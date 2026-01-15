@@ -1,0 +1,544 @@
+.tenant-container {
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.tenant-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.tenant-header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0;
+}
+
+.tenant-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.tenant-filters {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.tenant-search {
+    flex: 1;
+    min-width: 250px;
+    position: relative;
+}
+
+.tenant-search input {
+    width: 100%;
+    padding: 10px 16px 10px 40px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.tenant-search input:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.tenant-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    width: 18px;
+    height: 18px;
+}
+
+.tenant-status-filter {
+    min-width: 150px;
+}
+
+.tenant-status-filter select {
+    width: 100%;
+    padding: 10px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+}
+
+.tenant-table {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tenant-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.tenant-table thead {
+    background: #f9fafb;
+}
+
+.tenant-table th {
+    padding: 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.tenant-table td {
+    padding: 16px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 14px;
+    color: #1f2937;
+}
+
+.tenant-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.tenant-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.tenant-name {
+    font-weight: 500;
+    color: #111827;
+}
+
+.tenant-slug {
+    color: #6366f1;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.tenant-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.tenant-status.active {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.tenant-status.suspended {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.tenant-actions-cell {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.tenant-action-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tenant-action-btn.view {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.tenant-action-btn.view:hover {
+    background: #dbeafe;
+}
+
+.tenant-action-btn.edit {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.tenant-action-btn.edit:hover {
+    background: #fde68a;
+}
+
+.tenant-action-btn.suspend {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.tenant-action-btn.suspend:hover {
+    background: #fecaca;
+}
+
+.tenant-action-btn.resume {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.tenant-action-btn.resume:hover {
+    background: #a7f3d0;
+}
+
+.tenant-action-btn.delete {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.tenant-action-btn.delete:hover {
+    background: #fecaca;
+}
+
+.tenant-form {
+    background: white;
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.tenant-form h2 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 24px;
+}
+
+.tenant-form-group {
+    margin-bottom: 24px;
+}
+
+.tenant-form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.tenant-form-group label .required {
+    color: #dc2626;
+}
+
+.tenant-form-group input,
+.tenant-form-group select,
+.tenant-form-group textarea {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.tenant-form-group input:focus,
+.tenant-form-group select:focus,
+.tenant-form-group textarea:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.tenant-form-group textarea {
+    resize: vertical;
+    min-height: 100px;
+}
+
+.tenant-form-group .error {
+    color: #dc2626;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.tenant-form-group .help-text {
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.tenant-form-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.tenant-form-actions button {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tenant-form-actions button.primary {
+    background: #6366f1;
+    color: white;
+}
+
+.tenant-form-actions button.primary:hover {
+    background: #4f46e5;
+}
+
+.tenant-form-actions button.secondary {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.tenant-form-actions button.secondary:hover {
+    background: #e5e7eb;
+}
+
+.tenant-detail {
+    background: white;
+    border-radius: 12px;
+    padding: 32px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tenant-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.tenant-detail-info h2 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 8px;
+}
+
+.tenant-detail-info .tenant-subdomain {
+    color: #6366f1;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.tenant-detail-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.tenant-detail-section {
+    margin-bottom: 32px;
+}
+
+.tenant-detail-section h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 16px;
+}
+
+.tenant-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 24px;
+}
+
+.tenant-detail-card {
+    padding: 20px;
+    background: #f9fafb;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.tenant-detail-card label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.tenant-detail-card .value {
+    font-size: 16px;
+    font-weight: 500;
+    color: #111827;
+}
+
+.tenant-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.tenant-metric-card {
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    color: white;
+}
+
+.tenant-metric-card h4 {
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.9;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.tenant-metric-card .value {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.tenant-metric-card .change {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.loading-state,
+.error-state,
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6b7280;
+}
+
+.empty-state svg {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-content h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 16px;
+}
+
+.modal-content p {
+    color: #6b7280;
+    margin-bottom: 24px;
+    line-height: 1.6;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.modal-actions button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.modal-actions button.danger {
+    background: #dc2626;
+    color: white;
+}
+
+.modal-actions button.danger:hover {
+    background: #b91c1c;
+}
+
+.modal-actions button.secondary {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.modal-actions button.secondary:hover {
+    background: #e5e7eb;
+}
+
+@media (max-width: 768px) {
+    .tenant-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .tenant-filters {
+        flex-direction: column;
+    }
+
+    .tenant-search {
+        min-width: 100%;
+    }
+
+    .tenant-table {
+        overflow-x: auto;
+    }
+
+    .tenant-form {
+        padding: 24px;
+    }
+
+    .tenant-detail-header {
+        flex-direction: column;
+        gap: 16px;
+    }
+}
