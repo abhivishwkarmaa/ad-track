@@ -1,5 +1,12 @@
 node_modules/
 
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
 *.log
 .DS_Store
 dist/
@@ -12,3 +19,13 @@ coverage/
 .vscode/
 .idea/
 
+# PM2 logs
+logs/
+*.log
+
+# Debug files
+debug_*.log
+debug_*.txt
+
+# OS files
+Thumbs.db
