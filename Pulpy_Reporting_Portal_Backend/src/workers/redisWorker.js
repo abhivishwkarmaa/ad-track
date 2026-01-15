@@ -385,6 +385,10 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
 
     // UTC ENFORCEMENT: All timestamps stored as UTC only. Business logic converts to IST when needed.
     // Column order must match table schema exactly
+    // ✅ CRITICAL: Use INSERT IGNORE or ON DUPLICATE KEY UPDATE to prevent duplicates
+    // If UNIQUE constraint on click_uuid exists, ON DUPLICATE KEY UPDATE will prevent duplicates
+    // If constraint doesn't exist yet, INSERT IGNORE will silently skip duplicates
+    // We use ON DUPLICATE KEY UPDATE to be explicit about handling duplicates
     const sql = `INSERT INTO clicks (
         click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
         ip, user_agent, referrer, country, region, city, isp, location, domain,
@@ -393,6 +397,13 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
         timestamp, created_at
     ) VALUES ?
     ON DUPLICATE KEY UPDATE id = id`;
+    
+    // ✅ Log if we're about to insert clicks that might be duplicates
+    const clickUuids = validClicks.map(c => c.click_uuid);
+    logger.debug(`📝 Attempting to insert ${validClicks.length} clicks`, {
+        sample_uuids: clickUuids.slice(0, 5),
+        total: clickUuids.length
+    });
 
     // UTC ENFORCEMENT: Database connection is set to UTC timezone, so Date objects will be stored correctly
     const values = validClicks.map(c => {

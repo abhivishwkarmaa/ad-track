@@ -14,7 +14,9 @@ export function AuthProvider({ children }) {
         if (savedUser) {
             try {
                 const parsedUser = JSON.parse(savedUser);
-                // Ensure tenant_id is included (for backward compatibility)
+                // 🔒 STRICT: tenant_id in localStorage is ONLY for super admin role checks
+                // It is NEVER used for tenant resolution - tenant comes from subdomain (Host header)
+                // Ensure tenant_id is included (for backward compatibility with super admin checks)
                 if (parsedUser.tenant_id === undefined) {
                     parsedUser.tenant_id = null;
                 }
@@ -39,7 +41,7 @@ export function AuthProvider({ children }) {
                     name: response.data.name,
                     fullName: response.data.name,
                     role: response.data.role,
-                    tenant_id: response.data.tenant_id || null, // Include tenant_id for super admin check
+                    tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
                     token: response.data.token
                 };
                 

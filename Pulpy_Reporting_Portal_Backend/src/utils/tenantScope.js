@@ -6,11 +6,18 @@
 
 /**
  * Get tenant_id from request context
+ * 
+ * 🔒 STRICT: Tenant identity MUST come from subdomain (Host header) ONLY
+ * This function returns tenant ID ONLY if it was resolved from subdomain by tenant middleware.
+ * NO fallbacks to query params, headers, or business data.
+ * 
  * @param {Object} request - Fastify request object
- * @returns {number|null} - Tenant ID or null
+ * @returns {number|null} - Tenant ID from subdomain resolution, or null
  */
 export function getTenantIdFromRequest(request) {
-  return request.tenantId || request.tenant?.id || request.admin?.tenantId || request.query?.tenant_id || null;
+  // ✅ ONLY use request.tenantId which is set by tenant middleware from subdomain
+  // ❌ NEVER use: request.query.tenant_id, request.headers, request.tenant?.id (if not from subdomain)
+  return request.tenantId || null;
 }
 
 /**

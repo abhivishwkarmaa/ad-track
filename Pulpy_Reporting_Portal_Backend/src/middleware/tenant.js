@@ -4,13 +4,16 @@ import logger from '../utils/logger.js';
 /**
  * Tenant Resolution Middleware
  * 
- * Extracts tenant from subdomain and attaches to request context.
+ * 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
+ * 
+ * Extracts tenant EXCLUSIVELY from subdomain (Host header).
+ * NEVER accepts tenant from client headers (Origin, Referer, x-tenant-*, etc.)
  * 
  * Subdomain format: {tenant_slug}.track-myads.com
  * Examples:
  *   - owner1.track-myads.com -> tenant slug: "owner1"
  *   - admin.track-myads.com -> special admin subdomain (no tenant)
- *   - api.track-myads.com -> API subdomain (no tenant, but can accept tenant header)
+ *   - api.track-myads.com -> API subdomain (no tenant, no header fallback)
  */
 export async function resolveTenant(request, reply) {
   try {
@@ -42,18 +45,8 @@ export async function resolveTenant(request, reply) {
         if (subdomain === 'admin') {
           request.isAdminSubdomain = true;
         }
-        // API subdomain - check for tenant in header or subdomain
-        if (subdomain === 'api') {
-          // Allow tenant to be passed via header for API calls
-          const tenantSlug = request.headers['x-tenant-slug'] || request.headers['x-tenant-id'];
-          if (tenantSlug) {
-            const tenant = await getTenantBySlug(tenantSlug);
-            if (tenant) {
-              request.tenant = tenant;
-              return;
-            }
-          }
-        }
+        // 🔒 STRICT: API subdomain has no tenant - no header fallback allowed
+        // All API calls must use tenant subdomain (e.g., tenant1.domain.com/api/...)
         return; // No tenant for special subdomains
       }
 

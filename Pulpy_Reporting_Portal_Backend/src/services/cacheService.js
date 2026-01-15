@@ -145,9 +145,10 @@ export class CacheService {
 
     async isDuplicateClick(fingerprint) {
         const key = `dedupe:click:${fingerprint}`;
-        // SET NX EX 3: Set if Not Exists, Expire 3s
+        // SET NX EX 5: Set if Not Exists, Expire 5s
+        // ✅ Increased TTL from 3s to 5s for better duplicate prevention
         // Returns 'OK' if set, null if already exists
-        const result = await redis.set(key, '1', 'NX', 'EX', 3);
+        const result = await redis.set(key, '1', 'NX', 'EX', 5);
         return result === null; // If null, it WAS duplicate
     }
 

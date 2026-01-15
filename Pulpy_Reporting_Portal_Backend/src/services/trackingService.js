@@ -29,14 +29,29 @@ export class TrackingService {
       // ============================================
       // 1. REDIS: DEDUPLICATION (First Line of Defense)
       // ============================================
-      // Fingerprint: IP + UserAgent + OfferID
-      // Check if we have seen this Exact Request recently
+      // ✅ CRITICAL: Get tenant_id FIRST for deduplication fingerprint
+      // Tenant identity MUST come from subdomain (Host header) - EXCLUSIVE source of truth
+      const tenantId = getTenantIdFromRequest(request);
+      
+      // 🔒 STRICT: Reject if no tenant from subdomain
+      if (!tenantId) {
+        logger.error('❌ CRITICAL: No tenant resolved from subdomain - REJECTED', {
+          host: request.headers.host,
+          url: request.url,
+          offer_id: offerId,
+          pub_id: publisherId
+        });
+        throw new Error('Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/click for local testing). Business identifiers cannot be used for tenant resolution.');
+      }
 
+      // Fingerprint: TenantID + IP + UserAgent + OfferID
+      // ✅ CRITICAL: Include tenant_id in fingerprint to prevent cross-tenant collisions
       const userAgent = request.headers['user-agent'] || '';
       const ip = extractIP(request);
-      const dedupeFingerprint = `${ip}:${offerId}:${userAgent.substring(0, 50)}`; // Shorten UA for key
+      const dedupeFingerprint = `${tenantId}:${ip}:${offerId}:${userAgent.substring(0, 50)}`; // Include tenant_id
 
-      // isDuplicateClick uses SET NX EX 3. Returns TRUE if duplicate (key existed).
+      // isDuplicateClick uses SET NX EX 5. Returns TRUE if duplicate (key existed).
+      // Increased TTL from 3s to 5s for better duplicate prevention
       const isDuplicate = await cacheService.isDuplicateClick(dedupeFingerprint);
 
       if (isDuplicate) {
@@ -52,23 +67,10 @@ export class TrackingService {
       // ============================================
       // 2. STRICT MULTI-TENANT: TENANT RESOLUTION
       // ============================================
-      // 🔒 CRITICAL: Tenant identity MUST come from subdomain (Host header)
+      // ✅ NOTE: Tenant already resolved above for deduplication
+      // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
       // Tenant identity must be determined BEFORE any database lookup
-
-      // ✅ STEP 1: Get tenant from subdomain (Host header) - EXCLUSIVE source of truth
-      const tenantId = getTenantIdFromRequest(request);
-      
-      // 🔒 STRICT: Reject if no tenant from subdomain
-      if (!tenantId) {
-        logger.error('❌ CRITICAL: No tenant resolved from subdomain - REJECTED', {
-          host: request.headers.host,
-          url: request.url,
-          offer_id: offerId,
-          pub_id: publisherId
-        });
-        throw new Error('Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/click for local testing). Business identifiers cannot be used for tenant resolution.');
-      }
 
       logger.info('[CLICK] Tenant resolved from subdomain', {
         host: request.headers.host,
@@ -341,7 +343,8 @@ export class TrackingService {
         }
         pipeline.xadd('stream:clicks', '*', 'id', clickUuid, 'tenant_id', tenantIdStr);
         
-        pipeline.setex(`dedupe:redirect:${dedupeFingerprint}`, 3, redirectUrl);
+        // ✅ Increased TTL from 3s to 5s to match dedupe key TTL
+        pipeline.setex(`dedupe:redirect:${dedupeFingerprint}`, 5, redirectUrl);
         
         const results = await pipeline.exec();
         
@@ -580,46 +583,77 @@ export class TrackingService {
       const offerId = parseInt(query.offer_id);
       const publisherId = parseInt(query.pub_id);
 
-      // ✅ STEP 1: Try tenant from Host header (subdomain)
-      let tenantId = getTenantIdFromRequest(request);
+      // ============================================
+      // 🔒 STRICT MULTI-TENANT: TENANT RESOLUTION
+      // ============================================
+      // Tenant identity MUST come from subdomain (Host header) - EXCLUSIVE source of truth
+      // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
+      // Tenant identity must be determined BEFORE any database lookup
 
-      // ✅ STEP 2: Fetch offer and publisher
+      // ✅ STEP 1: Get tenant from subdomain (Host header) - EXCLUSIVE source of truth
+      const tenantId = getTenantIdFromRequest(request);
+      
+      // 🔒 STRICT: Reject if no tenant from subdomain
+      if (!tenantId) {
+        logger.error('❌ CRITICAL: No tenant resolved from subdomain for impression - REJECTED', {
+          host: request.headers.host,
+          url: request.url,
+          offer_id: offerId,
+          pub_id: publisherId
+        });
+        return { 
+          success: false, 
+          error: 'Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/imp for local testing). Business identifiers cannot be used for tenant resolution.' 
+        };
+      }
+
+      logger.info('[IMP] Tenant resolved from subdomain', {
+        host: request.headers.host,
+        tenant_id: tenantId,
+        offer_id: offerId,
+        pub_id: publisherId
+      });
+
+      // ✅ STEP 2: Fetch offer and publisher WITH tenant filtering
+      // Business data is validated AFTER tenant resolution
       const [offer, publisher] = await Promise.all([
-        offerService.getOfferById(offerId, tenantId),
-        publisherService.findById(publisherId)
+        offerService.getOfferById(offerId, tenantId), // ✅ Filter by resolved tenant_id
+        publisherService.findById(publisherId, tenantId) // ✅ Filter by resolved tenant_id
       ]);
 
+      // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
       if (!offer) {
-        return { success: false, error: 'Offer not found' };
-      }
-      if (!publisher) {
-        return { success: false, error: 'Publisher not found' };
-      }
-
-      // ✅ STEP 3: If NOT found from subdomain, derive tenant from offer or publisher
-      if (!tenantId) {
-        tenantId = offer.tenant_id || publisher.tenant_id || null;
-
-        logger.info('[IMP] Tenant resolution', {
-          host: request.headers.host,
+        logger.error('❌ Offer not found or does not belong to tenant', {
           offer_id: offerId,
-          pub_id: publisherId,
-          resolvedTenant: tenantId,
-          offer_tenant_id: offer.tenant_id,
-          publisher_tenant_id: publisher.tenant_id
+          tenant_id: tenantId
         });
+        return { success: false, error: `Offer ${offerId} not found or does not belong to tenant ${tenantId}` };
+      }
 
-        if (!tenantId) {
-          return { success: false, error: 'Tenant could not be resolved for impression. Offer and publisher must be assigned to a tenant.' };
-        }
-      } else {
-        // ✅ STEP 4: If tenant from subdomain, verify ownership
-        if (offer.tenant_id && offer.tenant_id !== tenantId) {
-          return { success: false, error: 'Offer does not belong to this tenant' };
-        }
-        if (publisher.tenant_id && publisher.tenant_id !== tenantId) {
-          return { success: false, error: 'Publisher does not belong to this tenant' };
-        }
+      if (!publisher) {
+        logger.error('❌ Publisher not found or does not belong to tenant', {
+          publisher_id: publisherId,
+          tenant_id: tenantId
+        });
+        return { success: false, error: `Publisher ${publisherId} not found or does not belong to tenant ${tenantId}` };
+      }
+
+      // ✅ STEP 4: Verify ownership (defense in depth)
+      if (offer.tenant_id && offer.tenant_id !== tenantId) {
+        logger.error('❌ Tenant mismatch: Offer does not belong to tenant', {
+          offer_id: offerId,
+          offer_tenant_id: offer.tenant_id,
+          resolved_tenant_id: tenantId
+        });
+        return { success: false, error: 'Offer does not belong to this tenant' };
+      }
+      if (publisher.tenant_id && publisher.tenant_id !== tenantId) {
+        logger.error('❌ Tenant mismatch: Publisher does not belong to tenant', {
+          publisher_id: publisherId,
+          publisher_tenant_id: publisher.tenant_id,
+          resolved_tenant_id: tenantId
+        });
+        return { success: false, error: 'Publisher does not belong to this tenant' };
       }
 
       if (publisher.status !== 'active') {

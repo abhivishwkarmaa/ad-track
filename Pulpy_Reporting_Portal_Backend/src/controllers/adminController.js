@@ -635,56 +635,53 @@ export class AdminController {
 
   async getTrackingURL(request, reply) {
     try {
-      // ✅ CRITICAL: Get tenant subdomain from request for multi-tenant tracking URLs
+      // 🔒 STRICT: Tenant identity MUST come from subdomain (Host header) ONLY
       const tenantId = getTenantIdFromRequest(request);
       if (!tenantId) {
+        logger.error('❌ getTrackingURL: No tenant resolved from subdomain - REJECTED', {
+          host: request.headers.host,
+          url: request.url
+        });
         return reply.code(400).send({
           success: false,
           error: 'Tenant Required',
-          message: 'This endpoint requires a valid tenant subdomain.',
+          message: 'This endpoint requires a valid tenant subdomain. Access via tenant subdomain (e.g., tenant1.domain.com/api/...).',
         });
       }
 
-      // ✅ CRITICAL: Get tenant subdomain for multi-tenant tracking URLs
-      // Priority: 1. request.tenant.slug, 2. Extract from host header
-      let tenantSubdomain = null;
-      if (request.tenant && request.tenant.slug) {
-        tenantSubdomain = request.tenant.slug;
-      } else {
-        // Extract subdomain from host header (e.g., "abhi.localhost:5001" -> "abhi")
-        const host = request.headers.host || request.hostname || '';
-        const hostParts = host.split('.');
-        if (hostParts.length >= 2) {
-          tenantSubdomain = hostParts[0].toLowerCase();
-        }
-      }
-
-      // Build base URL with tenant subdomain
-      let baseURL;
-      const trackingDomain = process.env.TRACKING_DOMAIN || process.env.BASE_URL || 'http://localhost:5001';
-      
-      if (tenantSubdomain) {
-        // Parse the tracking domain to extract protocol, domain, and port
-        try {
-          const url = new URL(trackingDomain);
-          // Build URL with tenant subdomain: {tenant}.{domain}:{port}
-          // Example: http://localhost:5001 -> http://abhi.localhost:5001
-          baseURL = `${url.protocol}//${tenantSubdomain}.${url.hostname}${url.port ? `:${url.port}` : ''}`;
-        } catch (e) {
-          // If trackingDomain is not a full URL, parse manually
-          const protocol = trackingDomain.startsWith('https') ? 'https' : 'http';
-          const domainAndPort = trackingDomain.replace(/^https?:\/\//, '');
-          const [domain, ...portParts] = domainAndPort.split(':');
-          const port = portParts.length > 0 ? `:${portParts.join(':')}` : '';
-          baseURL = `${protocol}://${tenantSubdomain}.${domain}${port}`;
-        }
-      } else {
-        // Fallback to original baseURL if subdomain can't be determined
-        logger.warn('Could not determine tenant subdomain for tracking URL, using base URL', {
+      // 🔒 STRICT: Tenant subdomain MUST be available from request.tenant (set by middleware)
+      if (!request.tenant || !request.tenant.slug) {
+        logger.error('❌ getTrackingURL: Tenant subdomain not available - REJECTED', {
           host: request.headers.host,
+          tenantId: tenantId,
           tenant: request.tenant
         });
-        baseURL = trackingDomain;
+        return reply.code(400).send({
+          success: false,
+          error: 'Tenant Subdomain Required',
+          message: 'Could not determine tenant subdomain from request. This should not happen if tenant was resolved from subdomain.',
+        });
+      }
+
+      const tenantSubdomain = request.tenant.slug;
+
+      // Build base URL with tenant subdomain
+      const trackingDomain = process.env.TRACKING_DOMAIN || process.env.BASE_URL || 'http://localhost:5001';
+      let baseURL;
+      
+      // Parse the tracking domain to extract protocol, domain, and port
+      try {
+        const url = new URL(trackingDomain);
+        // Build URL with tenant subdomain: {tenant}.{domain}:{port}
+        // Example: http://localhost:5001 -> http://tenant1.localhost:5001
+        baseURL = `${url.protocol}//${tenantSubdomain}.${url.hostname}${url.port ? `:${url.port}` : ''}`;
+      } catch (e) {
+        // If trackingDomain is not a full URL, parse manually
+        const protocol = trackingDomain.startsWith('https') ? 'https' : 'http';
+        const domainAndPort = trackingDomain.replace(/^https?:\/\//, '');
+        const [domain, ...portParts] = domainAndPort.split(':');
+        const port = portParts.length > 0 ? `:${portParts.join(':')}` : '';
+        baseURL = `${protocol}://${tenantSubdomain}.${domain}${port}`;
       }
 
       const format = request.query.format || 'standard'; // 'standard' or 'alternative'

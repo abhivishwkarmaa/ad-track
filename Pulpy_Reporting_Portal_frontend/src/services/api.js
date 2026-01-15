@@ -1,7 +1,11 @@
+// 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
 // ✅ CORRECT: Use relative paths for API calls
+// Frontend operates on tenant subdomain (e.g., tenant1.domain.com)
+// All API calls use relative paths, preserving Host header for tenant resolution
 // In development: Vite proxy forwards /api/* to backend
 // In production: NGINX proxy forwards /api/* to backend
-// Host header is preserved in both cases, enabling tenant resolution
+// Host header is preserved in both cases, enabling tenant resolution from subdomain
+// ❌ NEVER: Use absolute URLs, pass tenant headers, or infer tenant from client-side code
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Get token from localStorage
@@ -33,6 +37,8 @@ const apiRequest = async (endpoint, options = {}) => {
         headers: {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
             ...(token && { 'Authorization': `Bearer ${token}` }),
+            // 🔒 STRICT: Never add tenant headers (x-tenant-slug, x-tenant-id, etc.)
+            // Tenant is resolved by backend from Host header (subdomain) ONLY
             ...options.headers,
         },
     };
