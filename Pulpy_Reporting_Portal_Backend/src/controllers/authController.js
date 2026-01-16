@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
+import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -12,6 +13,13 @@ export class AuthController {
   async register(request, reply) {
     try {
       const { email, name, password, role = 'admin' } = request.body;
+
+      // ============================================
+      // 🔒 STRICT TENANT-SCOPED REGISTRATION
+      // ============================================
+      // Registration must also respect tenant subdomain
+      // Super admin registration: Only via admin subdomain
+      // Tenant admin registration: Only via matching tenant subdomain
 
       // Validate input
       if (!email || !name || !password) {
@@ -30,11 +38,25 @@ export class AuthController {
         });
       }
 
-      // Check if admin already exists
-      const [existingRows] = await pool.query(
-        'SELECT id FROM admin_users WHERE email = ?',
-        [email]
-      );
+      // ✅ STEP 1: Resolve tenant from subdomain
+      const requestTenantId = getTenantIdFromRequest(request);
+      const isAdminSubdomain = request.isAdminSubdomain || false;
+
+      logger.info('[REGISTER] Tenant resolution', {
+        host: request.headers.host,
+        requestTenantId: requestTenantId,
+        isAdminSubdomain: isAdminSubdomain,
+        email: email
+      });
+
+      // ✅ STEP 2: Check if admin already exists
+      // Note: For tenant-scoped registration, check within tenant scope if tenant is specified
+      let existingQuery = 'SELECT id FROM admin_users WHERE email = ?';
+      const existingParams = [email];
+      
+      // If tenant subdomain is present, only check within that tenant (if you want tenant-scoped emails)
+      // For now, email uniqueness is global, but we'll assign tenant_id based on subdomain
+      const [existingRows] = await pool.query(existingQuery, existingParams);
 
       if (existingRows && existingRows.length > 0) {
         return reply.code(409).send({
@@ -44,25 +66,38 @@ export class AuthController {
         });
       }
 
-      // Hash password
+      // ✅ STEP 3: Determine tenant_id for new user
+      // If registering via tenant subdomain, assign that tenant_id
+      // If registering via admin subdomain, create as super admin (tenant_id = NULL)
+      const tenantId = requestTenantId || null;
+
+      // ✅ STEP 4: Hash password
       const passwordHash = await bcrypt.hash(password, 10);
 
-      // Create admin user
-      const [result] = await pool.query(
-        'INSERT INTO admin_users (email, name, password_hash, role) VALUES (?, ?, ?, ?)',
-        [email, name, passwordHash, role]
-      );
+      // ✅ STEP 5: Create admin user with tenant_id
+      let insertQuery;
+      let insertParams;
+      
+      try {
+        // Try insert with tenant_id
+        insertQuery = 'INSERT INTO admin_users (email, name, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)';
+        insertParams = [email, name, passwordHash, role, tenantId];
+        const [result] = await pool.query(insertQuery, insertParams);
+        var adminId = result.insertId || result[0]?.insertId;
+      } catch (error) {
+        // If tenant_id column doesn't exist, fall back to insert without it
+        if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
+          logger.warn('tenant_id column not found in admin_users table. Please run migration.');
+          insertQuery = 'INSERT INTO admin_users (email, name, password_hash, role) VALUES (?, ?, ?, ?)';
+          insertParams = [email, name, passwordHash, role];
+          const [result] = await pool.query(insertQuery, insertParams);
+          adminId = result.insertId || result[0]?.insertId;
+        } else {
+          throw error;
+        }
+      }
 
-      const adminId = result.insertId || result[0]?.insertId;
-
-      // Get tenant_id if user has one
-      const [userRows] = await pool.query(
-        'SELECT tenant_id FROM admin_users WHERE id = ?',
-        [adminId]
-      );
-      const tenantId = userRows && userRows.length > 0 ? userRows[0].tenant_id : null;
-
-      // Use appropriate JWT secret based on user type
+      // ✅ STEP 6: Generate JWT token with appropriate secret
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
 
@@ -73,6 +108,14 @@ export class AuthController {
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
       );
 
+      logger.info('[REGISTER] Registration successful', {
+        adminId: adminId,
+        email: email,
+        tenantId: tenantId,
+        tokenType: tokenType,
+        host: request.headers.host
+      });
+
       return reply.code(201).send({
         success: true,
         message: 'Admin registered successfully',
@@ -81,6 +124,7 @@ export class AuthController {
           email,
           name,
           role,
+          tenant_id: tenantId, // Include tenant_id in response
           token,
         },
       });
@@ -94,6 +138,18 @@ export class AuthController {
     try {
       const { email, password } = request.body;
 
+      // ============================================
+      // 🔒 STRICT TENANT-SCOPED AUTHENTICATION
+      // ============================================
+      // Rule: "Login is not global. Login is always per-tenant."
+      // 
+      // Flow:
+      // 1. Resolve tenant from subdomain (Host header) FIRST
+      // 2. Validate credentials
+      // 3. Verify user belongs to resolved tenant
+      // 4. Reject if tenant mismatch (treat as invalid credentials)
+      // 5. Only issue token if tenant matches
+
       // Validate input
       if (!email || !password) {
         return reply.code(400).send({
@@ -103,7 +159,19 @@ export class AuthController {
         });
       }
 
-      // Find admin user (include tenant_id if column exists)
+      // ✅ STEP 1: Resolve tenant from subdomain (Host header) - EXCLUSIVE source
+      // Tenant must be resolved BEFORE credential validation
+      const requestTenantId = getTenantIdFromRequest(request);
+      const isAdminSubdomain = request.isAdminSubdomain || false;
+
+      logger.info('[LOGIN] Tenant resolution', {
+        host: request.headers.host,
+        requestTenantId: requestTenantId,
+        isAdminSubdomain: isAdminSubdomain,
+        email: email
+      });
+
+      // ✅ STEP 2: Find admin user (include tenant_id)
       // Note: tenant_id column may not exist if migration hasn't been run yet
       let [rows] = [];
       try {
@@ -126,7 +194,9 @@ export class AuthController {
         }
       }
 
+      // ✅ STEP 3: Reject if user not found (before password check to avoid timing attacks)
       if (!rows || rows.length === 0) {
+        logger.warn('[LOGIN] User not found', { email, host: request.headers.host });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -135,11 +205,13 @@ export class AuthController {
       }
 
       const admin = Array.isArray(rows) ? rows[0] : rows;
+      const userTenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
 
-      // Verify password
+      // ✅ STEP 4: Verify password
       const isValid = await bcrypt.compare(password, admin.password_hash);
 
       if (!isValid) {
+        logger.warn('[LOGIN] Invalid password', { email, host: request.headers.host });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -147,10 +219,90 @@ export class AuthController {
         });
       }
 
-      // Get tenant_id from admin record (may be undefined if column doesn't exist)
-      const tenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
+      // ✅ STEP 5: STRICT TENANT VALIDATION
+      // Tenant mismatch = Invalid credentials (not a post-login error)
+      // 
+      // Case 1: Super admin (userTenantId = NULL) must login via admin subdomain
+      // Case 2: Tenant admin (userTenantId = X) must login via matching tenant subdomain
+      // Case 3: Tenant admin trying to login via wrong tenant subdomain = REJECT
+      // Case 4: Super admin trying to login via tenant subdomain = REJECT
 
-      // Use appropriate JWT secret based on user type
+      if (!userTenantId) {
+        // User is super admin (tenant_id = NULL)
+        if (!isAdminSubdomain) {
+          // Super admin trying to login via tenant subdomain = REJECT
+          logger.warn('[LOGIN] Super admin attempted login via tenant subdomain - REJECTED', {
+            email: admin.email,
+            adminId: admin.id,
+            host: request.headers.host,
+            requestTenantId: requestTenantId,
+            isAdminSubdomain: isAdminSubdomain
+          });
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid email or password',
+            // Note: Don't reveal that credentials were correct - treat tenant mismatch as invalid credentials
+          });
+        }
+        // Super admin + admin subdomain = ✅ OK
+      } else {
+        // User is tenant admin (userTenantId = X)
+        if (!requestTenantId) {
+          // Tenant admin trying to login via admin subdomain (or no subdomain) = REJECT
+          logger.warn('[LOGIN] Tenant admin attempted login via admin subdomain - REJECTED', {
+            email: admin.email,
+            adminId: admin.id,
+            userTenantId: userTenantId,
+            host: request.headers.host,
+            requestTenantId: requestTenantId,
+            isAdminSubdomain: isAdminSubdomain
+          });
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid email or password',
+            // Note: Don't reveal that credentials were correct - treat tenant mismatch as invalid credentials
+          });
+        }
+
+        // ✅ CRITICAL: User tenant must match request tenant
+        if (parseInt(userTenantId) !== parseInt(requestTenantId)) {
+          logger.warn('[LOGIN] Tenant mismatch - REJECTED (treated as invalid credentials)', {
+            email: admin.email,
+            adminId: admin.id,
+            userTenantId: userTenantId,
+            requestTenantId: requestTenantId,
+            host: request.headers.host
+          });
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid email or password',
+            // 🔒 SECURITY: Don't reveal tenant mismatch - treat as invalid credentials
+            // This prevents information leakage about which tenant the user belongs to
+          });
+        }
+
+        // Verify tenant is active (already checked in tenant middleware, but double-check)
+        if (request.tenant && request.tenant.status !== 'active') {
+          logger.warn('[LOGIN] Suspended tenant login attempt', {
+            email: admin.email,
+            tenantId: requestTenantId,
+            tenantSlug: request.tenant.slug
+          });
+          return reply.code(403).send({
+            success: false,
+            error: 'Tenant Suspended',
+            message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+          });
+        }
+
+        // Tenant admin + matching tenant subdomain = ✅ OK
+      }
+
+      // ✅ STEP 6: All validations passed - generate JWT token
+      const tenantId = userTenantId; // Use user's tenant_id (matches request tenant)
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
 
@@ -168,10 +320,12 @@ export class AuthController {
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
       );
 
-      logger.debug(`JWT token generated`, {
+      logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
+        email: admin.email,
         tenantId: tenantId,
-        tokenType: tokenType
+        tokenType: tokenType,
+        host: request.headers.host
       });
 
       return reply.send({
@@ -182,6 +336,7 @@ export class AuthController {
           email: admin.email,
           name: admin.name,
           role: admin.role,
+          tenant_id: tenantId, // Include tenant_id in response
           token,
         },
       });

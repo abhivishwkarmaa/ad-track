@@ -1,0 +1,231 @@
+=================================================
+📁 BACKEND STRUCTURE
+=================================================
+Pulpy_Reporting_Portal_Backend/
+│
+├── 📂 src/
+│   ├── 📂 config/
+│   │   ├── redis.js
+│   │   └── redisHygiene.js
+│   │
+│   ├── 📂 controllers/ (9 files)
+│   │   ├── adminController.js
+│   │   ├── advertiser.controller.js
+│   │   ├── authController.js
+│   │   ├── dashboardController.js
+│   │   ├── offer.controller.js
+│   │   ├── postbackController.js
+│   │   ├── reportController.js
+│   │   ├── tenantController.js
+│   │   └── trackingController.js
+│   │
+│   ├── 📂 db/
+│   │   ├── connection.js
+│   │   ├── migrate.js
+│   │   ├── cleanup-duplicate-clicks.js
+│   │   ├── cleanup-duplicates.js
+│   │   ├── migrate_postback_logs.js
+│   │   ├── run-tenant-migration.js
+│   │   ├── validate-constraints.js
+│   │   └── 📂 migrations/
+│   │       ├── schema.sql
+│   │       ├── 001_add_multi_tenant_support.sql
+│   │       ├── 002_harden_multi_tenant_production.sql
+│   │       └── 003_add_unique_click_uuid.sql
+│   │
+│   ├── 📂 middleware/ (5 files)
+│   │   ├── auth.js
+│   │   ├── errorHandler.js
+│   │   ├── requestLogger.js
+│   │   ├── tenant.js ⭐ (Subdomain-based tenant resolution)
+│   │   └── validate.js
+│   │
+│   ├── 📂 routes/ (8 files)
+│   │   ├── admin.js
+│   │   ├── advertiser.routes.js
+│   │   ├── auth.js
+│   │   ├── offer.routes.js
+│   │   ├── postback.js
+│   │   ├── reports.js
+│   │   ├── tenant.js
+│   │   └── tracking.js
+│   │
+│   ├── 📂 schemas/ (2 files)
+│   │   ├── advertiser.schema.js
+│   │   └── offer.schema.js
+│   │
+│   ├── 📂 services/ (12 files)
+│   │   ├── advertiser.service.js
+│   │   ├── assignmentService.js
+│   │   ├── cacheService.js
+│   │   ├── dashboardService.js
+│   │   ├── offer.service.js
+│   │   ├── offerService.js
+│   │   ├── postbackService.js
+│   │   ├── publisherService.js
+│   │   ├── reportService.js
+│   │   ├── tenantMetricsService.js
+│   │   └── trackingService.js
+│   │
+│   ├── 📂 tests/ (8 files)
+│   │   ├── admin.test.js
+│   │   ├── loadtest.js
+│   │   ├── multi-tenant.test.js
+│   │   ├── setup-test-admin.js
+│   │   ├── tenant-routes.test.js
+│   │   ├── throughput-test.js
+│   │   ├── tracking.test.js
+│   │   └── verify_flow.js
+│   │
+│   ├── 📂 utils/ (9 files)
+│   │   ├── countryLookup.js
+│   │   ├── deviceParser.js
+│   │   ├── errorPage.js
+│   │   ├── errorResponse.js
+│   │   ├── ipExtractor.js
+│   │   ├── ispLookup.js
+│   │   ├── logger.js
+│   │   ├── tenantScope.js
+│   │   └── urlGenerator.js
+│   │
+│   ├── 📂 validators/ (5 files)
+│   │
+│   ├── 📂 workers/ (4 files)
+│   │   ├── redisWorker.js ⭐ (Click processing)
+│   │   ├── statsWorker.js
+│   │   └── redisHygieneWorker.js
+│   │
+│   └── server.js ⭐ (Main entry point)
+│
+├── 📂 docs/
+│   ├── API_ENDPOINTS.md
+│   ├── ARCHITECTURE_V2.md
+│   ├── MULTI_TENANT_IMPLEMENTATION.md
+│   └── PRODUCTION_HARDENING.md
+│
+├── 📂 scripts/
+│   ├── generate-admin-hash.js
+│   ├── test-server.js
+│   └── verify-imports.js
+│
+├── 📂 logs/
+│   └── (6 log files)
+│
+├── package.json
+├── docker-compose.yml
+├── Dockerfile
+├── ecosystem.config.cjs (PM2 config)
+└── (Many .md documentation files)
+
+
+=================================================
+📁 FRONTEND STRUCTURE
+=================================================
+Pulpy_Reporting_Portal_frontend/
+│
+├── 📂 src/
+│   ├── 📂 components/
+│   │   ├── 📂 Layout/
+│   │   │   ├── Header.jsx
+│   │   │   ├── Header.css
+│   │   │   ├── Layout.jsx
+│   │   │   ├── Layout.css
+│   │   │   ├── Sidebar.jsx
+│   │   │   └── Sidebar.css
+│   │   └── 📂 ReportsExample/
+│   │       ├── ReportsExample.jsx
+│   │       └── ReportsExample.css
+│   │
+│   ├── 📂 context/
+│   │   ├── AuthContext.jsx ⭐ (Auth state)
+│   │   ├── DataContext.jsx
+│   │   └── ToastContext.jsx
+│   │
+│   ├── 📂 hooks/
+│   │   ├── useOffers.js
+│   │   └── useReports.js
+│   │
+│   ├── 📂 pages/
+│   │   ├── 📂 Dashboard/
+│   │   │   ├── Dashboard.jsx
+│   │   │   └── Dashboard.css
+│   │   │
+│   │   ├── 📂 Login/
+│   │   │   ├── Login.jsx
+│   │   │   └── Login.css
+│   │   │
+│   │   ├── 📂 Offer/
+│   │   │   ├── NewOffer.jsx
+│   │   │   ├── EditOffer.jsx
+│   │   │   ├── OfferDetail.jsx
+│   │   │   ├── OfferList.jsx
+│   │   │   └── Offer.css
+│   │   │
+│   │   ├── 📂 Assignment/
+│   │   │   ├── NewAssignment.jsx
+│   │   │   ├── EditAssignment.jsx
+│   │   │   ├── ManageAssignment.jsx
+│   │   │   └── Assignment.css
+│   │   │
+│   │   ├── 📂 Affiliate/ (Publishers)
+│   │   │   ├── NewAffiliate.jsx
+│   │   │   ├── EditAffiliate.jsx
+│   │   │   ├── ManageAffiliate.jsx
+│   │   │   ├── PostbackTest.jsx
+│   │   │   └── Affiliate.css
+│   │   │
+│   │   ├── 📂 Advertiser/
+│   │   │   ├── NewAdvertiser.jsx
+│   │   │   ├── EditAdvertiser.jsx
+│   │   │   ├── ManageAdvertiser.jsx
+│   │   │   └── Advertiser.css
+│   │   │
+│   │   ├── 📂 Reports/
+│   │   │   ├── DetailedReports.jsx
+│   │   │   └── Reports.css
+│   │   │
+│   │   ├── 📂 Tenant/ (Super Admin only)
+│   │   │   ├── NewTenant.jsx
+│   │   │   ├── EditTenant.jsx
+│   │   │   ├── ManageTenant.jsx
+│   │   │   ├── TenantDetail.jsx
+│   │   │   └── Tenant.css
+│   │   │
+│   │   ├── 📂 Settings/
+│   │   │   ├── UpdateProfile.jsx
+│   │   │   └── Settings.css
+│   │   │
+│   │   ├── 📂 Import/
+│   │   │   ├── ImportData.jsx
+│   │   │   └── Import.css
+│   │   │
+│   │   └── 📂 LiveLogs/
+│   │       ├── LiveLogs.jsx
+│   │       └── LiveLogs.css
+│   │
+│   ├── 📂 services/
+│   │   └── api.js ⭐ (API service functions)
+│   │
+│   ├── 📂 utils/
+│   │   └── clipboard.js
+│   │
+│   ├── 📂 assets/
+│   │   └── react.svg
+│   │
+│   ├── App.jsx ⭐ (Main app component)
+│   ├── App.css
+│   ├── main.jsx ⭐ (Entry point)
+│   └── index.css
+│
+├── 📂 public/
+│   └── vite.svg
+│
+├── index.html
+├── vite.config.js ⭐ (Vite config with proxy)
+├── eslint.config.js
+├── package.json
+└── .gitignore
+
+=================================================
+⭐ = Important/Entry Point Files
+=================================================

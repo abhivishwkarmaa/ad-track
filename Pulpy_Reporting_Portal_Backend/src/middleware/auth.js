@@ -110,13 +110,32 @@ export async function authenticateAdmin(request, reply) {
     if (tenantId) {
       const requestTenantId = getTenantId(request);
       
-      // 🔒 STRICT: JWT tenant_id MUST match request tenant_id
-      if (requestTenantId && requestTenantId !== tenantId) {
-        logger.warn('Tenant mismatch detected', {
+      // 🔒 STRICT: Tenant admin MUST have matching tenant subdomain
+      // This should never happen if login validation worked correctly, but defense-in-depth
+      if (!requestTenantId) {
+        // Tenant admin trying to access without tenant subdomain = REJECT
+        logger.error('[AUTH] Tenant admin accessing without tenant subdomain - REJECTED', {
           jwtTenantId: tenantId,
           requestTenantId: requestTenantId,
           adminId: admin.id,
-          email: admin.email
+          email: admin.email,
+          host: request.headers.host
+        });
+        return reply.code(403).send({
+          success: false,
+          error: 'Forbidden',
+          message: 'Tenant admin access requires tenant subdomain. Please access via your tenant subdomain.',
+        });
+      }
+      
+      // 🔒 STRICT: JWT tenant_id MUST match request tenant_id (from subdomain)
+      if (parseInt(requestTenantId) !== parseInt(tenantId)) {
+        logger.error('[AUTH] Tenant mismatch detected - REJECTED', {
+          jwtTenantId: tenantId,
+          requestTenantId: requestTenantId,
+          adminId: admin.id,
+          email: admin.email,
+          host: request.headers.host
         });
         return reply.code(403).send({
           success: false,
@@ -125,15 +144,10 @@ export async function authenticateAdmin(request, reply) {
         });
       }
       
-      // If no tenant in request but admin has tenant, use admin's tenant
-      if (!requestTenantId) {
-        request.tenantId = tenantId;
-      }
-      
       // Rule 3: Verify tenant is active (not suspended)
       if (request.tenant) {
         if (request.tenant.status !== 'active') {
-          logger.warn('Suspended tenant access attempt', {
+          logger.warn('[AUTH] Suspended tenant access attempt', {
             tenantId: tenantId,
             tenantSlug: request.tenant.slug,
             adminId: admin.id
@@ -146,10 +160,11 @@ export async function authenticateAdmin(request, reply) {
         }
       } else {
         // Tenant not found in request but admin has tenant_id
-        // This shouldn't happen, but handle gracefully
-        logger.error('Tenant not found in request context', {
+        // This shouldn't happen if tenant middleware worked correctly
+        logger.error('[AUTH] Tenant not found in request context', {
           tenantId: tenantId,
-          adminId: admin.id
+          adminId: admin.id,
+          host: request.headers.host
         });
         return reply.code(403).send({
           success: false,
