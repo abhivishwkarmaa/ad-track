@@ -1,6 +1,12 @@
+/**
+ * 🔒 SECURE POSTBACK CONTROLLER
+ * 
+ * Postback endpoint is public-facing and must return minimal error responses
+ * to prevent information leakage.
+ */
+
 import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
-import { createErrorResponse } from '../utils/errorResponse.js';
 
 export class PostbackController {
   async handlePostback(request, reply) {
@@ -30,21 +36,30 @@ export class PostbackController {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
+      // ✅ Log full error details server-side
+      logger.error('PostbackController.handlePostback error:', {
+        error: error.message,
+        stack: error.stack,
+        code: error.code,
+        url: request.url,
+        host: request.headers.host,
+        ip: request.ip
+      });
+      
+      // Handle rate limiting
       if (error.code === 'RETRY_LATER') {
         const retrySeconds = 60;
         return reply
           .code(429)
           .header('Retry-After', retrySeconds)
           .send({
-            success: false,
-            error: 'Too Many Requests',
-            message: error.message,
-            retry_after: retrySeconds
+            success: false
+            // ✅ Minimal response - no error details
           });
       }
 
-      logger.error('PostbackController.handlePostback error:', error);
-      return reply.code(400).send(createErrorResponse(error, 400));
+      // ✅ Let error handler create appropriate response
+      throw error;
     }
   }
 }

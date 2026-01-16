@@ -1,5 +1,10 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import {
+  TenantNotFoundError,
+  TenantSuspendedError,
+  TenantRequiredError
+} from '../utils/secureErrors.js';
 
 /**
  * Tenant Resolution Middleware
@@ -54,33 +59,29 @@ export async function resolveTenant(request, reply) {
       const tenant = await getTenantBySlug(subdomain);
 
       if (!tenant) {
+        // ✅ Log full details server-side
         logger.warn(`Unknown tenant subdomain access attempt: ${subdomain}`, {
           host: host,
           subdomain: subdomain,
           ip: request.ip,
-          userAgent: request.headers['user-agent']
+          userAgent: request.headers['user-agent'],
+          url: request.url
         });
-        return reply.code(404).send({
-          success: false,
-          error: 'Tenant Not Found',
-          message: `No tenant found for subdomain: ${subdomain}. Please verify the subdomain is correct.`,
-          subdomain: subdomain,
-        });
+        // ✅ Throw error instead of sending response directly
+        throw new TenantNotFoundError('Tenant not found', subdomain);
       }
 
       // 🔒 STRICT: Reject suspended tenants immediately
       if (tenant.status !== 'active') {
+        // ✅ Log full details server-side
         logger.warn(`Suspended tenant access attempt: ${subdomain}`, {
           tenant: tenant,
           host: host,
-          ip: request.ip
+          ip: request.ip,
+          url: request.url
         });
-        return reply.code(403).send({
-          success: false,
-          error: 'Tenant Suspended',
-          message: `Tenant "${tenant.name}" is currently suspended. Please contact support.`,
-          tenant_slug: tenant.slug,
-        });
+        // ✅ Throw error instead of sending response directly
+        throw new TenantSuspendedError('Tenant suspended', tenant.slug);
       }
 
       // Attach tenant to request context
@@ -93,32 +94,17 @@ export async function resolveTenant(request, reply) {
       // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
       
-      // For tracking endpoints, STRICTLY require tenant subdomain
-      if (request.url && (request.url.startsWith('/click') || request.url.startsWith('/imp') || request.url.startsWith('/postback'))) {
-        logger.warn('❌ Tracking endpoint accessed without tenant subdomain - REJECTED', {
-          host,
-          url: request.url,
-          ip: request.ip,
-          userAgent: request.headers['user-agent']
-        });
-        return reply.code(400).send({
-          success: false,
-          error: 'Tenant Required',
-          message: 'Tracking endpoints require a valid tenant subdomain. Access via tenant subdomain (e.g., tenant1.localhost:5001/click for local testing).',
-          host: host,
-          url: request.url,
-          note: 'For local testing, use tenant subdomain: tenant1.localhost:5001/click'
-        });
-      }
-      
-      // For other endpoints, also require tenant subdomain
-      logger.warn('No subdomain detected in host - REJECTED', { host, url: request.url });
-      return reply.code(400).send({
-        success: false,
-        error: 'Tenant Required',
-        message: 'This endpoint requires a valid tenant subdomain. Please access via tenant subdomain.',
-        host: host
+      // ✅ Log full details server-side
+      logger.warn('No subdomain detected in host - REJECTED', { 
+        host, 
+        url: request.url,
+        ip: request.ip,
+        userAgent: request.headers['user-agent']
       });
+      
+      // ✅ Throw error instead of sending response directly
+      // Error handler will create appropriate response based on endpoint type
+      throw new TenantRequiredError('Tenant required');
     }
   } catch (error) {
     logger.error('Tenant resolution error:', error);
@@ -154,11 +140,8 @@ async function getTenantBySlug(slug) {
  */
 export async function requireTenant(request, reply) {
   if (!request.tenant || !request.tenantId) {
-    return reply.code(400).send({
-      success: false,
-      error: 'Tenant Required',
-      message: 'This endpoint requires a tenant context. Please access via tenant subdomain.',
-    });
+    // ✅ Throw error instead of sending response directly
+    throw new TenantRequiredError('Tenant required');
   }
 }
 
@@ -168,11 +151,10 @@ export async function requireTenant(request, reply) {
  */
 export async function requireAdminSubdomain(request, reply) {
   if (!request.isAdminSubdomain) {
-    return reply.code(403).send({
-      success: false,
-      error: 'Admin Access Required',
-      message: 'This endpoint requires admin subdomain access.',
-    });
+    // ✅ Throw error instead of sending response directly
+    const error = new Error('Admin access required');
+    error.statusCode = 403;
+    throw error;
   }
 }
 

@@ -90,105 +90,53 @@ async function initializeServer() {
   await fastify.register(postbackRoutes);
   await fastify.register(reportRoutes, { prefix: '/api/admin/reports' });
 
-  // 404 Not Found Handler - Enhanced with better logging (must be after routes)
-  fastify.setNotFoundHandler((request, reply) => {
+  // 🔒 SECURE 404 Not Found Handler
+  // Must be after routes - returns minimal response, logs full details server-side
+  fastify.setNotFoundHandler(async (request, reply) => {
     const timestamp = new Date().toISOString();
     const method = request.method;
     const url = request.url;
+    const host = request.headers.host;
     const ip = request.ip || request.socket?.remoteAddress || 'unknown';
     const userAgent = request.headers['user-agent'] || 'N/A';
+    const tenantId = request.tenantId || null;
+    const tenantSlug = request.tenant?.slug || null;
 
-    // Log 404 with clear formatting
-    console.log('\n' + '='.repeat(80));
-    console.log(`⚠️  404 NOT FOUND [${timestamp}]`);
-    console.log(`   Request: ${method} ${url}`);
-    console.log(`   IP: ${ip}`);
-    console.log(`   User-Agent: ${userAgent.substring(0, 100)}${userAgent.length > 100 ? '...' : ''}`);
-    console.log(`   ┌─ Available Endpoints ───────────────────────────────────────────────`);
-    console.log(`   │ Admin APIs:`);
-    console.log(`   │   POST   /api/admin/publishers`);
-    console.log(`   │   GET    /api/admin/publishers`);
-    console.log(`   │   GET    /api/admin/publishers/:id`);
-    console.log(`   │   POST   /api/admin/offers`);
-    console.log(`   │   GET    /api/admin/offers/:type (all/live/approved)`);
-    console.log(`   │   GET    /api/admin/offers/categories`);
-    console.log(`   │   GET    /api/admin/offers/single/:id`);
-    console.log(`   │   PATCH  /api/admin/offers/:id/status`);
-    console.log(`   │   POST   /api/admin/assignments`);
-    console.log(`   │   GET    /api/admin/assignments`);
-    console.log(`   │   GET    /api/admin/assignments/:id/tracking-url`);
-    console.log(`   │   POST   /api/admin/test-conversion`);
-    console.log(`   │`);
-    console.log(`   │ Tracking APIs:`);
-    console.log(`   │   GET    /click?offer_id=X&pub_id=Y&tid=...`);
-    console.log(`   │   GET    /imp?offer_id=X&pub_id=Y`);
-    console.log(`   │`);
-    console.log(`   │ Postback API:`);
-    console.log(`   │   GET    /postback?click_id=X&rcid=Y&amount=Z`);
-    console.log(`   │   POST   /postback`);
-    console.log(`   │`);
-    console.log(`   │ Reporting APIs:`);
-    console.log(`   │   GET    /api/admin/reports/dashboard`);
-    console.log(`   │   GET    /api/admin/reports/summary`);
-    console.log(`   │   GET    /api/admin/reports/detailed`);
-    console.log(`   │`);
-    console.log(`   │ Health Check:`);
-    console.log(`   │   GET    /health`);
-    console.log(`   └────────────────────────────────────────────────────────────────────`);
-    console.log('='.repeat(80) + '\n');
-
-    reply.code(404).send({
-      success: false,
-      error: 'Not Found',
-      message: `The requested endpoint ${method} ${url} was not found on this server`,
-      path: url,
-      method: method,
-      availableEndpoints: {
-        admin: {
-          base: '/api/admin',
-          endpoints: [
-            'POST /publishers',
-            'GET /publishers',
-            'GET /publishers/:id',
-            'POST /offers',
-            'GET /offers/:type',
-            'GET /offers/categories',
-            'GET /offers/single/:id',
-            'PATCH /offers/:id/status',
-            'POST /assignments',
-            'GET /assignments',
-            'GET /assignments/:id/tracking-url',
-            'POST /test-conversion',
-          ],
-        },
-        tracking: {
-          endpoints: [
-            'GET /click',
-            'GET /imp',
-          ],
-        },
-        postback: {
-          endpoints: [
-            'GET /postback',
-            'POST /postback',
-          ],
-        },
-        reports: {
-          base: '/api/admin/reports',
-          endpoints: [
-            'GET /dashboard',
-            'GET /summary',
-            'GET /detailed',
-          ],
-        },
-        health: {
-          endpoints: [
-            'GET /health',
-          ],
-        },
-      },
+    // ✅ Log full diagnostic details server-side (never expose to client)
+    logger.warn('404 Not Found - Full Diagnostics', {
       timestamp,
+      method,
+      url,
+      host,
+      ip,
+      userAgent: userAgent.substring(0, 200),
+      tenantId,
+      tenantSlug
     });
+
+    // ✅ Determine endpoint type for appropriate response
+    const { isTrackingEndpoint, isApiEndpoint } = await import('./utils/secureErrors.js');
+    const isTracking = isTrackingEndpoint(url);
+    const isApi = isApiEndpoint(url);
+
+    // ✅ Return minimal response based on endpoint type
+    if (isTracking) {
+      // Tracking endpoints: minimal response only
+      return reply.code(404).send({
+        success: false
+      });
+    } else if (isApi) {
+      // API endpoints: clean message
+      return reply.code(404).send({
+        success: false,
+        message: 'Not found'
+      });
+    } else {
+      // Unknown endpoints: minimal response
+      return reply.code(404).send({
+        success: false
+      });
+    }
   });
 }
 

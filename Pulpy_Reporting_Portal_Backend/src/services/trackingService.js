@@ -41,7 +41,9 @@ export class TrackingService {
           offer_id: offerId,
           pub_id: publisherId
         });
-        throw new Error('Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/click for local testing). Business identifiers cannot be used for tenant resolution.');
+        // ✅ Use secure error class - error handler will create minimal response
+        const { TenantRequiredError } = await import('../utils/secureErrors.js');
+        throw new TenantRequiredError('Tenant required');
       }
 
       // Fingerprint: TenantID + IP + UserAgent + OfferID
