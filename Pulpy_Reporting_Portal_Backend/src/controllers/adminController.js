@@ -663,26 +663,50 @@ export class AdminController {
         });
       }
 
-      const tenantSubdomain = request.tenant.slug;
-
-      // Build base URL with tenant subdomain
-      const trackingDomain = process.env.TRACKING_DOMAIN || process.env.BASE_URL || 'http://localhost:5001';
-      let baseURL;
+      // ✅ Build base URL from actual request Host header (not from env)
+      // This ensures tracking URLs use the real domain (e.g., ravi.track-myads.com)
+      // instead of localhost or env variables
       
-      // Parse the tracking domain to extract protocol, domain, and port
-      try {
-        const url = new URL(trackingDomain);
-        // Build URL with tenant subdomain: {tenant}.{domain}:{port}
-        // Example: http://localhost:5001 -> http://tenant1.localhost:5001
-        baseURL = `${url.protocol}//${tenantSubdomain}.${url.hostname}${url.port ? `:${url.port}` : ''}`;
-      } catch (e) {
-        // If trackingDomain is not a full URL, parse manually
-        const protocol = trackingDomain.startsWith('https') ? 'https' : 'http';
-        const domainAndPort = trackingDomain.replace(/^https?:\/\//, '');
-        const [domain, ...portParts] = domainAndPort.split(':');
-        const port = portParts.length > 0 ? `:${portParts.join(':')}` : '';
-        baseURL = `${protocol}://${tenantSubdomain}.${domain}${port}`;
+      const host = request.headers.host || request.hostname || '';
+      
+      // Determine protocol from request
+      // Check X-Forwarded-Proto first (set by NGINX/proxy), then request.protocol
+      const protocol = request.headers['x-forwarded-proto'] || 
+                      (request.protocol === 'https' ? 'https' : 'http') ||
+                      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+      
+      // Extract domain and port from host header
+      // host format: "ravi.track-myads.com" or "ravi.track-myads.com:5001"
+      let domain = host;
+      let port = '';
+      
+      if (host.includes(':')) {
+        const parts = host.split(':');
+        domain = parts[0];
+        port = parts[1];
+        
+        // Remove port if it's standard (80 for http, 443 for https)
+        // Also remove port in production (always use standard ports)
+        if ((protocol === 'http' && port === '80') || 
+            (protocol === 'https' && port === '443') ||
+            process.env.NODE_ENV === 'production') {
+          port = '';
+        }
       }
+      
+      // Build baseURL: {protocol}://{domain}{port}
+      // Example (production): https://ravi.track-myads.com
+      // Example (dev): http://ravi.localhost:5001
+      const baseURL = `${protocol}://${domain}${port ? `:${port}` : ''}`;
+      
+      logger.debug('Tracking URL base generated from request Host', {
+        host: host,
+        protocol: protocol,
+        domain: domain,
+        port: port,
+        baseURL: baseURL,
+        tenantSubdomain: request.tenant.slug
+      });
 
       const format = request.query.format || 'standard'; // 'standard' or 'alternative'
 
