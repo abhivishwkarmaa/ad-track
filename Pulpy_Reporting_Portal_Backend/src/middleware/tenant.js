@@ -29,6 +29,16 @@ export async function resolveTenant(request, reply) {
       return;
     }
 
+    // ✅ DEBUG: Log all host-related headers for troubleshooting
+    console.log('==== DEBUG HOST HEADERS ====');
+    console.log({
+      host: request.headers.host,
+      xForwardedHost: request.headers['x-forwarded-host'],
+      hostname: request.hostname,
+      rawHeaders: request.raw.headers,
+    });
+    console.log('============================');
+    
     // ✅ CRITICAL: Get host from forwarded headers (for VPS/NGINX reverse proxy)
     // Priority order:
     // 1. X-Forwarded-Host (set by NGINX when behind reverse proxy)
