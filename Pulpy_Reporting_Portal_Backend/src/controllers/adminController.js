@@ -663,49 +663,34 @@ export class AdminController {
         });
       }
 
-      // ✅ Build base URL from actual request Host header (not from env)
-      // This ensures tracking URLs use the real domain (e.g., ravi.track-myads.com)
-      // instead of localhost or env variables
+      // ✅ Build base URL using tenant subdomain + production base domain
+      // This ensures tracking URLs always use production domain format (e.g., ravi.track-myads.com)
+      // regardless of whether request comes from localhost or production domain
       
-      const host = request.headers.host || request.hostname || '';
+      const tenantSubdomain = request.tenant.slug;
       
-      // Determine protocol from request
-      // Check X-Forwarded-Proto first (set by NGINX/proxy), then request.protocol
-      const protocol = request.headers['x-forwarded-proto'] || 
-                      (request.protocol === 'https' ? 'https' : 'http') ||
-                      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+      // Get base domain from env or default to track-myads.com
+      // This allows overriding in different environments if needed
+      const baseDomain = process.env.TRACKING_BASE_DOMAIN || 
+                        process.env.BASE_DOMAIN || 
+                        'track-myads.com';
       
-      // Extract domain and port from host header
-      // host format: "ravi.track-myads.com" or "ravi.track-myads.com:5001"
-      let domain = host;
-      let port = '';
+      // Determine protocol
+      // In production, always use https. In development, use http.
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
       
-      if (host.includes(':')) {
-        const parts = host.split(':');
-        domain = parts[0];
-        port = parts[1];
-        
-        // Remove port if it's standard (80 for http, 443 for https)
-        // Also remove port in production (always use standard ports)
-        if ((protocol === 'http' && port === '80') || 
-            (protocol === 'https' && port === '443') ||
-            process.env.NODE_ENV === 'production') {
-          port = '';
-        }
-      }
-      
-      // Build baseURL: {protocol}://{domain}{port}
+      // Build baseURL: {protocol}://{tenantSubdomain}.{baseDomain}
       // Example (production): https://ravi.track-myads.com
-      // Example (dev): http://ravi.localhost:5001
-      const baseURL = `${protocol}://${domain}${port ? `:${port}` : ''}`;
+      // Example (dev): http://ravi.track-myads.com (still uses production domain format)
+      const baseURL = `${protocol}://${tenantSubdomain}.${baseDomain}`;
       
-      logger.debug('Tracking URL base generated from request Host', {
-        host: host,
+      logger.debug('Tracking URL base generated', {
+        tenantSubdomain: tenantSubdomain,
+        baseDomain: baseDomain,
         protocol: protocol,
-        domain: domain,
-        port: port,
         baseURL: baseURL,
-        tenantSubdomain: request.tenant.slug
+        requestHost: request.headers.host,
+        environment: process.env.NODE_ENV
       });
 
       const format = request.query.format || 'standard'; // 'standard' or 'alternative'
