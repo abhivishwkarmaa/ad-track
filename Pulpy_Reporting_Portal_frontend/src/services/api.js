@@ -6,7 +6,13 @@
 // In production: NGINX proxy forwards /api/* to backend
 // Host header is preserved in both cases, enabling tenant resolution from subdomain
 // ❌ NEVER: Use absolute URLs, pass tenant headers, or infer tenant from client-side code
-const BASE_URL = import.meta.env.VITE_API_URL || '';
+
+// 🛡️ SAFETY GUARD: Ensure no VITE_API_URL in production
+if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
+    throw new Error('❌ CRITICAL CONFIG ERROR: VITE_API_URL must NOT be set in production. The app must use relative paths (/api/...) to allow NGINX to handle tenant resolution via Host header.');
+}
+
+const BASE_URL = '';
 
 // Get token from localStorage
 const getToken = () => {
@@ -45,11 +51,11 @@ const apiRequest = async (endpoint, options = {}) => {
 
     try {
         const response = await fetch(url, config);
-        
+
         // Check if response is JSON
         const contentType = response.headers.get('content-type');
         let data;
-        
+
         if (contentType && contentType.includes('application/json')) {
             data = await response.json();
         } else {
