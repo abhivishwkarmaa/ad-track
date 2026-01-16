@@ -29,8 +29,24 @@ export async function resolveTenant(request, reply) {
       return;
     }
 
-    // Get host from request headers
-    const host = request.headers.host || request.hostname || '';
+    // ✅ CRITICAL: Get host from forwarded headers (for VPS/NGINX reverse proxy)
+    // Priority order:
+    // 1. X-Forwarded-Host (set by NGINX when behind reverse proxy)
+    // 2. Host header (direct access or if X-Forwarded-Host not set)
+    // 3. request.hostname (Fastify's parsed hostname, only works with trustProxy: true)
+    const host = request.headers['x-forwarded-host'] || 
+                 request.headers.host || 
+                 request.hostname || 
+                 '';
+    
+    // Log host resolution for debugging
+    logger.debug('Tenant resolution - Host extraction', {
+      'x-forwarded-host': request.headers['x-forwarded-host'],
+      'host': request.headers.host,
+      'hostname': request.hostname,
+      'resolved-host': host,
+      'url': request.url
+    });
 
     // Extract subdomain
     // Format: {subdomain}.{domain}

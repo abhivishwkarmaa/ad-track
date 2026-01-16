@@ -667,7 +667,11 @@ export class AdminController {
       // This ensures tracking URLs use the real domain (e.g., ravi.track-myads.com)
       // instead of localhost or env variables
       
-      const host = request.headers.host || request.hostname || '';
+      // ✅ CRITICAL: Use X-Forwarded-Host for VPS/NGINX reverse proxy
+      const host = request.headers['x-forwarded-host'] || 
+                   request.headers.host || 
+                   request.hostname || 
+                   '';
       
       // Determine protocol from request
       // Check X-Forwarded-Proto first (set by NGINX/proxy), then request.protocol

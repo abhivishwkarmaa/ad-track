@@ -24,6 +24,10 @@ const fastify = Fastify({
   logger: logger,
   requestIdLogLabel: 'reqId',
   disableRequestLogging: false,
+  // ✅ CRITICAL: Enable trust proxy for VPS/NGINX reverse proxy
+  // This allows Fastify to trust X-Forwarded-* headers from NGINX
+  // Without this, request.hostname will be "backend" (upstream name) instead of actual domain
+  trustProxy: true,
 });
 
 // Initialize server
@@ -96,7 +100,11 @@ async function initializeServer() {
     const timestamp = new Date().toISOString();
     const method = request.method;
     const url = request.url;
-    const host = request.headers.host;
+    // ✅ CRITICAL: Use X-Forwarded-Host for VPS/NGINX reverse proxy
+    const host = request.headers['x-forwarded-host'] || 
+                 request.headers.host || 
+                 request.hostname || 
+                 '';
     const ip = request.ip || request.socket?.remoteAddress || 'unknown';
     const userAgent = request.headers['user-agent'] || 'N/A';
     const tenantId = request.tenantId || null;
