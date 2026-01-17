@@ -27,6 +27,17 @@ async function main() {
         // Start the stats worker
         await startStatsWorker();
 
+        // Start Redis hygiene worker (runs every hour) - moved from server.js to run as singleton here
+        if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
+            try {
+                const redisHygieneWorker = (await import('./src/workers/redisHygieneWorker.js')).default;
+                redisHygieneWorker.start(3600000); // 1 hour
+                logger.info('✅ Redis hygiene worker started');
+            } catch (error) {
+                logger.warn('Failed to start Redis hygiene worker:', error);
+            }
+        }
+
         // Keep the process alive
         process.on('SIGTERM', () => {
             logger.info('📉 Stats Worker received SIGTERM, shutting down gracefully...');

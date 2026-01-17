@@ -16,7 +16,7 @@ const BASE_URL = '';
 
 // Get token from localStorage
 const getToken = () => {
-    const user = localStorage.getItem('bng_user');
+    const user = localStorage.getItem('track-myads_user');
     if (user) {
         try {
             const parsedUser = JSON.parse(user);

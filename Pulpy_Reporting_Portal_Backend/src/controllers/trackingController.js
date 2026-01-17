@@ -19,7 +19,7 @@ export class TrackingController {
       }
 
       // Redirect to offer URL if valid
-      return reply.redirect(302, result.redirect);
+      return reply.redirect(result.redirect, 302);
     } catch (error) {
       // ✅ Log full error details server-side
       logger.error('TrackingController.handleClick error:', {

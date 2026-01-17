@@ -68,14 +68,14 @@ async function initializeServer() {
 
   // Register middleware
   fastify.addHook('onRequest', requestLogger);
-  
+
   // Tenant resolution middleware (runs before routes)
   // This extracts tenant from subdomain and attaches to request context
   fastify.addHook('onRequest', async (request, reply) => {
     const { resolveTenant } = await import('./middleware/tenant.js');
     await resolveTenant(request, reply);
   });
-  
+
   fastify.addHook('onResponse', responseLogger);
   fastify.setErrorHandler(errorHandler);
 
@@ -101,10 +101,10 @@ async function initializeServer() {
     const method = request.method;
     const url = request.url;
     // ✅ CRITICAL: Use X-Forwarded-Host for VPS/NGINX reverse proxy
-    const host = request.headers['x-forwarded-host'] || 
-                 request.headers.host || 
-                 request.hostname || 
-                 '';
+    const host = request.headers['x-forwarded-host'] ||
+      request.headers.host ||
+      request.hostname ||
+      '';
     const ip = request.ip || request.socket?.remoteAddress || 'unknown';
     const userAgent = request.headers['user-agent'] || 'N/A';
     const tenantId = request.tenantId || null;
@@ -162,27 +162,35 @@ const start = async () => {
     logger.info(`   Listening on ${host}:${port}`);
     logger.info(`   Environment: ${process.env.NODE_ENV || 'development'}\n`);
 
-    // ✅ CRITICAL: Start Redis click worker (processes clicks from stream)
-    try {
-      const runWorker = (await import('./workers/redisWorker.js')).default;
-      // Start worker in background (non-blocking)
-      runWorker().catch(err => {
-        logger.error('❌ Redis click worker failed:', err);
-      });
-      logger.info('✅ Redis click worker started');
-    } catch (error) {
-      logger.error('❌ Failed to start Redis click worker:', error);
-    }
+    // Workers are now managed by separate PM2 processes (click-worker, stats-worker)
+    // Only start them here if explicitly requested (e.g. for local dev without PM2)
+    if (process.env.START_WORKERS_WITH_API === 'true') {
+      logger.info('⚠️ Starting workers inside API process (START_WORKERS_WITH_API=true)');
 
-    // Start Redis hygiene worker (runs every hour)
-    if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
+      // ✅ CRITICAL: Start Redis click worker (processes clicks from stream)
       try {
-        const redisHygieneWorker = (await import('./workers/redisHygieneWorker.js')).default;
-        redisHygieneWorker.start(3600000); // 1 hour
-        logger.info('✅ Redis hygiene worker started');
+        const runWorker = (await import('./workers/redisWorker.js')).default;
+        // Start worker in background (non-blocking)
+        runWorker().catch(err => {
+          logger.error('❌ Redis click worker failed:', err);
+        });
+        logger.info('✅ Redis click worker started');
       } catch (error) {
-        logger.warn('Failed to start Redis hygiene worker:', error);
+        logger.error('❌ Failed to start Redis click worker:', error);
       }
+
+      // Start Redis hygiene worker (runs every hour)
+      if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
+        try {
+          const redisHygieneWorker = (await import('./workers/redisHygieneWorker.js')).default;
+          redisHygieneWorker.start(3600000); // 1 hour
+          logger.info('✅ Redis hygiene worker started');
+        } catch (error) {
+          logger.warn('Failed to start Redis hygiene worker:', error);
+        }
+      }
+    } else {
+      logger.info('ℹ️ Workers skipped in API process (managed separately)');
     }
   } catch (err) {
     console.error('\n❌ Failed to start server:');
