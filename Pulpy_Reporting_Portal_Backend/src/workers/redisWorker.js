@@ -11,6 +11,26 @@ const GROUP_NAME = 'workers_group';
 const CONSUMER_NAME = `worker_${process.env.HOSTNAME || 'local'}_${process.pid}`;
 const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed inserts
 
+const ERROR_TYPES = {
+    FATAL: 'fatal',
+    RETRYABLE: 'retryable'
+};
+
+function classifyError(err) {
+    if (!err) return ERROR_TYPES.FATAL;
+    const msg = (err.message || '').toLowerCase();
+    const code = err.code || '';
+
+    // Network / Redis / DB Connection Issues -> RETRYABLE
+    if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'PROTOCOL_CONNECTION_LOST' ||
+        msg.includes('connection') || msg.includes('socket') || msg.includes('network') ||
+        msg.includes('redis') || msg.includes('econnreset')) {
+        return ERROR_TYPES.RETRYABLE;
+    }
+
+    return ERROR_TYPES.FATAL;
+}
+
 async function setupStream() {
     try {
         await redis.xgroup('CREATE', STREAM_KEY, GROUP_NAME, '$', 'MKSTREAM');
@@ -20,6 +40,8 @@ async function setupStream() {
 }
 
 async function runWorker() {
+    let consecutiveErrors = 0;
+
     try {
         await setupStream();
         logger.info(`👷 Redis Stream Worker Started: ${CONSUMER_NAME}`);
@@ -45,6 +67,9 @@ async function runWorker() {
                 'BLOCK', BATCH_TIMEOUT,
                 'STREAMS', STREAM_KEY, '>'
             );
+
+            // Reset error count on successful read (even if empty)
+            consecutiveErrors = 0;
 
             if (!response || !response.length) {
                 // No new messages - log periodically (every 10 seconds of waiting)
@@ -97,7 +122,7 @@ async function runWorker() {
             logger.info('Worker fetching keys:', clickIds.map(id => `click:${id}`));
             clickIds.forEach(id => pipeline.hgetall(`click:${id}`));
             const dataResults = await pipeline.exec();
-            
+
             // DEBUG: Log first result to check if data exists
             if (dataResults.length > 0 && dataResults[0]) {
                 const [err, firstData] = dataResults[0];
@@ -155,10 +180,10 @@ async function runWorker() {
 
             if (invalidEntries.length > 0) {
                 // Separate entries with missing hashes (expired) from other validation errors
-                const missingHashEntries = invalidEntries.filter(entry => 
+                const missingHashEntries = invalidEntries.filter(entry =>
                     entry.errors.some(e => e.includes('click hash does not exist'))
                 );
-                const otherInvalidEntries = invalidEntries.filter(entry => 
+                const otherInvalidEntries = invalidEntries.filter(entry =>
                     !entry.errors.some(e => e.includes('click hash does not exist'))
                 );
 
@@ -179,14 +204,14 @@ async function runWorker() {
                 const invalidPipeline = redis.pipeline();
                 const invalidMsgIds = invalidEntries.map(entry => entry.msgId);
                 invalidPipeline.xack(STREAM_KEY, GROUP_NAME, ...invalidMsgIds);
-                
+
                 if (missingHashEntries.length > 0) {
                     logger.warn(`⚠️ Acknowledging ${missingHashEntries.length} clicks with expired/missing hashes (cannot recover)`);
                 }
                 if (otherInvalidEntries.length > 0) {
                     logger.warn(`⚠️ Acknowledging ${otherInvalidEntries.length} clicks with validation errors (moved to DLQ)`);
                 }
-                
+
                 await invalidPipeline.exec();
             }
 
@@ -204,7 +229,7 @@ async function runWorker() {
                 }
                 continue;
             }
-            
+
             // ✅ CRITICAL: Log tenant_id status before processing
             logger.info(`📊 Processing ${validEntries.length} clicks with tenant_ids:`, {
                 tenant_ids: validEntries.map(e => ({
@@ -302,17 +327,31 @@ async function runWorker() {
             }
 
         } catch (err) {
-            logger.error('❌ Worker Error (will retry):', {
-                error: err.message,
-                stack: err.stack,
-                code: err.code,
-                name: err.name,
-                stream: STREAM_KEY,
-                group: GROUP_NAME,
-                consumer: CONSUMER_NAME
-            });
-            // Wait before retrying to avoid tight error loop
-            await new Promise(r => setTimeout(r, 5000)); // Increased to 5 seconds
+            consecutiveErrors++;
+            const errorType = classifyError(err);
+            const isRetryable = errorType === ERROR_TYPES.RETRYABLE;
+
+            // Exponential backoff: 2s, 4s, 8s... max 1 min
+            const backoffMs = Math.min(Math.pow(2, consecutiveErrors) * 1000, 60000);
+
+            if (isRetryable) {
+                logger.warn({
+                    err: { message: err.message, code: err.code },
+                    attempt: consecutiveErrors,
+                    nextRetryMs: backoffMs
+                }, `⚠️ Worker Retryable Error: ${err.message || 'Unknown'}`);
+            } else {
+                // Correct Pino usage: Object first, then message
+                logger.error({
+                    err,
+                    stream: STREAM_KEY,
+                    group: GROUP_NAME,
+                    attempt: consecutiveErrors,
+                    nextRetryMs: backoffMs
+                }, `❌ Worker Critical Error: ${err.message || 'Unknown'}`);
+            }
+
+            await new Promise(r => setTimeout(r, backoffMs));
         }
     }
 }
@@ -333,7 +372,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             });
             return false;
         }
-        
+
         // ✅ CRITICAL: In strict multi-tenant, tenant_id is REQUIRED
         // Parse tenant_id to check if it's valid
         let tenantId = null;
@@ -343,7 +382,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
                 tenantId = parsed;
             }
         }
-        
+
         if (!tenantId) {
             logger.error('❌ Invalid click data - missing tenant_id (strict multi-tenant violation):', {
                 click_uuid: c.click_uuid,
@@ -354,7 +393,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             });
             return false;
         }
-        
+
         return true;
     });
 
@@ -397,7 +436,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
         timestamp, created_at
     ) VALUES ?
     ON DUPLICATE KEY UPDATE id = id`;
-    
+
     // ✅ Log if we're about to insert clicks that might be duplicates
     const clickUuids = validClicks.map(c => c.click_uuid);
     logger.debug(`📝 Attempting to insert ${validClicks.length} clicks`, {
@@ -422,7 +461,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
                 tenantId = parsed;
             }
         }
-        
+
         // ✅ CRITICAL: In strict multi-tenant, tenant_id is REQUIRED
         // Filter out clicks without tenant_id (data integrity issue)
         if (!tenantId) {
@@ -499,7 +538,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
                 sqlState: err.sqlState,
                 sqlMessage: err.sqlMessage
             });
-            
+
             // Check which foreign key failed
             if (err.message && err.message.includes('tenant_id')) {
                 logger.error('   ❌ tenant_id does not exist in tenants table!');

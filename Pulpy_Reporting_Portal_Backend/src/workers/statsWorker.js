@@ -1,10 +1,33 @@
 import redis from '../config/redis.js';
-import pool from '../db/connection.js';
+import pool, { dbHealth } from '../db/connection.js';
 import logger from '../utils/logger.js';
 
 const FLUSH_INTERVAL = 10000; // 10 seconds
 
+let isFlushing = false;
+
 async function flushStats() {
+    // Prevent overlapping flushes if DB/Redis is slow
+    if (isFlushing) {
+        logger.debug('⏳ Stats flush skipped - previous flush in progress');
+        return;
+    }
+
+    // Gracefully skip if Redis is not ready
+    if (redis.status !== 'ready') {
+        const logLevel = redis.status === 'reconnecting' ? 'debug' : 'warn';
+        logger[logLevel](`⚠️ Stats flush skipped: Redis status is '${redis.status}'`);
+        return;
+    }
+
+    // Gracefully skip if Database is not available
+    if (!dbHealth.isAvailable()) {
+        logger.warn('⚠️ Stats flush skipped: Database is unreachable (will retry when online)');
+        return;
+    }
+
+    isFlushing = true;
+
     try {
         const pattern = 'stats:offer:*:*:*:*'; // id:tenant_id:date:metric
         let cursor = '0';
@@ -36,6 +59,12 @@ async function flushStats() {
         for (let i = 0; i < keys.length; i++) {
             const key = keys[i];
             const [err, valStr] = results[i];
+
+            if (err) {
+                logger.warn({ key, err: err.message }, '⚠️ Failed to read stats key');
+                continue;
+            }
+
             const val = parseFloat(valStr || '0');
 
             if (val > 0) {
@@ -98,7 +127,11 @@ async function flushStats() {
         logger.info('✅ Stats Flushed to DB');
 
     } catch (err) {
-        logger.error('Stats Flush Error:', err);
+        logger.error({
+            err: { message: err.message, code: err.code, stack: err.stack }
+        }, '❌ Stats Flush Failed');
+    } finally {
+        isFlushing = false;
     }
 }
 
