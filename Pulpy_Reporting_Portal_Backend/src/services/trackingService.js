@@ -247,7 +247,9 @@ export class TrackingService {
       // 5. GENERATE & PERSIST
       // ============================================
 
-      const clickUuid = generateClickId(36);
+      // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
+      // This ensures unique click identity across publishers and tenants
+      const clickUuid = generateClickId(tenantId, offerId, publisherId, 36);
 
       // Parse params
       const deviceInfo = parseDevice(userAgent);
@@ -289,6 +291,7 @@ export class TrackingService {
 
       // Persist to Redis (include tenant_id for database insertion later)
       // ✅ CRITICAL: Store all values as strings (Redis hash values are strings)
+      // ✅ CRITICAL: Add flushed flag to track if click has been inserted into DB
       const clickData = {
         click_uuid: clickUuid,
         offer_id: String(offerId),
@@ -316,7 +319,8 @@ export class TrackingService {
         device_model: deviceInfo.deviceModel || '',
         tid: query.tid || query.click_id || '', // Affiliate ID
         rcid: query.rcid || '',
-        timestamp: new Date().toISOString() // UTC ENFORCEMENT: Store UTC timestamp only
+        timestamp: new Date().toISOString(), // UTC ENFORCEMENT: Store UTC timestamp only
+        flushed: 'false' // ✅ CRITICAL: Track if click has been inserted into DB
       };
 
       // DEBUG: Dump clickData to file to verify content
@@ -328,10 +332,24 @@ export class TrackingService {
       }, null, 2) + '\n---\n');
 
       try {
+        // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
+        // This ensures clicks from different publishers on same offer are isolated
+        const redisKey = `click:${finalTenantId}:${offerId}:${publisherId}:${clickUuid}`;
+        
+        // ✅ CRITICAL: Log click received
+        logger.info('[CLICK] Click received', {
+          tenant_id: finalTenantId,
+          offer_id: offerId,
+          publisher_id: publisherId,
+          click_id: clickUuid,
+          redis_key: redisKey
+        });
+
+        // ✅ CRITICAL: Write click data ONLY ONCE to Redis HASH
         // Use pipeline for atomicity - ensure hash is written before stream entry
         const pipeline = redis.pipeline();
-        pipeline.hset(`click:${clickUuid}`, clickData);
-        pipeline.expire(`click:${clickUuid}`, 86400); // 24 hours TTL
+        pipeline.hset(redisKey, clickData);
+        pipeline.expire(redisKey, 86400); // 24 hours TTL
         
         // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
         const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
@@ -343,59 +361,100 @@ export class TrackingService {
           });
           throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
         }
-        pipeline.xadd('stream:clicks', '*', 'id', clickUuid, 'tenant_id', tenantIdStr);
+        
+        // ✅ CRITICAL: Add to stream - if XADD fails, DO NOT drop the click (log but continue)
+        pipeline.xadd('stream:clicks', '*', 
+          'tenant_id', tenantIdStr,
+          'offer_id', String(offerId),
+          'publisher_id', String(publisherId),
+          'click_id', clickUuid
+        );
         
         // ✅ Increased TTL from 3s to 5s to match dedupe key TTL
         pipeline.setex(`dedupe:redirect:${dedupeFingerprint}`, 5, redirectUrl);
         
         const results = await pipeline.exec();
         
-        // Verify all operations succeeded (pipeline results are [error, result] tuples)
+        // ✅ CRITICAL: Verify hash write succeeded (MANDATORY)
+        // Stream write failure is NON-FATAL - click is still in Redis hash and can be backfilled
         let hashWriteSuccess = false;
         let streamWriteSuccess = false;
+        let hashWriteError = null;
+        let streamWriteError = null;
         
         for (let i = 0; i < results.length; i++) {
           const [err, result] = results[i];
           if (err) {
             const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'dedupe set';
             logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
-            throw new Error(`Redis ${operation} failed: ${err.message}`);
+            
+            if (i === 0) {
+              // Hash write failure is FATAL - click data is lost
+              hashWriteError = err;
+              throw new Error(`Redis hash write failed: ${err.message}`);
+            } else if (i === 2) {
+              // Stream write failure is NON-FATAL - click is still in Redis hash
+              streamWriteError = err;
+              logger.warn(`⚠️ Redis stream enqueue failed - click stored in Redis hash, will be backfilled:`, {
+                error: err.message,
+                redis_key: redisKey,
+                click_id: clickUuid
+              });
+            }
           } else {
             if (i === 0) hashWriteSuccess = true; // Hash write
             if (i === 2) streamWriteSuccess = true; // Stream add
           }
         }
 
-        logger.info('[CLICK] Persisted to Redis successfully', { 
-          uuid: clickUuid,
-          operations: results.length,
-          tenant_id: finalTenantId,
-          offer_id: offerId,
-          publisher_id: publisherId,
-          stream_entry_id: results[2]?.[1] || 'unknown',
-          hash_key: `click:${clickUuid}`,
-          hash_write_success: hashWriteSuccess,
-          stream_write_success: streamWriteSuccess
-        });
-        
+        // ✅ CRITICAL: Log Redis stored
+        if (hashWriteSuccess) {
+          logger.info('[CLICK] Redis stored', {
+            redis_key: redisKey,
+            click_id: clickUuid,
+            tenant_id: finalTenantId,
+            offer_id: offerId,
+            publisher_id: publisherId
+          });
+        }
+
+        // ✅ CRITICAL: Log stream enqueued (or failed)
+        if (streamWriteSuccess) {
+          logger.info('[CLICK] Stream enqueued', {
+            stream: 'stream:clicks',
+            click_id: clickUuid,
+            tenant_id: finalTenantId,
+            offer_id: offerId,
+            publisher_id: publisherId
+          });
+        } else if (streamWriteError) {
+          logger.warn('[CLICK] Stream enqueue failed - click will be backfilled', {
+            stream: 'stream:clicks',
+            error: streamWriteError.message,
+            redis_key: redisKey,
+            click_id: clickUuid
+          });
+        }
+
         // Verify the hash was actually written (with retry in case of timing issue)
+        // redisKey already defined above
         let hashCheck = null;
         for (let attempt = 0; attempt < 3; attempt++) {
-          hashCheck = await redis.hget(`click:${clickUuid}`, 'offer_id');
+          hashCheck = await redis.hget(redisKey, 'offer_id');
           if (hashCheck) break;
           if (attempt < 2) await new Promise(r => setTimeout(r, 100)); // Wait 100ms before retry
         }
         
         if (hashCheck) {
-          logger.info(`✅ Verified click hash exists: click:${clickUuid} (offer_id: ${hashCheck})`);
+          logger.info(`✅ Verified click hash exists: ${redisKey} (offer_id: ${hashCheck})`);
         } else {
-          logger.error(`❌ CRITICAL: Click hash was NOT written or was deleted! click:${clickUuid}`);
+          logger.error(`❌ CRITICAL: Click hash was NOT written or was deleted! ${redisKey}`);
           logger.error('   This will cause the worker to fail when processing this click.');
           // Try to write it again as a fallback
           try {
-            await redis.hset(`click:${clickUuid}`, clickData);
-            await redis.expire(`click:${clickUuid}`, 86400);
-            logger.info(`✅ Fallback: Re-wrote click hash: click:${clickUuid}`);
+            await redis.hset(redisKey, clickData);
+            await redis.expire(redisKey, 86400);
+            logger.info(`✅ Fallback: Re-wrote click hash: ${redisKey}`);
           } catch (fallbackErr) {
             logger.error(`❌ Fallback hash write also failed: ${fallbackErr.message}`);
           }
@@ -413,15 +472,7 @@ export class TrackingService {
         tenant: finalTenantId
       }, null, 2) + '\n---\n');
 
-      // ✅ CRITICAL: Log that click was stored in Redis
-      logger.info('[CLICK] Stored in Redis', {
-        click_uuid: clickUuid,
-        offer_id: offerId,
-        publisher_id: publisherId,
-        tenant_id: finalTenantId,
-        stream: 'stream:clicks',
-        hash: `click:${clickUuid}`
-      });
+      // ✅ CRITICAL: Log that click was stored in Redis (already logged above, but keeping for compatibility)
 
       return {
         redirect: redirectUrl,

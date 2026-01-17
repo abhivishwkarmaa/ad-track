@@ -33,9 +33,20 @@ function classifyError(err) {
 
 async function setupStream() {
     try {
+        // ✅ CRITICAL: Ensure stream exists and consumer group exists
+        // Use XGROUP CREATE with MKSTREAM to create stream if it doesn't exist
+        // This ensures worker NEVER crashes due to missing stream or group
         await redis.xgroup('CREATE', STREAM_KEY, GROUP_NAME, '$', 'MKSTREAM');
+        logger.info(`✅ Redis stream and consumer group ready: ${STREAM_KEY}/${GROUP_NAME}`);
     } catch (err) {
-        if (!err.message.includes('BUSYGROUP')) throw err;
+        // BUSYGROUP means group already exists - this is OK
+        if (err.message && err.message.includes('BUSYGROUP')) {
+            logger.info(`✅ Consumer group already exists: ${STREAM_KEY}/${GROUP_NAME}`);
+        } else {
+            // Any other error is a problem - log but don't crash (will retry)
+            logger.error(`❌ Failed to setup Redis stream: ${err.message}`, err);
+            throw err;
+        }
     }
 }
 
@@ -89,19 +100,54 @@ async function runWorker() {
 
             logger.info(`📦 Worker Processing Batch: ${streamEntries.length} clicks`);
 
-            const clickIds = [];
+            const streamClickData = [];
             const msgIds = [];
 
-            // Extract Click IDs
+            // ✅ CRITICAL: Extract click data from stream messages
+            // New format: tenant_id, offer_id, publisher_id, click_id
             for (const [msgId, fields] of streamEntries) {
                 // Fields are [key1, val1, key2, val2...]
-                // We stored 'id' as key
-                const idIndex = fields.indexOf('id');
-                if (idIndex !== -1) {
-                    clickIds.push(fields[idIndex + 1]);
+                // New format stores: tenant_id, offer_id, publisher_id, click_id
+                const tenantIdIndex = fields.indexOf('tenant_id');
+                const offerIdIndex = fields.indexOf('offer_id');
+                const publisherIdIndex = fields.indexOf('publisher_id');
+                const clickIdIndex = fields.indexOf('click_id');
+                
+                if (tenantIdIndex !== -1 && offerIdIndex !== -1 && 
+                    publisherIdIndex !== -1 && clickIdIndex !== -1) {
+                    const tenantId = fields[tenantIdIndex + 1];
+                    const offerId = fields[offerIdIndex + 1];
+                    const publisherId = fields[publisherIdIndex + 1];
+                    const clickId = fields[clickIdIndex + 1];
+                    
+                    streamClickData.push({
+                        msgId,
+                        tenantId,
+                        offerId,
+                        publisherId,
+                        clickId
+                    });
                     msgIds.push(msgId);
+                } else {
+                    // Fallback: try old format with 'id' key (backwards compatibility)
+                    const idIndex = fields.indexOf('id');
+                    if (idIndex !== -1) {
+                        const clickId = fields[idIndex + 1];
+                        const tenantId = fields.indexOf('tenant_id') !== -1 ? 
+                            fields[fields.indexOf('tenant_id') + 1] : null;
+                        streamClickData.push({
+                            msgId,
+                            tenantId,
+                            offerId: null, // Will need to read from Redis hash
+                            publisherId: null, // Will need to read from Redis hash
+                            clickId
+                        });
+                        msgIds.push(msgId);
+                    }
                 }
             }
+
+            const clickIds = streamClickData.map(d => d.clickId);
 
             if (clickIds.length === 0) {
                 // Ack empty messages
@@ -109,18 +155,22 @@ async function runWorker() {
                 continue;
             }
 
-            // DEBUG WORKER LOG
-            const fs = await import('fs');
-            fs.appendFileSync('debug_worker.log', JSON.stringify({
-                time: new Date().toISOString(),
-                received: clickIds.length,
-                ids: clickIds
-            }) + '\n');
+            // ✅ CRITICAL: Build Redis keys using new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
+            // Fallback to old format if tenant_id/offer_id/publisher_id not in stream
+            const redisKeys = streamClickData.map(data => {
+                if (data.tenantId && data.offerId && data.publisherId && data.clickId) {
+                    return `click:${data.tenantId}:${data.offerId}:${data.publisherId}:${data.clickId}`;
+                } else {
+                    // Fallback to old format (backwards compatibility)
+                    return `click:${data.clickId}`;
+                }
+            });
 
-            // Fetch Full Data from Redis Pipelined
+            // ✅ CRITICAL: Fetch full click data from Redis HASH
+            // Worker MUST re-read full click data from Redis HASH (don't trust stream alone)
             const pipeline = redis.pipeline();
-            logger.info('Worker fetching keys:', clickIds.map(id => `click:${id}`));
-            clickIds.forEach(id => pipeline.hgetall(`click:${id}`));
+            logger.info('📥 Worker fetching click data from Redis:', redisKeys);
+            redisKeys.forEach(key => pipeline.hgetall(key));
             const dataResults = await pipeline.exec();
 
             // DEBUG: Log first result to check if data exists
@@ -146,14 +196,35 @@ async function runWorker() {
 
             for (let i = 0; i < dataResults.length; i++) {
                 const [err, clickData] = dataResults[i];
-                const clickUuid = clickIds[i] || null;
+                const streamData = streamClickData[i];
+                const clickUuid = streamData?.clickId || clickIds[i] || null;
+                const redisKey = redisKeys[i] || null;
 
+                // ✅ CRITICAL: Check if click data exists and is valid
+                // Also check if click has already been flushed (avoid duplicate processing)
                 if (!err && clickData && Object.keys(clickData).length > 0 && clickData.offer_id) {
-                    validEntries.push({
-                        msgId: msgIds[i],
-                        clickUuid,
-                        clickData
-                    });
+                    // ✅ CRITICAL: Skip if already flushed (idempotency check)
+                    const isFlushed = clickData.flushed === 'true' || clickData.flushed === true;
+                    if (isFlushed) {
+                        logger.info(`⏭️ Click already flushed (skipping): ${clickUuid}`, {
+                            redis_key: redisKey,
+                            click_id: clickUuid
+                        });
+                        // Still acknowledge message to prevent reprocessing
+                        validEntries.push({
+                            msgId: streamData.msgId,
+                            clickUuid,
+                            clickData,
+                            alreadyFlushed: true
+                        });
+                    } else {
+                        validEntries.push({
+                            msgId: streamData.msgId,
+                            clickUuid,
+                            clickData,
+                            alreadyFlushed: false
+                        });
+                    }
                 } else {
                     const validationErrors = [];
                     if (err) validationErrors.push(`Redis error: ${err.message}`);
@@ -164,12 +235,14 @@ async function runWorker() {
                     }
 
                     invalidEntries.push({
-                        msgId: msgIds[i],
+                        msgId: streamData?.msgId || msgIds[i],
                         clickUuid,
+                        redisKey,
                         clickData: clickData || null,
                         errors: validationErrors
                     });
-                    logger.warn(`❌ Click data invalid/missing for ID: ${clickUuid || 'unknown'}`, {
+                    logger.warn(`❌ Click data invalid/missing: ${clickUuid || 'unknown'}`, {
+                        redis_key: redisKey,
                         errors: validationErrors,
                         hasData: !!clickData,
                         dataKeys: clickData ? Object.keys(clickData) : [],
@@ -243,9 +316,32 @@ async function runWorker() {
 
             logger.info(`✅ Validated ${validEntries.length} clicks, ${invalidEntries.length} invalid`);
 
-            const validMsgIds = validEntries.map(entry => entry.msgId);
-            const validClicks = validEntries.map(entry => entry.clickData);
-            const clickIdsToCleanup = validEntries.map(entry => entry.clickData.click_uuid);
+            // ✅ CRITICAL: Filter out already-flushed clicks (they don't need DB insert)
+            const clicksToInsert = validEntries.filter(e => !e.alreadyFlushed);
+            const alreadyFlushedIds = validEntries.filter(e => e.alreadyFlushed).map(e => e.msgId);
+
+            if (alreadyFlushedIds.length > 0) {
+                // Acknowledge already-flushed clicks
+                await redis.xack(STREAM_KEY, GROUP_NAME, ...alreadyFlushedIds);
+                logger.info(`✅ Acknowledged ${alreadyFlushedIds.length} already-flushed clicks`);
+            }
+
+            if (clicksToInsert.length === 0) {
+                logger.info('⏭️ No new clicks to insert (all already flushed)');
+                continue;
+            }
+
+            const validMsgIds = clicksToInsert.map(entry => entry.msgId);
+            const validClicks = clicksToInsert.map(entry => entry.clickData);
+            const clickIdsToCleanup = clicksToInsert.map(entry => {
+                const c = entry.clickData;
+                // Build Redis key using new format
+                if (c.tenant_id && c.offer_id && c.publisher_id && c.click_uuid) {
+                    return `click:${c.tenant_id}:${c.offer_id}:${c.publisher_id}:${c.click_uuid}`;
+                }
+                // Fallback to old format
+                return `click:${c.click_uuid}`;
+            });
             // UTC ENFORCEMENT: Use UTC timestamp for all DB operations
             const batchTimestamp = new Date().toISOString();
 
@@ -254,8 +350,17 @@ async function runWorker() {
 
             while (retryCount < MAX_RETRY_ATTEMPTS && !insertSuccess) {
                 try {
+                    // ✅ CRITICAL: Insert clicks into MySQL
                     await bulkInsertClicks(validClicks, batchTimestamp);
                     insertSuccess = true;
+
+                    // ✅ CRITICAL: Mark clicks as flushed in Redis
+                    const flushPipeline = redis.pipeline();
+                    clickIdsToCleanup.forEach(key => {
+                        flushPipeline.hset(key, 'flushed', 'true');
+                    });
+                    await flushPipeline.exec();
+                    logger.info(`✅ Marked ${clickIdsToCleanup.length} clicks as flushed in Redis`);
 
                     await processPendingConversions(validClicks, batchTimestamp);
 
@@ -275,12 +380,22 @@ async function runWorker() {
                     }
                     await pipelineStats.exec();
 
+                    // ✅ CRITICAL: After successful DB insert, ACK stream message
+                    // Do NOT delete Redis hash immediately (keep for backfill safety net)
+                    // Hash will expire after TTL (24h)
                     const cleanupPipeline = redis.pipeline();
                     cleanupPipeline.xack(STREAM_KEY, GROUP_NAME, ...validMsgIds);
-                    clickIdsToCleanup.forEach(id => cleanupPipeline.del(`click:${id}`));
+                    // ✅ CRITICAL: DO NOT delete Redis hash - keep for backfill safety net
+                    // cleanupPipeline.del() removed - let TTL handle cleanup
                     await cleanupPipeline.exec();
 
-                    logger.info(`✅ Processed Batch: ${validClicks.length} clicks`);
+                    // ✅ CRITICAL: Log DB inserted
+                    logger.info(`✅ DB inserted: ${validClicks.length} clicks`, {
+                        click_ids: validClicks.map(c => c.click_uuid),
+                        tenant_ids: validClicks.map(c => c.tenant_id),
+                        offer_ids: validClicks.map(c => c.offer_id),
+                        publisher_ids: validClicks.map(c => c.publisher_id)
+                    });
 
                 } catch (dbErr) {
                     retryCount++;

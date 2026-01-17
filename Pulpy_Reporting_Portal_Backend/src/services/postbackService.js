@@ -26,8 +26,69 @@ export class PostbackService {
       // REDIS FIRST CHECK
       // ============================================
       // Check if click exists in Redis (pending DB insert)
+      // ✅ CRITICAL: Try new key format first, then fallback to old format
       if (click_id) {
-        const redisClick = await redis.hgetall(`click:${click_id}`);
+        let redisClick = null;
+        let redisKey = null;
+
+        // ✅ CRITICAL: Get tenant_id from request first (for new key format)
+        const tenantId = getTenantIdFromRequest(request);
+
+        // Strategy 1: If we have tenant_id, try to get click from DB first to get offer_id/publisher_id
+        if (tenantId) {
+          try {
+            const [dbRows] = await pool.query(
+              'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
+              [click_id, tenantId]
+            );
+            if (dbRows && dbRows.length > 0) {
+              const dbClick = dbRows[0];
+              // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
+              redisKey = `click:${dbClick.tenant_id}:${dbClick.offer_id}:${dbClick.publisher_id}:${click_id}`;
+              redisClick = await redis.hgetall(redisKey);
+            }
+          } catch (dbErr) {
+            // DB lookup failed - continue to Redis lookup
+            logger.debug('Could not lookup click in DB, trying Redis directly');
+          }
+        }
+
+        // Strategy 2: If click not found with new format, try old format (backwards compatibility)
+        if (!redisClick || !redisClick.offer_id) {
+          redisKey = `click:${click_id}`;
+          redisClick = await redis.hgetall(redisKey);
+        }
+
+        // Strategy 3: If still not found and we have tenant_id, try pattern scan (last resort)
+        if ((!redisClick || !redisClick.offer_id) && tenantId) {
+          try {
+            // Scan for pattern: click:*:*:*:${click_id}
+            let cursor = 0;
+            let found = false;
+            do {
+              const [newCursor, keys] = await redis.scan(
+                cursor,
+                'MATCH', `click:*:*:*:${click_id}`,
+                'COUNT', 10
+              );
+              cursor = parseInt(newCursor);
+              
+              if (keys.length > 0) {
+                // Try first matching key
+                redisKey = keys[0];
+                redisClick = await redis.hgetall(redisKey);
+                if (redisClick && redisClick.offer_id) {
+                  found = true;
+                  break;
+                }
+              }
+            } while (cursor !== 0 && !found);
+          } catch (scanErr) {
+            // Scan failed - log but continue
+            logger.debug('Redis SCAN failed, continuing with fallback', scanErr);
+          }
+        }
+
         if (redisClick && redisClick.offer_id) {
           // Click found in Redis! Process conversion in Redis.
 

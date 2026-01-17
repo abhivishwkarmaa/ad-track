@@ -5,34 +5,47 @@
 import crypto from 'crypto';
 
 /**
- * Generate a unique, URL-safe click_id (max 36 characters to match database CHAR(36))
- * Uses cryptographically secure random bytes for production-grade security
- * Format: Base64URL encoded random bytes (URL-safe, no padding)
+ * Generate a unique, URL-safe click_id based on tenant_id + offer_id + publisher_id + timestamp + random salt
+ * Uses cryptographically secure hash for production-grade uniqueness
+ * Format: Base64URL encoded hash (URL-safe, no padding)
  * 
+ * @param {number} tenantId - Tenant ID
+ * @param {number} offerId - Offer ID
+ * @param {number} publisherId - Publisher ID
  * @param {number} length - Desired length (default: 36, max: 36 to match database schema)
- * @returns {string} - URL-safe click_id
+ * @returns {string} - URL-safe click_id (hash)
  * 
- * Example output: "2092Y7avpRzmwWRY7aFjF2bS53VM4jjYK5f"
+ * Example output: "aB3cD4eF5gH6iJ7kL8mN9oP0qR1sT2u"
  */
-export function generateClickId(length = 36) {
+export function generateClickId(tenantId, offerId, publisherId, length = 36) {
+  // Validate required parameters
+  if (tenantId === undefined || tenantId === null || 
+      offerId === undefined || offerId === null || 
+      publisherId === undefined || publisherId === null) {
+    throw new Error('generateClickId requires tenantId, offerId, and publisherId');
+  }
+
   // Database column is CHAR(36), so limit to 36 characters
   const validLength = Math.min(36, length || 36);
 
-  // Generate cryptographically secure random bytes
-  // We need (length * 3/4) bytes to get approximately 'length' characters after base64 encoding
-  const bytesNeeded = Math.ceil(validLength * 0.75);
-  const randomBytes = crypto.randomBytes(bytesNeeded);
+  // Generate hash from: tenant_id + offer_id + publisher_id + timestamp + random salt
+  const timestamp = Date.now();
+  const randomSalt = crypto.randomBytes(16).toString('hex');
+  const hashInput = `${tenantId}:${offerId}:${publisherId}:${timestamp}:${randomSalt}`;
+
+  // Create SHA-256 hash
+  const hash = crypto.createHash('sha256').update(hashInput).digest();
 
   // Convert to Base64URL (URL-safe, no padding)
   // Base64URL uses - and _ instead of + and /, and removes = padding
-  let clickId = randomBytes.toString('base64url');
+  let clickId = hash.toString('base64url');
 
   // Trim to exact length (36 chars max to match database CHAR(36))
   if (clickId.length > validLength) {
     clickId = clickId.substring(0, validLength);
   }
 
-  // Ensure minimum length by padding if necessary
+  // Ensure minimum length by padding if necessary (rare case)
   while (clickId.length < validLength) {
     const additionalBytes = crypto.randomBytes(8);
     clickId += additionalBytes.toString('base64url');
