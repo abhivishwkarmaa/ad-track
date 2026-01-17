@@ -445,6 +445,25 @@ async function runWorker() {
             consecutiveErrors++;
             const errorType = classifyError(err);
             const isRetryable = errorType === ERROR_TYPES.RETRYABLE;
+            
+            // ✅ CRITICAL: Handle NOGROUP error - consumer group was deleted
+            // Auto-recreate stream and consumer group, then retry
+            if (err.message && (err.message.includes('NOGROUP') || err.message.includes('no such key'))) {
+                logger.warn(`⚠️ Consumer group missing (NOGROUP) - recreating stream and group`, {
+                    stream: STREAM_KEY,
+                    group: GROUP_NAME,
+                    error: err.message
+                });
+                try {
+                    await setupStream();
+                    logger.info(`✅ Stream and consumer group recreated successfully`);
+                    consecutiveErrors = 0; // Reset error count after successful recreation
+                    continue; // Retry reading immediately
+                } catch (setupErr) {
+                    logger.error(`❌ Failed to recreate stream/group: ${setupErr.message}`, setupErr);
+                    // Fall through to normal error handling
+                }
+            }
 
             // Exponential backoff: 2s, 4s, 8s... max 1 min
             const backoffMs = Math.min(Math.pow(2, consecutiveErrors) * 1000, 60000);
