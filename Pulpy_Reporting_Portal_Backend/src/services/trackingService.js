@@ -27,10 +27,13 @@ export class TrackingService {
       const publisherId = parseInt(query.pub_id || query.a);
 
       // ============================================
-      // 1. REDIS: DEDUPLICATION (First Line of Defense)
+      // 1. TENANT RESOLUTION (NO DEDUPLICATION)
       // ============================================
-      // ✅ CRITICAL: Get tenant_id FIRST for deduplication fingerprint
-      // Tenant identity MUST come from subdomain (Host header) - EXCLUSIVE source of truth
+      // ✅ CRITICAL: Get tenant_id from subdomain (Host header) - EXCLUSIVE source of truth
+      // ❌ REMOVED: Redis-based deduplication that blocks clicks
+      // ✅ REQUIREMENT: Redis must not decide whether a click is valid or should be dropped
+      // ✅ REQUIREMENT: Never check Redis for existing clicks
+      // ✅ REQUIREMENT: Every valid incoming click must be counted
       const tenantId = getTenantIdFromRequest(request);
       
       // 🔒 STRICT: Reject if no tenant from subdomain
@@ -46,30 +49,16 @@ export class TrackingService {
         throw new TenantRequiredError('Tenant required');
       }
 
-      // Fingerprint: TenantID + IP + UserAgent + OfferID
-      // ✅ CRITICAL: Include tenant_id in fingerprint to prevent cross-tenant collisions
+      // ✅ OPTIONAL: Create fingerprint ONLY for redirect URL caching (not for blocking)
+      // This is a performance optimization - does NOT block clicks
       const userAgent = request.headers['user-agent'] || '';
       const ip = extractIP(request);
-      const dedupeFingerprint = `${tenantId}:${ip}:${offerId}:${userAgent.substring(0, 50)}`; // Include tenant_id
-
-      // isDuplicateClick uses SET NX EX 5. Returns TRUE if duplicate (key existed).
-      // Increased TTL from 3s to 5s for better duplicate prevention
-      const isDuplicate = await cacheService.isDuplicateClick(dedupeFingerprint);
-
-      if (isDuplicate) {
-        // It's a duplicate! Try to return cached redirect URL
-        const cachedRedirect = await cacheService.getDedupeRedirect(dedupeFingerprint);
-        if (cachedRedirect) {
-          logger.info('Duplicate Click Suppressed (Redis)', { finger: dedupeFingerprint });
-          return { redirect: cachedRedirect, clickId: null, duplicate: true };
-        }
-        // If no cached redirect (rare race), proceed or error? Proceed to be safe.
-      }
+      const redirectCacheKey = `redirect:${tenantId}:${ip}:${offerId}:${userAgent.substring(0, 50)}`;
 
       // ============================================
       // 2. STRICT MULTI-TENANT: TENANT RESOLUTION
       // ============================================
-      // ✅ NOTE: Tenant already resolved above for deduplication
+      // ✅ NOTE: Tenant already resolved above
       // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
       // Tenant identity must be determined BEFORE any database lookup
@@ -370,8 +359,9 @@ export class TrackingService {
           'click_id', clickUuid
         );
         
-        // ✅ Increased TTL from 3s to 5s to match dedupe key TTL
-        pipeline.setex(`dedupe:redirect:${dedupeFingerprint}`, 5, redirectUrl);
+        // ✅ OPTIONAL: Cache redirect URL for quick lookup (performance optimization, not blocking)
+        // This cache does NOT affect click counting or DB insertion
+        pipeline.setex(redirectCacheKey, 5, redirectUrl);
         
         const results = await pipeline.exec();
         
@@ -385,7 +375,7 @@ export class TrackingService {
         for (let i = 0; i < results.length; i++) {
           const [err, result] = results[i];
           if (err) {
-            const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'dedupe set';
+            const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
             logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
             
             if (i === 0) {
