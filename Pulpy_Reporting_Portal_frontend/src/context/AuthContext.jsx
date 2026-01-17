@@ -10,7 +10,7 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         // Check for saved user in localStorage
-        const savedUser = localStorage.getItem('bng_user');
+        const savedUser = localStorage.getItem('track-myads_user');
         if (savedUser) {
             try {
                 const parsedUser = JSON.parse(savedUser);
@@ -24,7 +24,7 @@ export function AuthProvider({ children }) {
                 setIsAuthenticated(true);
             } catch (e) {
                 console.error('Failed to parse saved user:', e);
-                localStorage.removeItem('bng_user');
+                localStorage.removeItem('track-myads_user');
             }
         }
         setLoading(false);
@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
     const login = async (email, password) => {
         try {
             const response = await authAPI.login(email, password);
-            
+
             if (response.success && response.data) {
                 const userData = {
                     id: response.data.id,
@@ -44,19 +44,19 @@ export function AuthProvider({ children }) {
                     tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
                     token: response.data.token
                 };
-                
+
                 setUser(userData);
                 setIsAuthenticated(true);
-                localStorage.setItem('bng_user', JSON.stringify(userData));
+                localStorage.setItem('track-myads_user', JSON.stringify(userData));
                 return { success: true };
             } else {
                 return { success: false, error: response.message || 'Login failed' };
             }
         } catch (error) {
             console.error('Login error:', error);
-            return { 
-                success: false, 
-                error: error.message || 'An error occurred during login. Please try again.' 
+            return {
+                success: false,
+                error: error.message || 'An error occurred during login. Please try again.'
             };
         }
     };
@@ -64,14 +64,14 @@ export function AuthProvider({ children }) {
     const logout = () => {
         setUser(null);
         setIsAuthenticated(false);
-        localStorage.removeItem('bng_user');
+        localStorage.removeItem('track-myads_user');
         localStorage.removeItem('bng_token');
     };
 
     const updateProfile = (updates) => {
         const updatedUser = { ...user, ...updates };
         setUser(updatedUser);
-        localStorage.setItem('bng_user', JSON.stringify(updatedUser));
+        localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
     };
 
     if (loading) {

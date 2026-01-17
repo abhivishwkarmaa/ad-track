@@ -236,7 +236,7 @@ function DetailedReports() {
             // We use fetch with blob to handle auth headers if needed, or just window.open if cookies usage
             // Since we use Bearer token, we must use fetch
 
-            const token = localStorage.getItem('bng_user') ? JSON.parse(localStorage.getItem('bng_user')).token : null;
+            const token = localStorage.getItem('track-myads_user') ? JSON.parse(localStorage.getItem('track-myads_user')).token : null;
 
             const response = await fetch(`/api/admin/reports/detailed?${params.toString()}`, {
                 headers: {
