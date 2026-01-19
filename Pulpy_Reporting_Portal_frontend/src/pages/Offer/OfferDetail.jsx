@@ -256,9 +256,9 @@ function OfferDetail() {
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                    <Link to={`/offer/edit/${offer.id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Link to={`/offer/edit/${offer.id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
                         <EditIcon />
-                        Edit Offer
+                        <span>Edit Offer</span>
                     </Link>
                     <button
                         className="btn btn-secondary"

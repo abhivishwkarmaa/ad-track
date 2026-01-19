@@ -87,7 +87,7 @@ function NewAdvertiser() {
     return (
         <div className="advertiser-page">
             <div className="advertiser-header">
-                <div className="advertiser-header-left">
+                <div className="advertiser-header-left" style={{ whiteSpace: 'nowrap', minWidth: '140px', maxWidth: '100%', justifyContent: 'center' }}>
                     <h1>New Advertiser</h1>
                     <p>Register a new advertiser</p>
                 </div>

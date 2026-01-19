@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import logoImage from '../../assets/logo.png';
 import './Login.css';
 
 function Login() {
@@ -31,9 +32,15 @@ function Login() {
         <div className="login-page">
             <div className="login-left">
                 <div className="login-brand">
-                    <div className="login-logo">P</div>
-                    <h1>Pulpy Reporting Portal</h1>
-                    <p>Affiliate Management Platform</p>
+                    <div className="login-logo">
+                        {logoImage ? (
+                            <img src={logoImage} alt="Track MyAds Logo" />
+                        ) : (
+                            <span className="login-logo-text">TM</span>
+                        )}
+                    </div>
+                    <h1>Track MyAds</h1>
+                    <p>Performance Marketing Platform</p>
                 </div>
 
                 <div className="login-card">

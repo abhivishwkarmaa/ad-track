@@ -14,7 +14,7 @@ const SearchIcon = () => (
 );
 
 const PlusIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
         <line x1="12" y1="5" x2="12" y2="19" />
         <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
@@ -166,9 +166,9 @@ function ManageAdvertiser() {
                     <h1>Manage Advertisers</h1>
                     <p>View and manage all registered advertisers</p>
                 </div>
-                <Link to="/advertiser/new" className="btn btn-primary">
+                <Link to="/advertiser/new" className="btn btn-primary" style={{ whiteSpace: 'nowrap', minWidth: '140px', maxWidth: '100%', justifyContent: 'center' }}>
                     <PlusIcon />
-                    New Advertiser
+                    <span>New Advertiser</span>
                 </Link>
             </div>
 

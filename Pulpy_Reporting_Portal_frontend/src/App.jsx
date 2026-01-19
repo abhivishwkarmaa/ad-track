@@ -27,6 +27,7 @@ import EditTenant from './pages/Tenant/EditTenant';
 import TenantDetail from './pages/Tenant/TenantDetail';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { ThemeProvider } from './context/ThemeContext';
 import './App.css';
 
 function PrivateRoute({ children }) {
@@ -116,11 +117,13 @@ function AppRoutes() {
 function App() {
   return (
     <Router>
-      <AuthProvider>
-        <ToastProvider>
-          <AppRoutes />
-        </ToastProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <AppRoutes />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </Router>
   );
 }

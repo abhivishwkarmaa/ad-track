@@ -1,9 +1,14 @@
 .login-page {
     min-height: 100vh;
     display: flex;
-    background: linear-gradient(135deg, #1a1f2e 0%, #2d3748 50%, #1a202c 100%);
+    background: linear-gradient(135deg, #1A273D 0%, #222F45 50%, #25354d 100%);
     position: relative;
     overflow: hidden;
+    transition: background var(--transition-normal);
+}
+
+[data-theme="light"] .login-page {
+    background: linear-gradient(135deg, #F4F4F4 0%, #F7F7F6 50%, #E9E9E9 100%);
 }
 
 .login-page::before {
@@ -13,7 +18,7 @@
     left: -50%;
     width: 200%;
     height: 200%;
-    background: radial-gradient(circle, rgba(26, 188, 156, 0.1) 0%, transparent 50%);
+    background: radial-gradient(circle, rgba(27, 182, 184, 0.1) 0%, transparent 50%);
     animation: pulse 15s ease-in-out infinite;
 }
 
@@ -48,43 +53,63 @@
 .login-logo {
     width: 80px;
     height: 80px;
-    background: linear-gradient(135deg, #1abc9c, #16a085);
     border-radius: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 36px;
-    font-weight: 700;
-    color: white;
     margin: 0 auto 20px;
-    box-shadow: 0 10px 40px rgba(26, 188, 156, 0.3);
+    overflow: visible;
+    background: transparent;
+    position: relative;
+    padding: 4px;
+}
+
+.login-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    filter: brightness(1.05) contrast(1.05);
+}
+
+.login-logo-text {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--primary-color);
+    letter-spacing: -1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
 }
 
 .login-brand h1 {
-    color: white;
-    font-size: 32px;
-    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 36px;
+    font-weight: 800;
     margin-bottom: 8px;
+    letter-spacing: -0.02em;
 }
 
 .login-brand p {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-secondary);
     font-size: 16px;
 }
 
 .login-card {
     width: 100%;
     max-width: 420px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--bg-secondary);
     backdrop-filter: blur(20px);
     border-radius: 24px;
     padding: 40px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border-light);
     box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
 }
 
 .login-title {
-    color: white;
+    color: var(--text-primary);
     font-size: 24px;
     font-weight: 600;
     margin-bottom: 8px;
@@ -92,7 +117,7 @@
 }
 
 .login-subtitle {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-secondary);
     font-size: 14px;
     text-align: center;
     margin-bottom: 32px;
@@ -103,24 +128,24 @@
 }
 
 .login-form .form-label {
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--text-primary);
 }
 
 .login-form .form-control {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: white;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
     padding: 14px 16px;
     font-size: 15px;
 }
 
 .login-form .form-control::placeholder {
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--text-muted);
 }
 
 .login-form .form-control:focus {
-    border-color: #1abc9c;
-    box-shadow: 0 0 0 3px rgba(26, 188, 156, 0.2);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
     background: rgba(255, 255, 255, 0.08);
 }
 
@@ -135,7 +160,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
     font-size: 14px;
     cursor: pointer;
 }
@@ -143,18 +168,18 @@
 .login-remember input {
     width: 18px;
     height: 18px;
-    accent-color: #1abc9c;
+    accent-color: var(--primary-color);
 }
 
 .login-forgot {
-    color: #1abc9c;
+    color: var(--primary-light);
     font-size: 14px;
     text-decoration: none;
     transition: var(--transition-fast);
 }
 
 .login-forgot:hover {
-    color: #16a085;
+    color: var(--primary-color);
     text-decoration: underline;
 }
 
@@ -163,19 +188,20 @@
     padding: 16px;
     font-size: 16px;
     font-weight: 600;
-    background: linear-gradient(135deg, #1abc9c, #16a085);
-    color: white;
+    background: var(--primary-gradient);
+    color: #0a0a0a;
     border: none;
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: var(--transition-fast);
     position: relative;
     overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 217, 255, 0.4);
 }
 
 .login-btn:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 30px rgba(26, 188, 156, 0.4);
+    box-shadow: 0 10px 30px rgba(0, 217, 255, 0.6);
 }
 
 .login-btn:active {
@@ -217,13 +243,13 @@
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 12px;
-    color: #1abc9c;
+    color: var(--primary-light);
 }
 
 .login-right {
     flex: 1;
     display: none;
-    background: linear-gradient(135deg, rgba(26, 188, 156, 0.2), rgba(52, 152, 219, 0.2));
+    background: linear-gradient(135deg, rgba(0, 217, 255, 0.1), rgba(0, 184, 212, 0.1));
     align-items: center;
     justify-content: center;
     padding: 40px;
@@ -238,7 +264,7 @@
 .login-illustration {
     max-width: 500px;
     text-align: center;
-    color: white;
+    color: var(--text-primary);
 }
 
 .login-illustration h2 {
@@ -248,7 +274,7 @@
 
 .login-illustration p {
     font-size: 16px;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
     line-height: 1.8;
 }
 
@@ -269,7 +295,7 @@
 .login-feature-icon {
     width: 48px;
     height: 48px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--bg-secondary);
     border-radius: 12px;
     display: flex;
     align-items: center;
@@ -280,7 +306,7 @@
 .login-feature-icon svg {
     width: 24px;
     height: 24px;
-    color: #1abc9c;
+    color: var(--primary-color);
 }
 
 .login-feature h4 {
@@ -290,5 +316,87 @@
 
 .login-feature p {
     font-size: 14px;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-secondary);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .login-page {
+        flex-direction: column;
+    }
+
+    .login-left {
+        padding: 24px 20px;
+        min-height: 100vh;
+    }
+
+    .login-brand h1 {
+        font-size: 24px;
+    }
+
+    .login-brand p {
+        font-size: 14px;
+    }
+
+    .login-logo {
+        width: 60px;
+        height: 60px;
+        font-size: 28px;
+    }
+
+    .login-card {
+        padding: 24px 20px;
+        border-radius: 16px;
+    }
+
+    .login-title {
+        font-size: 20px;
+    }
+
+    .login-subtitle {
+        font-size: 13px;
+        margin-bottom: 24px;
+    }
+
+    .login-form .form-group {
+        margin-bottom: 20px;
+    }
+
+    .login-form .form-control {
+        padding: 12px 14px;
+        font-size: 14px;
+    }
+
+    .login-options {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .login-btn {
+        padding: 14px;
+        font-size: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .login-left {
+        padding: 20px 16px;
+    }
+
+    .login-card {
+        padding: 20px 16px;
+    }
+
+    .login-brand h1 {
+        font-size: 20px;
+    }
+
+    .login-logo {
+        width: 50px;
+        height: 50px;
+        font-size: 24px;
+        margin-bottom: 16px;
+    }
 }

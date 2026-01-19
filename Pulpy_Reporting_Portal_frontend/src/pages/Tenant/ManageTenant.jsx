@@ -189,9 +189,9 @@ function ManageTenant() {
             <div className="tenant-header">
                 <h1>Tenant Management</h1>
                 <div className="tenant-actions">
-                    <Link to="/tenant/new" className="tenant-action-btn primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#6366f1', color: 'white', borderRadius: '8px', fontWeight: '500' }}>
+                    <Link to="/tenant/new" className="btn btn-primary" style={{ whiteSpace: 'nowrap', minWidth: '140px', justifyContent: 'center', textDecoration: 'none' }}>
                         <PlusIcon />
-                        Create Tenant
+                        <span>Create Tenant</span>
                     </Link>
                 </div>
             </div>

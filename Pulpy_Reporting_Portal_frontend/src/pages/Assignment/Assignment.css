@@ -11,6 +11,17 @@
     gap: 16px;
 }
 
+.assignment-header .btn {
+    flex-shrink: 0;
+    max-width: 200px;
+}
+
+.assignment-header .btn svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
 .assignment-header-left h1 {
     font-size: 24px;
     font-weight: 700;
@@ -51,7 +62,7 @@
 .assignment-search input:focus {
     outline: none;
     border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.15);
+    box-shadow: 0 0 0 3px rgba(27, 182, 184, 0.15);
 }
 
 .assignment-search svg {
@@ -97,7 +108,7 @@
 }
 
 .assignment-table tbody tr:hover {
-    background: rgba(33, 150, 243, 0.03);
+    background: rgba(27, 182, 184, 0.03);
 }
 
 .assignment-table tbody tr:last-child td {
@@ -224,22 +235,115 @@
 }
 
 @media (max-width: 768px) {
-    .assignment-form-row.two-col {
-        grid-template-columns: 1fr;
+    .assignment-page {
+        padding: 16px;
     }
 
     .assignment-header {
         flex-direction: column;
         align-items: flex-start;
+        gap: 16px;
+    }
+
+    .assignment-header-left h1 {
+        font-size: 20px;
+    }
+
+    .assignment-header .btn {
+        width: 100%;
+        min-width: auto;
+        max-width: 100%;
+        justify-content: center;
+        padding: 10px 16px;
+        font-size: 13px;
+        flex-shrink: 1;
+    }
+
+    .assignment-header .btn svg {
+        width: 16px;
+        height: 16px;
     }
 
     .assignment-filters {
         flex-direction: column;
         align-items: stretch;
+        gap: 12px;
     }
 
     .assignment-search {
         max-width: none;
+        min-width: auto;
+    }
+
+    .assignment-filter-select {
+        width: 100%;
+        min-width: auto;
+    }
+
+    .assignment-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .assignment-table {
+        min-width: 900px;
+        font-size: 13px;
+    }
+
+    .assignment-table th,
+    .assignment-table td {
+        padding: 12px 14px;
+    }
+
+    .assignment-table th {
+        font-size: 11px;
+    }
+
+    .assignment-form-row.two-col {
+        grid-template-columns: 1fr;
+    }
+
+    .assignment-form-container {
+        padding: 20px;
+    }
+
+    .assignment-actions {
+        gap: 4px;
+    }
+
+    .assignment-action-btn {
+        width: 32px;
+        height: 32px;
+    }
+}
+
+@media (max-width: 480px) {
+    .assignment-page {
+        padding: 12px;
+    }
+
+    .assignment-header-left h1 {
+        font-size: 18px;
+    }
+
+    .assignment-header .btn {
+        padding: 8px 14px;
+        font-size: 12px;
+    }
+
+    .assignment-header .btn svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .assignment-table {
+        min-width: 800px;
+        font-size: 12px;
+    }
+
+    .assignment-table th,
+    .assignment-table td {
+        padding: 10px 12px;
     }
 }
 

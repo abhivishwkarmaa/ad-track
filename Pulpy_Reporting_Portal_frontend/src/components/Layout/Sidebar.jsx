@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import logoImage from '../../assets/logo.png';
 import './Sidebar.css';
 
 // Icons as SVG components
@@ -237,11 +238,18 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
 
     return (
         <>
+            {/* Overlay only for desktop side drawer, not for mobile top nav */}
             <div className={`sidebar-overlay ${mobileOpen ? 'show' : ''}`} onClick={onCloseMobile}></div>
             <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
                 <div className="sidebar-header">
-                    <div className="sidebar-logo">P</div>
-                    <span className="sidebar-brand">Pulpy Reporting Portal</span>
+                    <div className="sidebar-logo">
+                        {logoImage ? (
+                            <img src={logoImage} alt="Track MyAds Logo" />
+                        ) : (
+                            <span className="sidebar-logo-text">TM</span>
+                        )}
+                    </div>
+                    <span className="sidebar-brand">Track MyAds</span>
                 </div>
 
                 <nav className="sidebar-nav">
