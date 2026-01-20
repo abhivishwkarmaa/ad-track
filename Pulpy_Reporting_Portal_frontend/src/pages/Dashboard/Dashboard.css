@@ -516,12 +516,13 @@
 
 .dashboard-error {
     color: var(--text-primary);
+    text-align: center;
 }
 
 .dashboard-error p {
     color: #ff4444;
     font-size: 14px;
-    margin: 0;
+    margin: 8px 0;
 }
 
 .dashboard-error button {
@@ -534,6 +535,7 @@
     font-size: 14px;
     font-weight: 500;
     transition: var(--transition-fast);
+    margin-top: 16px;
 }
 
 .dashboard-error button:hover {

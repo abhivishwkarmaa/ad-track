@@ -88,7 +88,6 @@ function Dashboard() {
     const [topOffers, setTopOffers] = useState([]);
     const [performanceData, setPerformanceData] = useState([]);
     const [topAffiliates, setTopAffiliates] = useState([]);
-    const [infoCards, setInfoCards] = useState(null);
     const [topCountries, setTopCountries] = useState([]);
     const [summaryData, setSummaryData] = useState(null);
     const [detailedData, setDetailedData] = useState(null);
@@ -99,7 +98,6 @@ function Dashboard() {
     const [topOffersLoading, setTopOffersLoading] = useState(false);
     const [performanceLoading, setPerformanceLoading] = useState(false);
     const [topAffiliatesLoading, setTopAffiliatesLoading] = useState(false);
-    const [infoCardsLoading, setInfoCardsLoading] = useState(false);
     const [topCountriesLoading, setTopCountriesLoading] = useState(false);
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryError, setSummaryError] = useState(null);
@@ -187,20 +185,6 @@ function Dashboard() {
                 console.error('Top affiliates fetch error:', err);
             } finally {
                 setTopAffiliatesLoading(false);
-            }
-        };
-
-        const fetchInfoCards = async () => {
-            try {
-                setInfoCardsLoading(true);
-                const response = await dashboardAPI.getInfoCards();
-                if (response.success) {
-                    setInfoCards(response.data);
-                }
-            } catch (err) {
-                console.error('Info cards fetch error:', err);
-            } finally {
-                setInfoCardsLoading(false);
             }
         };
 
@@ -324,7 +308,6 @@ function Dashboard() {
         fetchDashboardCards();
         fetchTopOffers();
         fetchTopAffiliates();
-        fetchInfoCards();
         fetchTopCountries();
         fetchSummaryData();
         fetchDetailedData();
@@ -829,53 +812,6 @@ function Dashboard() {
                     )}
                 </div>
 
-                {/* Info Cards */}
-                <div className="dashboard-card info-cards-card">
-                    <div className="card-header">
-                        <h3>Information</h3>
-                    </div>
-                    {infoCardsLoading ? (
-                        <div className="loading-spinner">Loading info...</div>
-                    ) : infoCards ? (
-                        <div style={{ padding: '16px' }}>
-                            <div className="summary-grid">
-                                <div className="summary-item">
-                                    <span className="summary-label">Active Offers</span>
-                                    <span className="summary-value">{infoCards.active_offers || 0}</span>
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-label">Offer Requests</span>
-                                    <span className="summary-value">{infoCards.offer_requests || 0}</span>
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-label">Pending Affiliates</span>
-                                    <span className="summary-value">{infoCards.pending_affiliates || 0}</span>
-                                </div>
-                            </div>
-                            {infoCards.account_manager && (
-                                <div style={{ marginTop: '16px', padding: '12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
-                                    <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>Account Manager</div>
-                                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        <div><strong>Name:</strong> {infoCards.account_manager.name || 'N/A'}</div>
-                                        {infoCards.account_manager.email && <div><strong>Email:</strong> {infoCards.account_manager.email}</div>}
-                                        {infoCards.account_manager.phone && <div><strong>Phone:</strong> {infoCards.account_manager.phone}</div>}
-                                        {infoCards.account_manager.telegram && <div><strong>Telegram:</strong> {infoCards.account_manager.telegram}</div>}
-                                        {infoCards.account_manager.skype && <div><strong>Skype:</strong> {infoCards.account_manager.skype}</div>}
-                                    </div>
-                                </div>
-                            )}
-                            {infoCards.signup_link && (
-                                <div style={{ marginTop: '12px' }}>
-                                    <a href={infoCards.signup_link} target="_blank" rel="noopener noreferrer" className="view-all" style={{ fontSize: '12px' }}>
-                                        Signup Link →
-                                    </a>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="no-data">No info available</div>
-                    )}
-                </div>
 
                 {/* Top Countries */}
                 <div className="dashboard-card top-countries-card">
