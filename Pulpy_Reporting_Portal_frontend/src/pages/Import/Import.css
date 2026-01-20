@@ -244,3 +244,166 @@
     width: 18px;
     height: 18px;
 }
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+    .import-options {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .import-header h1 {
+        font-size: 20px;
+    }
+
+    .import-header p {
+        font-size: 13px;
+    }
+
+    .import-container {
+        padding: 20px 16px;
+        border-radius: var(--radius-md);
+    }
+
+    .import-form-header {
+        margin-bottom: 24px;
+        padding-bottom: 16px;
+    }
+
+    .import-form-header h2 {
+        font-size: 18px;
+    }
+
+    .import-section {
+        margin-bottom: 24px;
+    }
+
+    .import-section-title {
+        font-size: 15px;
+        margin-bottom: 16px;
+    }
+
+    .import-dropzone {
+        padding: 40px 20px;
+    }
+
+    .import-dropzone-icon {
+        width: 52px;
+        height: 52px;
+        margin-bottom: 16px;
+    }
+
+    .import-dropzone-icon svg {
+        width: 28px;
+        height: 28px;
+    }
+
+    .import-dropzone h3 {
+        font-size: 16px;
+    }
+
+    .import-dropzone p {
+        font-size: 13px;
+    }
+
+    .import-file-info {
+        gap: 12px;
+        padding: 12px;
+    }
+
+    .import-file-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .import-file-icon svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .import-options {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .import-option {
+        padding: 12px;
+    }
+
+    .import-actions {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .import-actions .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .import-template-link {
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .import-header h1 {
+        font-size: 18px;
+    }
+
+    .import-container {
+        padding: 16px 12px;
+    }
+
+    .import-form-header h2 {
+        font-size: 16px;
+    }
+
+    .import-dropzone {
+        padding: 30px 16px;
+    }
+
+    .import-dropzone-icon {
+        width: 48px;
+        height: 48px;
+    }
+
+    .import-dropzone-icon svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .import-dropzone h3 {
+        font-size: 15px;
+    }
+
+    .import-dropzone p {
+        font-size: 12px;
+    }
+
+    .import-file-info {
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .import-file-name {
+        font-size: 13px;
+    }
+
+    .import-file-size {
+        font-size: 12px;
+    }
+
+    .import-option {
+        padding: 10px;
+    }
+
+    .import-option-label strong {
+        font-size: 13px;
+    }
+
+    .import-option-label span {
+        font-size: 12px;
+    }
+}

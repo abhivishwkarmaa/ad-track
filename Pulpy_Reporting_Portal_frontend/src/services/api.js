@@ -122,10 +122,6 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/top-affiliates?${queryString}`);
     },
-    // Info cards data
-    getInfoCards: async () => {
-        return apiRequest('/api/admin/reports/dashboard/info-cards');
-    },
     // Top countries
     getTopCountries: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
@@ -339,6 +335,36 @@ export const tenantsAPI = {
     },
 };
 
+// Contact Submissions API (Super Admin Only - Admin Subdomain Only)
+export const contactSubmissionsAPI = {
+    // Get all contact submissions with pagination and filters
+    getContactSubmissions: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/contact-submissions?${queryString}`);
+    },
+    // Get single contact submission
+    getContactSubmission: async (id) => {
+        return apiRequest(`/api/admin/contact-submissions/${id}`);
+    },
+    // Update contact submission status
+    updateContactStatus: async (id, status) => {
+        return apiRequest(`/api/admin/contact-submissions/${id}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status }),
+        });
+    },
+    // Delete contact submission
+    deleteContactSubmission: async (id) => {
+        return apiRequest(`/api/admin/contact-submissions/${id}`, {
+            method: 'DELETE',
+        });
+    },
+    // Get contact submissions statistics
+    getContactStats: async () => {
+        return apiRequest('/api/admin/contact-submissions/stats');
+    },
+};
+
 export default {
     authAPI,
     dashboardAPI,
@@ -347,5 +373,6 @@ export default {
     advertisersAPI,
     assignmentsAPI,
     tenantsAPI,
+    contactSubmissionsAPI,
 };
 

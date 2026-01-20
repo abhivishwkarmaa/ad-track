@@ -284,27 +284,7 @@ function ReportsExample() {
                 )}
             </section>
 
-            {/* Info Cards Section */}
-            <section className="section">
-                <h2>Information</h2>
-                {infoLoading && <div className="loading">Loading info...</div>}
-                {infoError && <div className="error">Error: {infoError}</div>}
-                {infoCards && (
-                    <div>
-                        <p>Active Offers: {infoCards.active_offers}</p>
-                        <p>Offer Requests: {infoCards.offer_requests}</p>
-                        <p>Pending Affiliates: {infoCards.pending_affiliates}</p>
-                        {infoCards.account_manager && (
-                            <div className="account-manager">
-                                <h4>Account Manager</h4>
-                                <p>Name: {infoCards.account_manager.name}</p>
-                                {infoCards.account_manager.email && <p>Email: {infoCards.account_manager.email}</p>}
-                                {infoCards.account_manager.phone && <p>Phone: {infoCards.account_manager.phone}</p>}
-                            </div>
-                        )}
-                    </div>
-                )}
-            </section>
+
 
             {/* Top Countries Section */}
             <section className="section">

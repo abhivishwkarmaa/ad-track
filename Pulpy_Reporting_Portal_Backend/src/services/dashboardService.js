@@ -128,7 +128,8 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(payout), 0) as payout
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? AND tenant_id = ?
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
+        AND status = 'approved' AND tenant_id = ?
         `,
         [dates.monthStart, tenantId]
       );
@@ -191,6 +192,7 @@ export class DashboardService {
           mtd: parseFloat(revenueMTD[0]?.revenue || 0),
           profit: parseFloat((revenueToday[0]?.revenue || 0) - (revenueToday[0]?.payout || 0)),
           payout: parseFloat(revenueToday[0]?.payout || 0),
+          payout_mtd: parseFloat(revenueMTD[0]?.payout || 0),
         },
         offers: {
           total: parseInt(offerStats[0]?.total || 0),
@@ -590,6 +592,109 @@ export class DashboardService {
         `, [tenantId]
       );
 
+      // Get impressions data (today, yesterday, MTD)
+      const [impressionsTodayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM impressions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.todayStart, tenantId]
+      );
+
+      const [impressionsYesterdayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM impressions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.yesterdayStart, tenantId]
+      );
+
+      const [impressionsMTDRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM impressions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? AND tenant_id = ?
+        `,
+        [dates.monthStart, tenantId]
+      );
+
+      // Get clicks today and yesterday for trend calculation
+      const [clicksTodayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM clicks
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.todayStart, tenantId]
+      );
+
+      const [clicksYesterdayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM clicks
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.yesterdayStart, tenantId]
+      );
+
+      const [clicksMTDRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM clicks
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? AND tenant_id = ?
+        `,
+        [dates.monthStart, tenantId]
+      );
+
+      // Get conversions today and yesterday
+      const [conversionsTodayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM conversions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.todayStart, tenantId]
+      );
+
+      const [conversionsYesterdayRows] = await pool.query(
+        `SELECT COUNT(*) as total
+        FROM conversions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ? AND tenant_id = ?
+        `,
+        [dates.yesterdayStart, tenantId]
+      );
+
+      // Calculate conversion rate
+      const clicksToday = parseInt(clicksTodayRows[0]?.total || 0);
+      const conversionsToday = parseInt(conversionsTodayRows[0]?.total || 0);
+      const conversionRate = clicksToday > 0 ? ((conversionsToday / clicksToday) * 100) : 0;
+
+      // Get payout today and yesterday
+      const [payoutTodayRows] = await pool.query(
+        `SELECT COALESCE(SUM(payout), 0) as payout
+        FROM conversions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?
+        AND status = 'approved' AND tenant_id = ?
+        `,
+        [dates.todayStart, tenantId]
+      );
+
+      const [payoutYesterdayRows] = await pool.query(
+        `SELECT COALESCE(SUM(payout), 0) as payout
+        FROM conversions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?
+        AND status = 'approved' AND tenant_id = ?
+        `,
+        [dates.yesterdayStart, tenantId]
+      );
+
+      // Get revenue MTD
+      const [revenueMTDRows] = await pool.query(
+        `SELECT 
+          COALESCE(SUM(amount), 0) as revenue,
+          COALESCE(SUM(payout), 0) as payout
+        FROM conversions
+        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ?
+        AND status = 'approved' AND tenant_id = ?
+        `,
+        [dates.monthStart, tenantId]
+      );
+
       return {
         offers: {
           total: parseInt(offerRows[0]?.total || 0),
@@ -606,25 +711,43 @@ export class DashboardService {
         clicks: {
           total: parseInt(clickRows[0]?.total || 0),
           unique: parseInt(clickRows[0]?.unique_clicks || 0),
+          today: parseInt(clicksTodayRows[0]?.total || 0),
+          yesterday: parseInt(clicksYesterdayRows[0]?.total || 0),
+          mtd: parseInt(clicksMTDRows[0]?.total || 0),
           label: 'TOTAL CLICKS',
           status_label: 'Unique'
         },
+        impressions: {
+          total: parseInt(impressionsTodayRows[0]?.total || 0),
+          today: parseInt(impressionsTodayRows[0]?.total || 0),
+          yesterday: parseInt(impressionsYesterdayRows[0]?.total || 0),
+          mtd: parseInt(impressionsMTDRows[0]?.total || 0),
+          label: 'IMPRESSIONS',
+          status_label: 'Total'
+        },
         conversions: {
           total: totalConversions,
+          today: parseInt(conversionsTodayRows[0]?.total || 0),
+          yesterday: parseInt(conversionsYesterdayRows[0]?.total || 0),
           approved: approvedConversions,
           pending: parseInt(conversionRows[0]?.pending || 0),
           rejected: parseInt(conversionRows[0]?.rejected || 0),
+          conversion_rate: conversionRate,
           approval_rate: `${approvalRate}%`,
           label: 'CONVERSIONS',
           status_label: `Approved +${approvalRate}%`
         },
         revenue: {
-          total: parseFloat(revenueRows[0]?.total_revenue || 0).toFixed(2),
-          payout: parseFloat(revenueRows[0]?.total_payout || 0).toFixed(2),
-          profit: (parseFloat(revenueRows[0]?.total_revenue || 0) - parseFloat(revenueRows[0]?.total_payout || 0)).toFixed(2),
-          today: revenueToday.toFixed(2),
-          yesterday: revenueYesterday.toFixed(2),
-          change: revenueChange.toFixed(2),
+          total: parseFloat(revenueRows[0]?.total_revenue || 0),
+          payout: parseFloat(revenueRows[0]?.total_payout || 0),
+          profit: (parseFloat(revenueRows[0]?.total_revenue || 0) - parseFloat(revenueRows[0]?.total_payout || 0)),
+          today: revenueToday,
+          yesterday: revenueYesterday,
+          mtd: parseFloat(revenueMTDRows[0]?.revenue || 0),
+          payout_today: parseFloat(payoutTodayRows[0]?.payout || 0),
+          payout_yesterday: parseFloat(payoutYesterdayRows[0]?.payout || 0),
+          payout_mtd: parseFloat(revenueMTDRows[0]?.payout || 0),
+          change: revenueChange,
           label: 'TOTAL REVENUE',
           status_label: `Up $${revenueChange.toFixed(2)}`
         },

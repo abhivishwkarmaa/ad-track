@@ -25,6 +25,7 @@ import ManageTenant from './pages/Tenant/ManageTenant';
 import NewTenant from './pages/Tenant/NewTenant';
 import EditTenant from './pages/Tenant/EditTenant';
 import TenantDetail from './pages/Tenant/TenantDetail';
+import ManageContactSubmissions from './pages/ContactSubmissions/ManageContactSubmissions';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -102,6 +103,7 @@ function AppRoutes() {
             <Route path="edit/:id" element={<EditTenant />} />
             <Route path="detail/:id" element={<TenantDetail />} />
           </Route>
+          <Route path="contact-submissions" element={<ManageContactSubmissions />} />
         </Route>
 
         {/* Shared Routes */}

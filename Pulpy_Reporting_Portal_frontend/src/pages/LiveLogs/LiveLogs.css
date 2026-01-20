@@ -129,3 +129,157 @@
     background: #ffebee;
     color: #c62828;
 }
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+    .logs-page {
+        padding: 16px;
+    }
+
+    .logs-controls {
+        padding: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .logs-page {
+        padding: 12px;
+    }
+
+    .logs-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .logs-header h1 {
+        font-size: 20px;
+    }
+
+    .logs-controls {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .control-group {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .control-group select,
+    .control-group label {
+        width: 100%;
+    }
+
+    .control-group select {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    .tab-group {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .tab-btn {
+        flex: 1;
+        text-align: center;
+        padding: 10px 8px;
+        font-size: 13px;
+    }
+
+    .logs-table-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: var(--radius-md);
+    }
+
+    .logs-table {
+        min-width: 800px;
+        font-size: 12px;
+    }
+
+    .logs-table th,
+    .logs-table td {
+        padding: 10px;
+        font-size: 12px;
+    }
+
+    .monospace {
+        font-size: 11px;
+    }
+
+    .badge {
+        padding: 2px 6px;
+        font-size: 10px;
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
+        padding: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .logs-page {
+        padding: 8px;
+    }
+
+    .logs-header {
+        gap: 8px;
+    }
+
+    .logs-header h1 {
+        font-size: 18px;
+    }
+
+    .logs-controls {
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .control-group {
+        gap: 4px;
+    }
+
+    .control-group select {
+        padding: 8px;
+        font-size: 13px;
+    }
+
+    .tab-btn {
+        padding: 8px 6px;
+        font-size: 12px;
+    }
+
+    .logs-table {
+        min-width: 600px;
+        font-size: 11px;
+    }
+
+    .logs-table th,
+    .logs-table td {
+        padding: 8px;
+        font-size: 11px;
+    }
+
+    .monospace {
+        font-size: 10px;
+    }
+
+    .badge {
+        padding: 1px 5px;
+        font-size: 9px;
+    }
+
+    .btn {
+        padding: 8px;
+        font-size: 12px;
+    }
+}

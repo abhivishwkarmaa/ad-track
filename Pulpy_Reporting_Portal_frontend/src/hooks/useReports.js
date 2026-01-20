@@ -185,36 +185,36 @@ export function useTopAffiliates(params = {}) {
  * Custom hook for fetching info cards
  * @returns {Object} - { data, loading, error, refetch }
  */
-export function useInfoCards() {
-    const [data, setData] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
+// export function useInfoCards() {
+//     const [data, setData] = useState(null);
+//     const [loading, setLoading] = useState(false);
+//     const [error, setError] = useState(null);
 
-    const fetchData = async () => {
-        setLoading(true);
-        setError(null);
+//     const fetchData = async () => {
+//         setLoading(true);
+//         setError(null);
 
-        try {
-            const response = await dashboardAPI.getInfoCards();
+//         try {
+//             const response = await dashboardAPI.getInfoCards();
 
-            if (response.success) {
-                setData(response.data);
-            } else {
-                setError('Failed to fetch info cards');
-            }
-        } catch (err) {
-            setError(err.message || 'An error occurred');
-        } finally {
-            setLoading(false);
-        }
-    };
+//             if (response.success) {
+//                 setData(response.data);
+//             } else {
+//                 setError('Failed to fetch info cards');
+//             }
+//         } catch (err) {
+//             setError(err.message || 'An error occurred');
+//         } finally {
+//             setLoading(false);
+//         }
+//     };
 
-    useEffect(() => {
-        fetchData();
-    }, []);
+//     useEffect(() => {
+//         fetchData();
+//     }, []);
 
-    return { data, loading, error, refetch: fetchData };
-}
+//     return { data, loading, error, refetch: fetchData };
+// }
 
 /**
  * Custom hook for fetching top countries
@@ -404,7 +404,6 @@ export function useAllDashboardData() {
                 dashboardAPI.getTopOffers(),
                 dashboardAPI.getPerformance(),
                 dashboardAPI.getTopAffiliates(),
-                dashboardAPI.getInfoCards(),
                 dashboardAPI.getTopCountries()
             ]);
 

@@ -95,31 +95,38 @@
 }
 
 .nav-section-title {
-    padding: 8px 20px;
+    padding: 12px 20px 8px 20px;
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 1.2px;
     color: var(--text-muted);
     white-space: nowrap;
+    margin-bottom: 4px;
 }
 
 .sidebar.collapsed .nav-section-title {
     opacity: 0;
     height: 0;
     padding: 0;
+    margin: 0;
 }
 
 .nav-item {
     display: flex;
     align-items: center;
     padding: 12px 20px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     text-decoration: none;
     transition: var(--transition-fast);
     cursor: pointer;
-    gap: 14px;
+    gap: 12px;
     position: relative;
     white-space: nowrap;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
 }
 
 .nav-item:hover {
@@ -128,14 +135,13 @@
 }
 
 .nav-item.active {
-    background: linear-gradient(90deg, rgba(27, 182, 184, 0.2) 0%, transparent 100%);
+    background: var(--bg-sidebar-active);
     color: var(--primary-color);
-    border-left: 3px solid var(--primary-color);
 }
 
 .nav-item-icon {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -145,6 +151,7 @@
 .nav-item-icon svg {
     width: 20px;
     height: 20px;
+    stroke-width: 2;
 }
 
 .nav-item-text {
@@ -152,6 +159,7 @@
     font-size: 14px;
     font-weight: 500;
     transition: opacity var(--transition-normal);
+    color: inherit;
 }
 
 .sidebar.collapsed .nav-item-text {
@@ -159,52 +167,6 @@
     width: 0;
 }
 
-.nav-item-arrow {
-    transition: transform var(--transition-fast);
-}
-
-.nav-item-arrow.open {
-    transform: rotate(90deg);
-}
-
-.sidebar.collapsed .nav-item-arrow {
-    opacity: 0;
-}
-
-.nav-submenu {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height var(--transition-normal);
-    background: rgba(0, 0, 0, 0.15);
-}
-
-.nav-submenu.open {
-    max-height: 500px;
-}
-
-.sidebar.collapsed .nav-submenu {
-    display: none;
-}
-
-.nav-submenu .nav-item {
-    padding-left: 56px;
-    font-size: 13px;
-}
-
-.nav-submenu .nav-item::before {
-    content: '';
-    position: absolute;
-    left: 36px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--text-muted);
-}
-
-.nav-submenu .nav-item:hover::before,
-.nav-submenu .nav-item.active::before {
-    background: var(--primary-color);
-}
 
 .sidebar-footer {
     padding: 16px 20px;

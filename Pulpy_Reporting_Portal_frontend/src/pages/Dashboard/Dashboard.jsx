@@ -1,43 +1,49 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
-import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { dashboardAPI } from '../../services/api';
+import { useToast } from '../../context/ToastContext';
+import ErrorFallback from '../../components/ErrorBoundary/ErrorFallback';
 import './Dashboard.css';
 
 // Icons
-const OfferIcon = () => (
+const CheckIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
-        <line x1="7" y1="7" x2="7.01" y2="7" />
+        <polyline points="20 6 9 17 4 12" />
     </svg>
 );
 
-const AffiliateIcon = () => (
+const ClockIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 00-3-3.87" />
-        <path d="M16 3.13a4 4 0 010 7.75" />
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
     </svg>
 );
 
-const AdvertiserIcon = () => (
+const ArrowDownIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-        <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16" />
+        <polyline points="6 9 12 15 18 9" />
+    </svg>
+);
+
+const ArrowUpIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="18 15 12 9 6 15" />
+    </svg>
+);
+
+const ImpressionsIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
     </svg>
 );
 
 const ClickIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-    </svg>
-);
-
-const ConversionIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-        <polyline points="17 6 23 6 23 12" />
     </svg>
 );
 
@@ -48,339 +54,185 @@ const RevenueIcon = () => (
     </svg>
 );
 
-const PlusIcon = () => (
+const PayoutIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <line x1="12" y1="5" x2="12" y2="19" />
-        <line x1="5" y1="12" x2="19" y2="12" />
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 6v6l4 2" />
     </svg>
 );
 
-const ArrowUpIcon = () => (
+const ProfitIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="18 15 12 9 6 15" />
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
     </svg>
 );
 
-const CalendarIcon = () => (
+const ConversionIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-        <line x1="16" y1="2" x2="16" y2="6" />
-        <line x1="8" y1="2" x2="8" y2="6" />
-        <line x1="3" y1="10" x2="21" y2="10" />
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
     </svg>
 );
 
-const ListIcon = () => (
+const BookIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <line x1="8" y1="6" x2="21" y2="6" />
-        <line x1="8" y1="12" x2="21" y2="12" />
-        <line x1="8" y1="18" x2="21" y2="18" />
-        <line x1="3" y1="6" x2="3.01" y2="6" />
-        <line x1="3" y1="12" x2="3.01" y2="12" />
-        <line x1="3" y1="18" x2="3.01" y2="18" />
+        <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
     </svg>
 );
+
+const DocumentIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+    </svg>
+);
+
+const UserIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+
+const LinkIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+    </svg>
+);
+
+const CopyIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+    </svg>
+);
+
+const RefreshIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="23 4 23 10 17 10" />
+        <polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0114.85 3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+    </svg>
+);
+
+const COLORS = ['#E9A248', '#1BB6B8', '#A85D5D', '#1A273D', '#9BA3AC', '#F4F4F4'];
 
 function Dashboard() {
     const { user } = useAuth();
-    const [dashboardData, setDashboardData] = useState(null);
-    const [dashboardCards, setDashboardCards] = useState(null); // New: Dashboard cards data
+    const toast = useToast();
+    const [dashboardCards, setDashboardCards] = useState(null);
     const [topOffers, setTopOffers] = useState([]);
     const [performanceData, setPerformanceData] = useState([]);
     const [topAffiliates, setTopAffiliates] = useState([]);
-    const [infoCards, setInfoCards] = useState(null);
     const [topCountries, setTopCountries] = useState([]);
-    const [summaryData, setSummaryData] = useState(null);
-    const [detailedData, setDetailedData] = useState(null);
-    const [publisherData, setPublisherData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [cardsLoading, setCardsLoading] = useState(false); // New: Cards loading state
-    const [topOffersLoading, setTopOffersLoading] = useState(false);
-    const [performanceLoading, setPerformanceLoading] = useState(false);
-    const [topAffiliatesLoading, setTopAffiliatesLoading] = useState(false);
-    const [infoCardsLoading, setInfoCardsLoading] = useState(false);
-    const [topCountriesLoading, setTopCountriesLoading] = useState(false);
-    const [summaryLoading, setSummaryLoading] = useState(false);
-    const [summaryError, setSummaryError] = useState(null);
-    const [detailedLoading, setDetailedLoading] = useState(false);
-    const [detailedError, setDetailedError] = useState(null);
-    const [publisherLoading, setPublisherLoading] = useState(false);
-    const [publisherError, setPublisherError] = useState(null);
-    const [offersData, setOffersData] = useState(null);
-    const [offersLoading, setOffersLoading] = useState(false);
-    const [offersError, setOffersError] = useState(null);
-    const [affiliatesData, setAffiliatesData] = useState(null);
-    const [affiliatesLoading, setAffiliatesLoading] = useState(false);
-    const [affiliatesError, setAffiliatesError] = useState(null);
+    const [dateFilter, setDateFilter] = useState('today');
+    const [topOffersTab, setTopOffersTab] = useState('offers');
 
-
-    // Fetch dashboard data
+    // Fetch all dashboard data
     useEffect(() => {
-        const fetchDashboardData = async () => {
+        const fetchAllData = async () => {
             try {
                 setLoading(true);
                 setError(null);
-                const response = await dashboardAPI.getDashboard();
-                if (response.success) {
-                    setDashboardData(response.data);
-                } else {
-                    setError('Failed to load dashboard data');
-                }
+                const [cardsRes, offersRes, performanceRes, affiliatesRes, countriesRes] = await Promise.all([
+                    dashboardAPI.getDashboardCards(),
+                    dashboardAPI.getTopOffers({ limit: 10 }),
+                    dashboardAPI.getPerformance({ date_from: getDateFromFilter('today'), group_by: 'day' }),
+                    dashboardAPI.getTopAffiliates({ limit: 10 }),
+                    dashboardAPI.getTopCountries({ limit: 10 })
+                ]);
+
+                if (cardsRes.success) setDashboardCards(cardsRes.data);
+                if (offersRes.success) setTopOffers(offersRes.data || []);
+                if (performanceRes.success) setPerformanceData(performanceRes.data || []);
+                if (affiliatesRes.success) setTopAffiliates(affiliatesRes.data || []);
+                if (countriesRes.success) setTopCountries(countriesRes.data || []);
             } catch (err) {
                 console.error('Dashboard fetch error:', err);
-                setError(err.message || 'Failed to load dashboard data');
+                
+                // Check if it's an auth/permission error
+                const errorMessage = err?.message || err?.toString() || '';
+                const isAuthError = errorMessage.includes('subdomain') || 
+                                   errorMessage.includes('Unauthorized') || 
+                                   errorMessage.includes('Forbidden') || 
+                                   errorMessage.includes('suspended') ||
+                                   errorMessage.includes('expired') ||
+                                   errorMessage.includes('401') ||
+                                   errorMessage.includes('403');
+                
+                if (isAuthError) {
+                    // Show error fallback for auth errors
+                    setError(err);
+                } else {
+                    // Show toast for other errors
+                    toast.error('Failed to load dashboard data');
+                }
             } finally {
                 setLoading(false);
             }
         };
 
-        // New: Fetch dashboard cards (optimized endpoint for card data)
-        const fetchDashboardCards = async () => {
-            try {
-                setCardsLoading(true);
-                const response = await dashboardAPI.getDashboardCards();
-                if (response.success) {
-                    setDashboardCards(response.data);
-                }
-            } catch (err) {
-                console.error('Dashboard cards fetch error:', err);
-            } finally {
-                setCardsLoading(false);
-            }
-        };
-
-        const fetchTopOffers = async () => {
-            try {
-                setTopOffersLoading(true);
-                const response = await dashboardAPI.getTopOffers();
-                if (response.success) {
-                    setTopOffers(response.data || []);
-                }
-            } catch (err) {
-                console.error('Top offers fetch error:', err);
-            } finally {
-                setTopOffersLoading(false);
-            }
-        };
-
-        const fetchPerformance = async () => {
-            try {
-                setPerformanceLoading(true);
-                const response = await dashboardAPI.getPerformance();
-                if (response.success) {
-                    setPerformanceData(response.data || []);
-                }
-            } catch (err) {
-                console.error('Performance fetch error:', err);
-            } finally {
-                setPerformanceLoading(false);
-            }
-        };
-
-        const fetchTopAffiliates = async () => {
-            try {
-                setTopAffiliatesLoading(true);
-                const response = await dashboardAPI.getTopAffiliates();
-                if (response.success) {
-                    setTopAffiliates(response.data || []);
-                }
-            } catch (err) {
-                console.error('Top affiliates fetch error:', err);
-            } finally {
-                setTopAffiliatesLoading(false);
-            }
-        };
-
-        const fetchInfoCards = async () => {
-            try {
-                setInfoCardsLoading(true);
-                const response = await dashboardAPI.getInfoCards();
-                if (response.success) {
-                    setInfoCards(response.data);
-                }
-            } catch (err) {
-                console.error('Info cards fetch error:', err);
-            } finally {
-                setInfoCardsLoading(false);
-            }
-        };
-
-        const fetchTopCountries = async () => {
-            try {
-                setTopCountriesLoading(true);
-                const response = await dashboardAPI.getTopCountries();
-                if (response.success) {
-                    setTopCountries(response.data || []);
-                }
-            } catch (err) {
-                console.error('Top countries fetch error:', err);
-            } finally {
-                setTopCountriesLoading(false);
-            }
-        };
-
-        const fetchSummaryData = async () => {
-            try {
-                setSummaryLoading(true);
-                setSummaryError(null);
-                setSummaryData(null); // Clear previous data to ensure fresh fetch
-                const response = await dashboardAPI.getSummary();
-                if (response.success) {
-                    setSummaryData(response.data);
-                } else {
-                    setSummaryError('Failed to load summary data');
-                }
-            } catch (err) {
-                console.error('Summary fetch error:', err);
-                setSummaryError(err.message || 'Failed to load summary data');
-            } finally {
-                setSummaryLoading(false);
-            }
-        };
-
-        const fetchDetailedData = async () => {
-            try {
-                setDetailedLoading(true);
-                setDetailedError(null);
-                const response = await dashboardAPI.getDetailed();
-                if (response.success) {
-                    setDetailedData(response.data);
-                } else {
-                    setDetailedError('Failed to load activity data');
-                }
-            } catch (err) {
-                console.error('Detailed fetch error:', err);
-                setDetailedError(err.message || 'Failed to load activity data');
-            } finally {
-                setDetailedLoading(false);
-            }
-        };
-
-        const fetchPublisherData = async () => {
-            try {
-                setPublisherLoading(true);
-                setPublisherError(null);
-                const response = await dashboardAPI.getPublisherConversions();
-                if (response.success) {
-                    setPublisherData(response.data);
-                } else {
-                    setPublisherError('Failed to load publisher data');
-                }
-            } catch (err) {
-                console.error('Publisher fetch error:', err);
-                setPublisherError(err.message || 'Failed to load publisher data');
-            } finally {
-                setPublisherLoading(false);
-            }
-        };
-
-        const fetchOffersData = async () => {
-            try {
-                setOffersLoading(true);
-                setOffersError(null);
-                const response = await offersAPI.getOffers({
-                    type: 'live',
-                    page: 1,
-                    limit: 100
-                });
-                if (response.success) {
-                    setOffersData(response.data);
-                } else {
-                    setOffersError('Failed to load offers data');
-                }
-            } catch (err) {
-                console.error('Offers fetch error:', err);
-                setOffersError(err.message || 'Failed to load offers data');
-            } finally {
-                setOffersLoading(false);
-            }
-        };
-
-        const fetchAffiliatesData = async () => {
-            try {
-                setAffiliatesLoading(true);
-                setAffiliatesError(null);
-                const response = await publishersAPI.getPublishers({
-                    status: 'active',
-                    page: 1,
-                    limit: 10
-                });
-                if (response.success && response.data) {
-                    // Sort by some criteria (e.g., by ID or name) and take top 4
-                    const sortedAffiliates = response.data
-                        .sort((a, b) => b.id - a.id) // Sort by ID descending (newest first)
-                        .slice(0, 4);
-                    setAffiliatesData(sortedAffiliates);
-                } else {
-                    setAffiliatesError('Failed to load affiliates data');
-                }
-            } catch (err) {
-                console.error('Affiliates fetch error:', err);
-                setAffiliatesError(err.message || 'Failed to load affiliates data');
-            } finally {
-                setAffiliatesLoading(false);
-            }
-        };
-
-        fetchDashboardData();
-        fetchDashboardCards(); // New: Fetch optimized dashboard cards
-        fetchTopOffers();
-        fetchTopAffiliates();
-        fetchInfoCards();
-        fetchTopCountries();
-        fetchSummaryData();
-        fetchDetailedData();
-        fetchPublisherData();
-        fetchOffersData();
-        fetchAffiliatesData();
+        fetchAllData();
     }, []);
 
-    // Prioritize dashboardCards (optimized endpoint), then dashboardData
-    const apiStats = dashboardCards || dashboardData || {};
+    const getDateFromFilter = (filter) => {
+        const today = new Date();
+        const dateFrom = new Date();
+        switch (filter) {
+            case 'today':
+                return today.toISOString().split('T')[0];
+            case 'yesterday':
+                dateFrom.setDate(dateFrom.getDate() - 1);
+                return dateFrom.toISOString().split('T')[0];
+            case 'week':
+                dateFrom.setDate(dateFrom.getDate() - 7);
+                return dateFrom.toISOString().split('T')[0];
+            case 'month':
+                dateFrom.setMonth(dateFrom.getMonth() - 1);
+                return dateFrom.toISOString().split('T')[0];
+            default:
+                return today.toISOString().split('T')[0];
+        }
+    };
 
-
-    // Format number with commas
     const formatNumber = (num) => {
         if (num === null || num === undefined) return '0';
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     };
 
-    // Format currency
     const formatCurrency = (amount) => {
-        if (amount === null || amount === undefined) return '$0.00';
-        return `$${parseFloat(amount).toFixed(2)}`;
+        if (amount === null || amount === undefined) return '0.00';
+        return parseFloat(amount).toFixed(2);
     };
 
-    // Calculate trend percentage
     const calculateTrend = (current, previous) => {
-        if (!previous || previous === 0) return null;
+        if (!previous || previous === 0) return { value: '0', isPositive: true };
         const change = ((current - previous) / previous) * 100;
         return {
-            value: Math.abs(change).toFixed(1),
+            value: Math.abs(change).toFixed(0),
             isPositive: change >= 0
         };
     };
 
-    // Format trend display component
-    const TrendIndicator = ({ current, previous }) => {
-        const trend = calculateTrend(current, previous);
-        if (trend === null) return null;
-        return (
-            <div className={`stat-trend ${trend.isPositive ? 'up' : 'down'}`}>
-                <ArrowUpIcon style={{ transform: trend.isPositive ? 'none' : 'rotate(180deg)' }} />
-                <span>{trend.value}%</span>
-            </div>
-        );
+    const handleCopyLink = (link) => {
+        navigator.clipboard.writeText(link);
+        toast.success('Link copied to clipboard');
     };
 
-    // Today's date formatted
-    const today = new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    });
+    const stats = dashboardCards || {};
+
+    // Show error fallback for auth/permission errors
+    if (error) {
+        return <ErrorFallback error={error} resetError={() => window.location.reload()} />;
+    }
 
     if (loading) {
         return (
@@ -393,629 +245,380 @@ function Dashboard() {
         );
     }
 
-    if (error) {
-        return (
-            <div className="dashboard">
-                <div className="dashboard-error">
-                    <p>Error: {error}</p>
-                    <button onClick={() => window.location.reload()}>Retry</button>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <div className="dashboard">
-            {/* Header */}
-            <div className="dashboard-header">
-                <div className="dashboard-header-left">
-                    <h1>Dashboard</h1>
-                    <p className="dashboard-date">
-                        <CalendarIcon />
-                        {today}
-                    </p>
+            {/* Onboarding Steps */}
+            <div className="onboarding-section">
+                <div className="onboarding-header">
+                    <CheckIcon />
+                    <span>onBoarding Steps</span>
                 </div>
-                <div className="dashboard-header-right">
-                    <span className="welcome-text">Welcome, <strong>{user?.name || user?.fullName || 'User'}</strong></span>
+                <div className="onboarding-steps">
+                    <div className="onboarding-step completed">
+                        <div className="step-icon completed">
+                            <CheckIcon />
+                        </div>
+                        <span>Step 1 SMTP Setup</span>
+                    </div>
+                    <div className="onboarding-step completed">
+                        <div className="step-icon completed">
+                            <CheckIcon />
+                        </div>
+                        <span>Step 2 Create Affiliate</span>
+                    </div>
+                    <div className="onboarding-step completed">
+                        <div className="step-icon completed">
+                            <CheckIcon />
+                        </div>
+                        <span>Step 3 Create Advertiser</span>
+                    </div>
+                    <div className="onboarding-step completed">
+                        <div className="step-icon completed">
+                            <CheckIcon />
+                        </div>
+                        <span>Step 4 Create Offer</span>
+                    </div>
                 </div>
             </div>
 
-            {/* Stats Grid - 6 Cards */}
-            <div className="stats-grid">
-                <div className="stat-card blue">
-                    <div className="stat-icon">
-                        <OfferIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{apiStats.offers?.total || 0}</span>
-                        <span className="stat-label">Total Offers</span>
-                    </div>
-                    {apiStats.offers?.previous_total !== undefined && (
-                        <TrendIndicator current={apiStats.offers?.total || 0} previous={apiStats.offers.previous_total} />
-                    )}
-                    <div className="stat-badge">{apiStats.offers?.active || 0} Active</div>
-                </div>
-
-                <div className="stat-card green">
-                    <div className="stat-icon">
-                        <AffiliateIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{apiStats.publishers?.total || 0}</span>
-                        <span className="stat-label">Publishers</span>
-                    </div>
-                    {apiStats.publishers?.previous_total !== undefined && (
-                        <TrendIndicator current={apiStats.publishers?.total || 0} previous={apiStats.publishers.previous_total} />
-                    )}
-                    <div className="stat-badge">{apiStats.publishers?.active || 0} Active</div>
-                </div>
-
-                <div className="stat-card purple">
-                    <div className="stat-icon">
-                        <ClickIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatNumber(apiStats.clicks?.total || 0)}</span>
-                        <span className="stat-label">Total Clicks</span>
-                    </div>
-                    <TrendIndicator current={apiStats.clicks?.total || 0} previous={apiStats.clicks?.yesterday || 0} />
-                    <div className="stat-badge">{formatNumber(apiStats.clicks?.unique || 0)} Unique</div>
-                </div>
-
-                <div className="stat-card teal">
-                    <div className="stat-icon">
-                        <ConversionIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatNumber(apiStats.conversions?.total || 0)}</span>
-                        <span className="stat-label">Conversions</span>
-                    </div>
-                    <TrendIndicator current={apiStats.conversions?.total || 0} previous={apiStats.conversions?.yesterday || 0} />
-                    <div className="stat-badge">
-                        {apiStats.conversions?.approved || 0} Approved
-                        {apiStats.conversions?.conversion_rate !== undefined && (
-                            <span> • {apiStats.conversions.conversion_rate.toFixed(2)}%</span>
-                        )}
-                    </div>
-                </div>
-
-                <div className="stat-card red">
-                    <div className="stat-icon">
-                        <RevenueIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatCurrency(apiStats.revenue?.total || 0)}</span>
-                        <span className="stat-label">Total Revenue</span>
-                    </div>
-                    <div className="stat-badge">
-                        Profit: {formatCurrency(apiStats.revenue?.profit || 0)}
-                    </div>
-                </div>
-
-                <div className="stat-card orange">
-                    <div className="stat-icon">
-                        <AdvertiserIcon />
-                    </div>
-                    <div className="stat-info">
-                        <span className="stat-value">{apiStats.advertisers?.total || 0}</span>
-                        <span className="stat-label">Advertisers</span>
-                    </div>
-                    {apiStats.advertisers?.previous_total !== undefined && (
-                        <TrendIndicator current={apiStats.advertisers?.total || 0} previous={apiStats.advertisers.previous_total} />
-                    )}
-                    <div className="stat-badge">{apiStats.advertisers?.active || 0} Active</div>
-                </div>
-            </div>
-
-            {/* Main Content Grid */}
-            <div className="dashboard-content">
-                {/* Quick Actions */}
-                <div className="dashboard-card quick-actions-card">
-                    <div className="card-header">
-                        <h3>Quick Actions</h3>
-                    </div>
-                    <div className="quick-actions-grid">
-                        <Link to="/offer/new" className="action-btn">
-                            <div className="action-icon blue">
-                                <PlusIcon />
-                            </div>
-                            <span>New Offer</span>
-                        </Link>
-                        <Link to="/affiliate/new" className="action-btn">
-                            <div className="action-icon green">
-                                <AffiliateIcon />
-                            </div>
-                            <span>Add Affiliate</span>
-                        </Link>
-                        <Link to="/advertiser/new" className="action-btn">
-                            <div className="action-icon orange">
-                                <AdvertiserIcon />
-                            </div>
-                            <span>Add Advertiser</span>
-                        </Link>
-                        <Link to="/offer/list" className="action-btn">
-                            <div className="action-icon purple">
-                                <ListIcon />
-                            </div>
-                            <span>View All Offers</span>
-                        </Link>
-                    </div>
-                </div>
-
-                {/* Recent Offers */}
-                <div className="dashboard-card recent-offers-card">
-                    <div className="card-header">
-                        <h3>Live Offers</h3>
-                        <Link to="/offer/list" className="view-all">View All</Link>
-                    </div>
-                    {offersLoading ? (
-                        <div className="loading-spinner">Loading offers...</div>
-                    ) : offersError ? (
-                        <div className="error-state">
-                            <p>Error: {offersError}</p>
-                            <button onClick={() => {
-                                setOffersError(null);
-                                // Re-fetch offers data
-                                const fetchOffersData = async () => {
-                                    try {
-                                        setOffersLoading(true);
-                                        setOffersError(null);
-                                        const response = await offersAPI.getOffers({
-                                            type: 'live',
-                                            page: 1,
-                                            limit: 100
-                                        });
-                                        if (response.success) {
-                                            setOffersData(response.data);
-                                        } else {
-                                            setOffersError('Failed to load offers data');
-                                        }
-                                    } catch (err) {
-                                        console.error('Offers fetch error:', err);
-                                        setOffersError(err.message || 'Failed to load offers data');
-                                    } finally {
-                                        setOffersLoading(false);
-                                    }
-                                };
-                                fetchOffersData();
-                            }}>Retry</button>
-                        </div>
-                    ) : offersData && offersData.length > 0 ? (
-                        <div className="offers-list">
-                            {offersData.map(offer => (
-                                <div key={offer.id} className="offer-row">
-                                    <div className="offer-info">
-                                        <span className="offer-name">{offer.name}</span>
-                                        <span className="offer-id">ID: {offer.id}</span>
-                                        <span className="offer-description">{offer.description}</span>
-                                    </div>
-                                    <div className="offer-meta">
-                                        <span className="offer-country">{offer.country}</span>
-                                        <span className={`offer-status ${offer.status.toLowerCase()}`}>{offer.status}</span>
-                                        <span className="offer-payout">${offer.affiliate_amount} {offer.affiliate_model}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="no-data">No offers available</div>
-                    )}
-                </div>
-
-                {/* Top Affiliates */}
-                <div className="dashboard-card affiliates-card">
-                    <div className="card-header">
-                        <h3>Top Affiliates</h3>
-                        <Link to="/affiliate/manage" className="view-all">View All</Link>
-                    </div>
-                    {(topAffiliatesLoading || affiliatesLoading) ? (
-                        <div className="loading-spinner">Loading affiliates...</div>
-                    ) : (topAffiliates && topAffiliates.length > 0) ? (
-                        <div className="affiliates-list">
-                            {topAffiliates.map((aff, idx) => (
-                                <div key={aff.publisher_id || idx} className="affiliate-row">
-                                    <div className="affiliate-rank">#{idx + 1}</div>
-                                    <div className="affiliate-avatar">
-                                        {(aff.publisher_name || 'A').charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="affiliate-info">
-                                        <span className="affiliate-name">{aff.publisher_name || 'N/A'}</span>
-                                        <span className="affiliate-email">{formatNumber(aff.conversions || 0)} conversions</span>
-                                    </div>
-                                    <div className="affiliate-status active">
-                                        {formatNumber(aff.conversions || 0)}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (affiliatesData && affiliatesData.length > 0) ? (
-                        <div className="affiliates-list">
-                            {affiliatesData.map((aff, idx) => (
-                                <div key={aff.id || idx} className="affiliate-row">
-                                    <div className="affiliate-rank">#{idx + 1}</div>
-                                    <div className="affiliate-avatar">
-                                        {(aff.company_name || aff.first_name || 'A').charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="affiliate-info">
-                                        <span className="affiliate-name">{aff.company_name || aff.first_name || 'N/A'}</span>
-                                        <span className="affiliate-email">{aff.email || 'New Affiliate'}</span>
-                                    </div>
-                                    <div className="affiliate-status pending">
-                                        New
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="no-data">No affiliates available</div>
-                    )}
-                </div>
-
-                {/* Summary Reports */}
-                <div className="dashboard-card summary-reports-card">
-                    <div className="card-header">
-                        <h3>Performance Summary</h3>
-                        <span className="period-indicator">Last 30 Days</span>
-                    </div>
-                    {summaryLoading ? (
-                        <div className="loading-spinner">Loading summary...</div>
-                    ) : summaryError ? (
-                        <div className="error-state">
-                            <p>Error: {summaryError}</p>
-                            <button onClick={() => {
-                                setSummaryError(null);
-                                // Re-fetch summary data
-                                const fetchSummaryData = async () => {
-                                    try {
-                                        setSummaryLoading(true);
-                                        setSummaryError(null);
-                                        const response = await dashboardAPI.getSummary({
-                                        });
-                                        if (response.success) {
-                                            setSummaryData(response.data);
-                                        } else {
-                                            setSummaryError('Failed to load summary data');
-                                        }
-                                    } catch (err) {
-                                        console.error('Summary fetch error:', err);
-                                        setSummaryError(err.message || 'Failed to load summary data');
-                                    } finally {
-                                        setSummaryLoading(false);
-                                    }
-                                };
-                                fetchSummaryData();
-                            }}>Retry</button>
-                        </div>
-                    ) : summaryData ? (
-                        <div className="summary-grid">
-                            <div className="summary-item">
-                                <span className="summary-label">Affiliates</span>
-                                <span className="summary-value">{summaryData.affiliates || 0}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Unique Clicks</span>
-                                <span className="summary-value">{formatNumber(summaryData.unique_clicks || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Impressions</span>
-                                <span className="summary-value">{formatNumber(summaryData.impressions || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Conversions</span>
-                                <span className="summary-value">{formatNumber(summaryData.conversions || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Revenue</span>
-                                <span className="summary-value">{formatCurrency(summaryData.revenue || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Payout</span>
-                                <span className="summary-value">{formatCurrency(summaryData.payout || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Profit</span>
-                                <span className="summary-value profit">{formatCurrency(summaryData.profit || 0)}</span>
-                            </div>
-                            <div className="summary-item">
-                                <span className="summary-label">Conv. Rate</span>
-                                <span className="summary-value">{summaryData.conversion_rate || 0}%</span>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="no-data">No summary data available</div>
-                    )}
-                </div>
-
-                {/* Recent Clicks/Conversions */}
-                <div className="dashboard-card recent-activity-card">
-                    <div className="card-header">
-                        <h3>Recent Activity</h3>
-                        <Link to="/reports" className="view-all">View Detailed Reports</Link>
-                    </div>
-                    {detailedLoading ? (
-                        <div className="loading-spinner">Loading activity...</div>
-                    ) : detailedError ? (
-                        <div className="error-state">
-                            <p>Error: {detailedError}</p>
-                            <button onClick={() => {
-                                setDetailedError(null);
-                                // Re-fetch detailed data
-                                const fetchDetailedData = async () => {
-                                    try {
-                                        setDetailedLoading(true);
-                                        setDetailedError(null);
-                                        // Calculate date 30 days ago
-                                        const dateTo = new Date();
-                                        const dateFrom = new Date();
-                                        dateFrom.setDate(dateFrom.getDate() - 30);
-                                        
-                                        const response = await dashboardAPI.getDetailed({
-                                            page: 1,
-                                            limit: 10,
-                                            date_from: dateFrom.toISOString().split('T')[0],
-                                            date_to: dateTo.toISOString().split('T')[0]
-                                        });
-                                        if (response.success) {
-                                            setDetailedData(response.data);
-                                        } else {
-                                            setDetailedError('Failed to load activity data');
-                                        }
-                                    } catch (err) {
-                                        console.error('Detailed fetch error:', err);
-                                        setDetailedError(err.message || 'Failed to load activity data');
-                                    } finally {
-                                        setDetailedLoading(false);
-                                    }
-                                };
-                                fetchDetailedData();
-                            }}>Retry</button>
-                        </div>
-                    ) : detailedData && detailedData.length > 0 ? (
-                        <div className="activity-table">
-                            <div className="table-header">
-                                <span>Offer</span>
-                                <span>Publisher</span>
-                                <span>Clicks</span>
+            {/* Main Dashboard Grid */}
+            <div className="dashboard-main-grid">
+                {/* Left Column - KPI Cards */}
+                <div className="dashboard-left-column">
+                    {/* Conversions Card - Large */}
+                    <div className="kpi-card conversions-card large">
+                        <div className="kpi-header">
+                            <div className="kpi-title">
+                                <ConversionIcon />
                                 <span>Conversions</span>
-                                <span>Revenue</span>
                             </div>
-                            {detailedData.slice(0, 5).map((item, index) => (
-                                <div key={item.click_id || index} className="table-row">
-                                    <div className="activity-offer">
-                                        <span className="offer-name">{item.offer_name || 'N/A'}</span>
-                                        <span className="offer-id">ID: {item.offer_id}</span>
-                                    </div>
-                                    <div className="activity-publisher">
-                                        <span className="publisher-name">{item.publisher_company || item.publisher_email || 'N/A'}</span>
-                                    </div>
-                                    <div className="activity-clicks">
-                                        <span className="click-count">1</span>
-                                    </div>
-                                    <div className="activity-conversions">
-                                        <span className={`conversion-status ${item.conversion_status || 'none'}`}>
-                                            {item.conversion_status || 'No'}
-                                        </span>
-                                    </div>
-                                    <div className="activity-revenue">
-                                        <span className="revenue-amount">
-                                            {formatCurrency(item.conversion_amount || 0)}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
                         </div>
-                    ) : (
-                        <div className="no-data">No recent activity</div>
-                    )}
-                </div>
-
-                {/* Publisher Performance */}
-                <div className="dashboard-card publisher-performance-card">
-                    <div className="card-header">
-                        <h3>Publisher Performance</h3>
-                        <span className="period-indicator">This Month</span>
-                    </div>
-                    {publisherLoading ? (
-                        <div className="loading-spinner">Loading publisher data...</div>
-                    ) : publisherError ? (
-                        <div className="error-state">
-                            <p>Error: {publisherError}</p>
-                            <button onClick={() => {
-                                setPublisherError(null);
-                                // Re-fetch publisher data
-                                const fetchPublisherData = async () => {
-                                    try {
-                                        setPublisherLoading(true);
-                                        setPublisherError(null);
-                                        const response = await dashboardAPI.getPublisherConversions();
-                                        if (response.success) {
-                                            setPublisherData(response.data);
-                                        } else {
-                                            setPublisherError('Failed to load publisher data');
-                                        }
-                                    } catch (err) {
-                                        console.error('Publisher fetch error:', err);
-                                        setPublisherError(err.message || 'Failed to load publisher data');
-                                    } finally {
-                                        setPublisherLoading(false);
-                                    }
-                                };
-                                fetchPublisherData();
-                            }}>Retry</button>
+                        <div className="kpi-value-large">{formatNumber(stats.conversions?.today || stats.conversions?.total || 0)}</div>
+                        <div className="kpi-trend">
+                            {(() => {
+                                const trend = calculateTrend(
+                                    stats.conversions?.today || stats.conversions?.total || 0,
+                                    stats.conversions?.yesterday || 0
+                                );
+                                return (
+                                    <span className={`trend-badge ${trend.isPositive ? 'up' : 'down'}`}>
+                                        {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                        {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                    </span>
+                                );
+                            })()}
                         </div>
-                    ) : publisherData && publisherData.stats && publisherData.stats.length > 0 ? (
-                        <div className="publisher-list">
-                            {publisherData.stats.slice(0, 5).map((stat, index) => (
-                                <div key={`${stat.publisher?.id}-${stat.offer?.id}-${index}`} className="publisher-row">
-                                    <div className="publisher-info">
-                                        <span className="publisher-name">{stat.publisher?.company_name || stat.publisher?.email || 'N/A'}</span>
-                                        <span className="publisher-email">{stat.offer?.name || 'N/A'}</span>
-                                        <span className="publisher-country">{stat.publisher?.country || 'N/A'}</span>
-                                    </div>
-                                    <div className="publisher-stats">
-                                        <div className="stat">
-                                            <span className="stat-label">Clicks</span>
-                                            <span className="stat-value">{formatNumber(stat.clicks?.total || 0)}</span>
-                                        </div>
-                                        <div className="stat">
-                                            <span className="stat-label">Conversions</span>
-                                            <span className="stat-value">{formatNumber(stat.conversions?.total || 0)}</span>
-                                        </div>
-                                        <div className="stat">
-                                            <span className="stat-label">Revenue</span>
-                                            <span className="stat-value">{formatCurrency(stat.revenue?.total || 0)}</span>
-                                        </div>
-                                        <div className="stat">
-                                            <span className="stat-label">Rate</span>
-                                            <span className="stat-value">{stat.conversions?.conversion_rate?.toFixed(1) || 0}%</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                            {publisherData.summary && (
-                                <div style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', fontSize: '11px', color: 'var(--text-muted)' }}>
-                                    <strong>Summary:</strong> {publisherData.summary.total_publishers || 0} Publishers • {publisherData.summary.total_offers || 0} Offers • {publisherData.summary.total_combinations || 0} Combinations
-                                </div>
-                            )}
+                        <div className="kpi-meta">
+                                <span className="conversion-rate">
+                                CR: {stats.conversions?.conversion_rate ? stats.conversions.conversion_rate.toFixed(3) : '0.000'}%
+                            </span>
                         </div>
-                    ) : (
-                        <div className="no-data">No publisher data available</div>
-                    )}
-                </div>
-
-                {/* Top Offers */}
-                <div className="dashboard-card top-offers-card">
-                    <div className="card-header">
-                        <h3>Top Offers by Conversions</h3>
-                    </div>
-                    {topOffersLoading ? (
-                        <div className="loading-spinner">Loading top offers...</div>
-                    ) : topOffers && topOffers.length > 0 ? (
-                        <div className="offers-list">
-                            {topOffers.map((offer, idx) => (
-                                <div key={offer.offer_id} className="offer-row">
-                                    <div className="offer-info">
-                                        <span className="offer-name">{offer.offer_name || 'N/A'}</span>
-                                        <span className="offer-id">ID: {offer.offer_id}</span>
-                                    </div>
-                                    <div className="offer-meta">
-                                        <span className="offer-payout">{formatNumber(offer.conversions || 0)} conversions</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="no-data">No top offers available</div>
-                    )}
-                </div>
-
-                {/* Performance Chart */}
-                <div className="dashboard-card performance-chart-card">
-                    <div className="card-header">
-                        <h3>Performance Chart</h3>
-                    </div>
-                    {performanceLoading ? (
-                        <div className="loading-spinner">Loading performance data...</div>
-                    ) : performanceData && performanceData.length > 0 ? (
-                        <div style={{ padding: '16px' }}>
-                            <div className="activity-table">
-                                <div className="table-header">
-                                    <span>Date</span>
-                                    <span>Clicks</span>
-                                    <span>Conversions</span>
-                                </div>
-                                {performanceData.slice(0, 10).map((item, index) => (
-                                    <div key={index} className="table-row">
-                                        <div>{item.date}</div>
-                                        <div>{formatNumber(item.clicks || 0)}</div>
-                                        <div>{formatNumber(item.conversions || 0)}</div>
+                        <div className="top-offers-section">
+                            <div className="top-offers-tabs">
+                                <button
+                                    className={topOffersTab === 'offers' ? 'active' : ''}
+                                    onClick={() => setTopOffersTab('offers')}
+                                >
+                                    Offers
+                                </button>
+                                <button
+                                    className={topOffersTab === 'conversions' ? 'active' : ''}
+                                    onClick={() => setTopOffersTab('conversions')}
+                                >
+                                    Conversions
+                                </button>
+                            </div>
+                            <div className="top-offers-list">
+                                {topOffers.slice(0, 5).map((offer, idx) => (
+                                    <div key={offer.offer_id} className="top-offer-item">
+                                        <span className="offer-id">{offer.offer_id}</span>
+                                        <span className="offer-conversions">{formatNumber(offer.conversions || 0)}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                    ) : (
-                        <div className="no-data">No performance data available</div>
-                    )}
-                </div>
-
-                {/* Info Cards */}
-                <div className="dashboard-card info-cards-card">
-                    <div className="card-header">
-                        <h3>Information</h3>
                     </div>
-                    {infoCardsLoading ? (
-                        <div className="loading-spinner">Loading info...</div>
-                    ) : infoCards ? (
-                        <div style={{ padding: '16px' }}>
-                            <div className="summary-grid">
-                                <div className="summary-item">
-                                    <span className="summary-label">Active Offers</span>
-                                    <span className="summary-value">{infoCards.active_offers || 0}</span>
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-label">Offer Requests</span>
-                                    <span className="summary-value">{infoCards.offer_requests || 0}</span>
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-label">Pending Affiliates</span>
-                                    <span className="summary-value">{infoCards.pending_affiliates || 0}</span>
-                                </div>
+
+                    {/* Other KPI Cards */}
+                    <div className="kpi-cards-grid">
+                        {/* Impressions */}
+                        <div className="kpi-card">
+                            <div className="kpi-icon red">
+                                <ImpressionsIcon />
                             </div>
-                            {infoCards.account_manager && (
-                                <div style={{ marginTop: '16px', padding: '12px', background: 'var(--bg-primary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
-                                    <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>Account Manager</div>
-                                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        <div><strong>Name:</strong> {infoCards.account_manager.name || 'N/A'}</div>
-                                        {infoCards.account_manager.email && <div><strong>Email:</strong> {infoCards.account_manager.email}</div>}
-                                        {infoCards.account_manager.phone && <div><strong>Phone:</strong> {infoCards.account_manager.phone}</div>}
-                                        {infoCards.account_manager.telegram && <div><strong>Telegram:</strong> {infoCards.account_manager.telegram}</div>}
-                                        {infoCards.account_manager.skype && <div><strong>Skype:</strong> {infoCards.account_manager.skype}</div>}
-                                    </div>
-                                </div>
-                            )}
-                            {infoCards.signup_link && (
-                                <div style={{ marginTop: '12px' }}>
-                                    <a href={infoCards.signup_link} target="_blank" rel="noopener noreferrer" className="view-all" style={{ fontSize: '12px' }}>
-                                        Signup Link →
-                                    </a>
-                                </div>
-                            )}
+                            <div className="kpi-content">
+                                <div className="kpi-value">{formatNumber(stats.impressions?.today || stats.impressions?.total || 0)}</div>
+                                <div className="kpi-label">Impressions</div>
+                                <div className="kpi-mtd">MTD {formatNumber(stats.impressions?.mtd || 0)}</div>
+                                {(() => {
+                                    const trend = calculateTrend(
+                                        stats.impressions?.today || stats.impressions?.total || 0,
+                                        stats.impressions?.yesterday || 0
+                                    );
+                                    return (
+                                        <div className={`kpi-trend-small ${trend.isPositive ? 'up' : 'down'}`}>
+                                            {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                            {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                        </div>
+                                    );
+                                })()}
+                            </div>
                         </div>
-                    ) : (
-                        <div className="no-data">No info available</div>
-                    )}
-                </div>
 
-                {/* Top Countries */}
-                <div className="dashboard-card top-countries-card">
-                    <div className="card-header">
-                        <h3>Top Countries</h3>
-                    </div>
-                    {topCountriesLoading ? (
-                        <div className="loading-spinner">Loading countries...</div>
-                    ) : topCountries && topCountries.length > 0 ? (
-                        <div className="activity-table">
-                            <div className="table-header">
-                                <span>Country</span>
-                                <span>Clicks</span>
-                                <span>Conversions</span>
-                                <span>Revenue</span>
+                        {/* Clicks */}
+                        <div className="kpi-card">
+                            <div className="kpi-icon orange">
+                                <ClickIcon />
                             </div>
-                            {topCountries.map((country, index) => (
-                                <div key={country.country_code || index} className="table-row">
-                                    <div>
-                                        <div style={{ fontWeight: '500' }}>{country.country_name || country.country_code}</div>
-                                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{country.country_code}</div>
-                                    </div>
-                                    <div>{formatNumber(country.clicks || 0)}</div>
-                                    <div>{formatNumber(country.conversions || 0)}</div>
-                                    <div>{formatCurrency(country.revenue || 0)}</div>
+                            <div className="kpi-content">
+                                <div className="kpi-value">{formatNumber(stats.clicks?.today || stats.clicks?.total || 0)}</div>
+                                <div className="kpi-label">Clicks</div>
+                                <div className="kpi-mtd">MTD {formatNumber(stats.clicks?.mtd || 0)}</div>
+                                {(() => {
+                                    const trend = calculateTrend(
+                                        stats.clicks?.today || stats.clicks?.total || 0,
+                                        stats.clicks?.yesterday || 0
+                                    );
+                                    return (
+                                        <div className={`kpi-trend-small ${trend.isPositive ? 'up' : 'down'}`}>
+                                            {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                            {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+
+                        {/* Revenue */}
+                        <div className="kpi-card">
+                            <div className="kpi-icon blue">
+                                <RevenueIcon />
+                            </div>
+                            <div className="kpi-content">
+                                <div className="kpi-value">{formatCurrency(stats.revenue?.today || stats.revenue?.total || 0)} USD</div>
+                                <div className="kpi-label">Revenue</div>
+                                <div className="kpi-mtd">MTD {formatCurrency(stats.revenue?.mtd || 0)} USD</div>
+                                {(() => {
+                                    const trend = calculateTrend(
+                                        stats.revenue?.today || stats.revenue?.total || 0,
+                                        stats.revenue?.yesterday || 0
+                                    );
+                                    return (
+                                        <div className={`kpi-trend-small ${trend.isPositive ? 'up' : 'down'}`}>
+                                            {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                            {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+
+                        {/* Payout */}
+                        <div className="kpi-card">
+                            <div className="kpi-icon purple">
+                                <PayoutIcon />
+                            </div>
+                            <div className="kpi-content">
+                                <div className="kpi-value">{formatCurrency(stats.revenue?.payout_today || stats.revenue?.payout || 0)} USD</div>
+                                <div className="kpi-label">Payout</div>
+                                <div className="kpi-mtd">MTD {formatCurrency((stats.revenue?.mtd || 0) - (stats.revenue?.payout_mtd || 0))} USD</div>
+                                {(() => {
+                                    const trend = calculateTrend(
+                                        stats.revenue?.payout_today || stats.revenue?.payout || 0,
+                                        stats.revenue?.payout_yesterday || 0
+                                    );
+                                    return (
+                                        <div className={`kpi-trend-small ${trend.isPositive ? 'up' : 'down'}`}>
+                                            {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                            {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+
+                        {/* Profit */}
+                        <div className="kpi-card">
+                            <div className="kpi-icon green">
+                                <ProfitIcon />
+                            </div>
+                            <div className="kpi-content">
+                                <div className="kpi-value">{formatCurrency((stats.revenue?.today || stats.revenue?.total || 0) - (stats.revenue?.payout_today || stats.revenue?.payout || 0))} USD</div>
+                                <div className="kpi-label">Profit</div>
+                                <div className="kpi-mtd">MTD {formatCurrency((stats.revenue?.mtd || 0) - (stats.revenue?.payout_mtd || 0))} USD</div>
+                                {(() => {
+                                    const profit = (stats.revenue?.today || stats.revenue?.total || 0) - (stats.revenue?.payout_today || stats.revenue?.payout || 0);
+                                    const profitYesterday = (stats.revenue?.yesterday || 0) - (stats.revenue?.payout_yesterday || 0);
+                                    const trend = calculateTrend(profit, profitYesterday);
+                                    return (
+                                        <div className={`kpi-trend-small ${trend.isPositive ? 'up' : 'down'}`}>
+                                            {trend.isPositive ? <ArrowUpIcon /> : <ArrowDownIcon />}
+                                            {trend.value}% {trend.isPositive ? 'Up' : 'Down'} from yesterday
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Filter/Summary Card */}
+                    <div className="summary-filter-card">
+                        <div className="filter-controls">
+                            <select className="filter-select" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
+                                <option value="today">Today</option>
+                                <option value="yesterday">Yesterday</option>
+                                <option value="week">Last 7 Days</option>
+                                <option value="month">Last 30 Days</option>
+                            </select>
+                            <select className="filter-select">
+                                <option value="all">All</option>
+                            </select>
+                        </div>
+                        <div className="summary-stats">
+                            <div className="summary-stat">
+                                <span className="summary-label">Active Offers:</span>
+                                <span className="summary-value">{stats.offers?.active || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+
+            {/* Bottom Section - Charts */}
+            <div className="dashboard-charts-section">
+                {/* Top Countries - World Map */}
+                <div className="chart-card countries-card">
+                    <h3>Top Countries</h3>
+                    <div className="countries-map">
+                        {/* Simplified world map visualization */}
+                        <div className="countries-list">
+                            {topCountries.slice(0, 10).map((country, idx) => (
+                                <div key={country.country_code} className="country-item">
+                                    <div className="country-bar" style={{ width: `${(country.conversions / (topCountries[0]?.conversions || 1)) * 100}%` }}></div>
+                                    <span className="country-name">{country.country_name}</span>
+                                    <span className="country-value">{formatNumber(country.conversions)}</span>
                                 </div>
                             ))}
                         </div>
+                    </div>
+                </div>
+
+                {/* Performance Chart */}
+                <div className="chart-card performance-card">
+                    <div className="chart-header">
+                        <h3>Performance</h3>
+                        <button className="forecast-btn">
+                            <RefreshIcon />
+                            Forecast Report
+                        </button>
+                    </div>
+                    {performanceData && performanceData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={300}>
+                            <LineChart data={performanceData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                                <XAxis
+                                    dataKey="date"
+                                    stroke="var(--text-secondary)"
+                                    style={{ fontSize: '12px' }}
+                                    tickFormatter={(value) => {
+                                        // Format date for display
+                                        if (value && value.length > 10) {
+                                            return value.substring(5, 10); // Show MM-DD
+                                        }
+                                        return value;
+                                    }}
+                                />
+                                <YAxis
+                                    yAxisId="left"
+                                    stroke="var(--primary-color)"
+                                    style={{ fontSize: '12px' }}
+                                    label={{ value: 'Clicks', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
+                                />
+                                <YAxis
+                                    yAxisId="right"
+                                    orientation="right"
+                                    stroke="var(--success-color)"
+                                    style={{ fontSize: '12px' }}
+                                    label={{ value: 'Conversions', angle: 90, position: 'insideRight', style: { textAnchor: 'middle' } }}
+                                />
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '8px',
+                                        color: 'var(--text-primary)'
+                                    }}
+                                    labelStyle={{ color: 'var(--text-primary)' }}
+                                />
+                                <Legend />
+                                <Line
+                                    yAxisId="left"
+                                    type="monotone"
+                                    dataKey="clicks"
+                                    stroke="var(--primary-color)"
+                                    strokeWidth={2}
+                                    dot={{ r: 4, fill: 'var(--primary-color)' }}
+                                    name="Clicks"
+                                />
+                                <Line
+                                    yAxisId="right"
+                                    type="monotone"
+                                    dataKey="conversions"
+                                    stroke="var(--success-color)"
+                                    strokeWidth={2}
+                                    dot={{ r: 4, fill: 'var(--success-color)' }}
+                                    name="Conversions"
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
                     ) : (
-                        <div className="no-data">No country data available</div>
+                        <div className="no-data" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                            No performance data available
+                        </div>
                     )}
+                </div>
+
+                {/* Top Affiliates - Donut Chart */}
+                <div className="chart-card affiliates-chart-card">
+                    <h3>Top Affiliates</h3>
+                    <div className="affiliates-chart-container">
+                        <ResponsiveContainer width="100%" height={250}>
+                            <PieChart>
+                                <Pie
+                                    data={topAffiliates.slice(0, 6)}
+                                    cx="50%"
+                                    cy="50%"
+                                    labelLine={false}
+                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                    outerRadius={80}
+                                    fill="#8884d8"
+                                    dataKey="conversions"
+                                >
+                                    {topAffiliates.slice(0, 6).map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: '8px'
+                                    }}
+                                />
+                            </PieChart>
+                        </ResponsiveContainer>
+                        <div className="affiliates-legend">
+                            <div className="legend-total">Total Conversions: {formatNumber(topAffiliates.reduce((sum, aff) => sum + (aff.conversions || 0), 0))}</div>
+                            {topAffiliates.slice(0, 6).map((aff, idx) => (
+                                <div key={aff.publisher_id} className="legend-item">
+                                    <div className="legend-color" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                                    <span>{aff.publisher_name || 'Unknown'}</span>
+                                    <span className="legend-value">{formatNumber(aff.conversions || 0)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

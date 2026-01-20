@@ -1,0 +1,144 @@
+.error-fallback {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: var(--bg-primary);
+}
+
+.error-fallback-card {
+    max-width: 600px;
+    width: 100%;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    padding: 60px 40px;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+    animation: slideUp 0.3s ease;
+}
+
+.error-fallback-icon {
+    font-size: 80px;
+    margin-bottom: 24px;
+    animation: bounce 1s ease infinite;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+.error-fallback-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+}
+
+.error-fallback-message {
+    font-size: 16px;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    line-height: 1.6;
+}
+
+.error-fallback-suggestion {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+    line-height: 1.6;
+}
+
+.error-fallback-details {
+    margin: 24px 0;
+    text-align: left;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.error-fallback-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 12px;
+}
+
+.error-fallback-details pre {
+    font-size: 12px;
+    color: var(--danger-color);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.error-fallback-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.error-fallback-actions .btn {
+    min-width: 150px;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .error-fallback-card {
+        padding: 40px 24px;
+    }
+
+    .error-fallback-icon {
+        font-size: 60px;
+    }
+
+    .error-fallback-title {
+        font-size: 24px;
+    }
+
+    .error-fallback-message {
+        font-size: 15px;
+    }
+
+    .error-fallback-suggestion {
+        font-size: 13px;
+    }
+
+    .error-fallback-actions {
+        flex-direction: column;
+    }
+
+    .error-fallback-actions .btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .error-fallback-card {
+        padding: 32px 20px;
+    }
+
+    .error-fallback-icon {
+        font-size: 50px;
+    }
+
+    .error-fallback-title {
+        font-size: 20px;
+    }
+}

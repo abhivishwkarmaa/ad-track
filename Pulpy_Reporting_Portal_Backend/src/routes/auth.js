@@ -3,7 +3,7 @@ import { authenticateAdmin } from '../middleware/auth.js';
 
 async function authRoutes(fastify, options) {
   // Public routes (no auth required)
-  fastify.post('/register', authController.register);
+  // fastify.post('/register', authController.register);
   fastify.post('/login', authController.login);
   
   // Protected route (requires auth)
