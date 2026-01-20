@@ -14,8 +14,8 @@
 .tenant-header h1 {
     font-size: 28px;
     font-weight: 600;
-    color: #1a1a1a;
-    margin: 0;
+    color: var(--text-primary);
+    margin-bottom: 4px;
 }
 
 .tenant-actions {
