@@ -425,7 +425,11 @@ class OfferService {
 
   async getOfferById(id, tenantId = null) {
     // If tenantId provided, enforce tenant isolation
-    let query = 'SELECT * FROM offers WHERE id = ?';
+    let query = `
+      SELECT *,
+      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = offers.tenant_id AND o2.id <= offers.id) as display_id
+      FROM offers WHERE id = ?
+    `;
     const params = [id];
 
     if (tenantId) {
@@ -797,7 +801,8 @@ class OfferService {
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const listSql = `
-      SELECT *
+      SELECT *,
+      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = offers.tenant_id AND o2.id <= offers.id) as display_id
       FROM offers
       ${whereClause}
       ORDER BY created_at DESC

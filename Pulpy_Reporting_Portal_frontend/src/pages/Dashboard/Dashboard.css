@@ -10,6 +10,8 @@
     margin-bottom: 24px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border-light);
+    flex-wrap: wrap;
+    gap: 16px;
 }
 
 .dashboard-header-left h1 {
@@ -31,6 +33,53 @@
 .dashboard-date svg {
     width: 14px;
     height: 14px;
+}
+
+.dashboard-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.date-filter-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
+}
+
+.date-filter-container label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.date-filter-select {
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    outline: none;
+}
+
+.date-filter-select:hover {
+    border-color: var(--primary-color);
+}
+
+.date-filter-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(27, 182, 184, 0.1);
 }
 
 .welcome-text {
@@ -565,6 +614,14 @@
 /* Summary Reports */
 .summary-reports-card {
     grid-column: span 2;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.summary-reports-card .summary-grid {
+    overflow-y: auto;
+    flex: 1;
 }
 
 .period-indicator {
@@ -615,10 +672,15 @@
 /* Recent Activity */
 .recent-activity-card {
     grid-column: span 2;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
 }
 
 .activity-table {
     padding: 0;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .table-header {
@@ -699,10 +761,15 @@
 /* Publisher Performance */
 .publisher-performance-card {
     grid-column: span 1;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
 }
 
 .publisher-list {
     padding: 8px 0;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .publisher-row {
@@ -823,6 +890,15 @@
     grid-column: span 1;
 }
 
+/* Desktop large screens */
+@media (min-width: 1025px) {
+    .summary-reports-card,
+    .recent-activity-card,
+    .publisher-performance-card {
+        height: 500px;
+    }
+}
+
 /* Tablet (768px - 1024px) */
 @media (min-width: 769px) and (max-width: 1024px) {
     .stats-grid {
@@ -842,6 +918,12 @@
     .quick-actions-grid {
         grid-template-columns: repeat(4, 1fr);
     }
+
+    .summary-reports-card,
+    .recent-activity-card,
+    .publisher-performance-card {
+        height: 450px;
+    }
 }
 
 /* Mobile (up to 768px) */
@@ -858,6 +940,18 @@
     }
 
     .dashboard-header-right {
+        width: 100%;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .date-filter-container {
+        width: 100%;
+    }
+
+    .date-filter-select {
+        flex: 1;
         width: 100%;
     }
 
@@ -922,6 +1016,12 @@
     .affiliates-list,
     .publisher-list {
         max-height: 300px;
+    }
+
+    .summary-reports-card,
+    .recent-activity-card,
+    .publisher-performance-card {
+        height: 400px;
     }
 
     .offer-row,
@@ -1077,5 +1177,215 @@
     .offers-list,
     .affiliates-list {
         max-height: 250px;
+    }
+
+    .summary-reports-card,
+    .recent-activity-card,
+    .publisher-performance-card {
+        height: 350px;
+    }
+}
+
+/* Offer Statistics Table */
+.offer-statistics-card {
+    grid-column: 1 / -1;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.offer-stats-table-wrapper {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.offer-stats-table {
+    padding: 0;
+}
+
+.stats-table-header {
+    display: grid;
+    grid-template-columns: 2fr 100px 120px 90px 140px 140px 120px;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-light);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.stats-table-header span {
+    text-align: left;
+}
+
+.stats-table-header span:not(:first-child) {
+    text-align: right;
+}
+
+.stats-table-row {
+    display: grid;
+    grid-template-columns: 2fr 100px 120px 90px 140px 140px 120px;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-light);
+    transition: var(--transition-fast);
+    align-items: center;
+}
+
+.stats-table-row:hover {
+    background: rgba(0, 217, 255, 0.05);
+}
+
+.offer-stats-name {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+}
+
+.offer-name-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+.offer-id-text {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: left;
+}
+
+.stats-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-align: right;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+.cr-value {
+    text-align: right;
+}
+
+.positive-cr {
+    color: #00ff88;
+    font-weight: 600;
+}
+
+.payout-value {
+    color: #ffb800;
+}
+
+.revenue-value {
+    color: #00d9ff;
+}
+
+.profit-value {
+    text-align: right;
+}
+
+.positive-profit {
+    color: #00ff88;
+    font-weight: 600;
+}
+
+.negative-profit {
+    color: #ff4444;
+    font-weight: 600;
+}
+
+/* Responsive for offer stats table */
+@media (min-width: 1025px) {
+    .offer-statistics-card {
+        height: 500px;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    .offer-statistics-card {
+        height: 450px;
+        grid-column: 1 / -1;
+    }
+
+    .stats-table-header,
+    .stats-table-row {
+        grid-template-columns: 1.5fr 80px 100px 70px 110px 110px 100px;
+        gap: 12px;
+        padding: 10px 12px;
+        font-size: 10px;
+    }
+
+    .offer-name-text {
+        font-size: 12px;
+    }
+
+    .stats-value {
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 768px) {
+    .offer-statistics-card {
+        height: 400px;
+        grid-column: 1 / -1;
+    }
+
+    .stats-table-header,
+    .stats-table-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+        padding: 10px 12px;
+    }
+
+    .stats-table-header span {
+        display: none;
+    }
+
+    .stats-table-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--border-light);
+        margin-bottom: 8px;
+        border-radius: var(--radius-sm);
+    }
+
+    .stats-value {
+        display: flex;
+        justify-content: space-between;
+        text-align: left;
+    }
+
+    .stats-value::before {
+        content: attr(data-label);
+        font-size: 10px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+    }
+
+    .offer-stats-name {
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border-light);
+    }
+}
+
+@media (max-width: 480px) {
+    .offer-statistics-card {
+        height: 350px;
     }
 }

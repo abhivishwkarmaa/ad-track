@@ -113,8 +113,8 @@ const LiveLogs = () => {
             <div className="logs-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <h1>Live Logs</h1>
-                    <button 
-                        className="btn btn-outline" 
+                    <button
+                        className="btn btn-outline"
                         onClick={() => navigate('/reports')}
                         style={{ padding: '6px 12px', fontSize: '14px' }}
                     >
@@ -126,7 +126,7 @@ const LiveLogs = () => {
                         <select value={selectedOffer} onChange={(e) => setSelectedOffer(e.target.value)}>
                             <option value="">All Offers</option>
                             {offers.map(o => (
-                                <option key={o.id} value={o.id}>{o.name} ({o.id})</option>
+                                <option key={o.id} value={o.id}>{o.name} ({o.display_id || o.id})</option>
                             ))}
                         </select>
                     </div>
@@ -223,7 +223,7 @@ const LiveLogs = () => {
                                     <>
                                         <td>{formatDate(row.click_created_at || row.created_at)}</td>
                                         <td className="monospace">{row.click_uuid}</td>
-                                        <td>{row.offer_name} ({row.offer_id})</td>
+                                        <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_company || row.publisher_email} - ({row.publisher_id})</td>
                                         <td>{row.ip}</td>
                                         <td>{[row.city, row.region, row.country].filter(Boolean).join(', ') || '-'}</td>
@@ -236,7 +236,7 @@ const LiveLogs = () => {
                                         <td>{formatDate(row.created_at)}</td>
                                         <td className="monospace">{row.conversion_uuid}</td>
                                         <td className="monospace">{row.click_uuid}</td>
-                                        <td>{row.offer_name} ({row.offer_id})</td>
+                                        <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_name} - ({row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
                                         <td><span className={`badge ${row.status}`}>{row.status}</span></td>

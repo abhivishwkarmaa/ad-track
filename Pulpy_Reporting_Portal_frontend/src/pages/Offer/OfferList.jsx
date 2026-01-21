@@ -86,7 +86,9 @@ function OfferList() {
 
     const filteredOffers = offers.filter(offer => {
         const matchesSearch = offer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (offer.advertiser_id && offer.advertiser_id.toString().includes(searchTerm));
+            (offer.advertiser_id && offer.advertiser_id.toString().includes(searchTerm)) ||
+            (offer.display_id && offer.display_id.toString().includes(searchTerm)) ||
+            (offer.id && offer.id.toString().includes(searchTerm));
         const matchesStatus = statusFilter === 'all' || offer.status.toLowerCase() === statusFilter.toLowerCase();
         return matchesSearch && matchesStatus;
     });
@@ -239,7 +241,7 @@ function OfferList() {
                                 <tr key={offer.id}>
                                     <td>
                                         <div className="offer-name">{offer.name}</div>
-                                        <div className="offer-id">ID: {offer.id}</div>
+                                        <div className="offer-id">ID: {offer.display_id || offer.id}</div>
                                     </td>
                                     <td>Advertiser {offer.advertiser_id || '-'}</td>
                                     <td>{offer.category || '-'}</td>

@@ -16,6 +16,7 @@ async function reportRoutes(fastify, options) {
   fastify.get('/dashboard/top-affiliates', dashboardController.getTopAffiliates);
   fastify.get('/dashboard/info-cards', dashboardController.getInfoCards);
   fastify.get('/dashboard/top-countries', dashboardController.getTopCountries);
+  fastify.get('/dashboard/offer-statistics', dashboardController.getOfferStatistics);
 
   // Reports
   fastify.get('/summary', reportController.getSummary);

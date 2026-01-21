@@ -111,14 +111,73 @@ function Dashboard() {
     const [affiliatesData, setAffiliatesData] = useState(null);
     const [affiliatesLoading, setAffiliatesLoading] = useState(false);
     const [affiliatesError, setAffiliatesError] = useState(null);
+    const [offerStatsData, setOfferStatsData] = useState(null);
+    const [offerStatsLoading, setOfferStatsLoading] = useState(false);
+    const [offerStatsError, setOfferStatsError] = useState(null);
+    const [dateFilter, setDateFilter] = useState('this_month');
+
+    // Get date range based on filter
+    // Helper to format date as YYYY-MM-DD in local time
+    const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    // Get date range based on filter
+    const getDateRange = (filter) => {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        let dateFrom, dateTo;
+
+        switch (filter) {
+            case 'today':
+                dateFrom = formatDate(today);
+                dateTo = formatDate(today);
+                break;
+            case 'yesterday':
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                dateFrom = formatDate(yesterday);
+                dateTo = formatDate(yesterday);
+                break;
+            case 'this_week':
+                const weekStart = new Date(today);
+                weekStart.setDate(today.getDate() - today.getDay());
+                dateFrom = formatDate(weekStart);
+                dateTo = formatDate(today);
+                break;
+            case 'this_month':
+                const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                dateFrom = formatDate(monthStart);
+                dateTo = formatDate(today);
+                break;
+            case 'last_month':
+                const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+                dateFrom = formatDate(lastMonthStart);
+                dateTo = formatDate(lastMonthEnd);
+                break;
+            default:
+                const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                dateFrom = formatDate(defaultStart);
+                dateTo = formatDate(today);
+        }
+
+        return { date_from: dateFrom, date_to: dateTo };
+    };
 
     // Fetch dashboard data
     useEffect(() => {
+        const dateRange = getDateRange(dateFilter);
+        console.log('Date Filter Changed:', dateFilter, 'Date Range:', dateRange);
+
         const fetchDashboardData = async () => {
             try {
                 setLoading(true);
                 setError(null);
-                const response = await dashboardAPI.getDashboard();
+                const response = await dashboardAPI.getDashboard(dateRange);
                 if (response.success) {
                     setDashboardData(response.data);
                 } else {
@@ -135,7 +194,7 @@ function Dashboard() {
         const fetchDashboardCards = async () => {
             try {
                 setCardsLoading(true);
-                const response = await dashboardAPI.getDashboardCards();
+                const response = await dashboardAPI.getDashboardCards(dateRange);
                 if (response.success) {
                     setDashboardCards(response.data);
                 }
@@ -149,7 +208,7 @@ function Dashboard() {
         const fetchTopOffers = async () => {
             try {
                 setTopOffersLoading(true);
-                const response = await dashboardAPI.getTopOffers();
+                const response = await dashboardAPI.getTopOffers(dateRange);
                 if (response.success) {
                     setTopOffers(response.data || []);
                 }
@@ -163,7 +222,7 @@ function Dashboard() {
         const fetchPerformance = async () => {
             try {
                 setPerformanceLoading(true);
-                const response = await dashboardAPI.getPerformance();
+                const response = await dashboardAPI.getPerformance(dateRange);
                 if (response.success) {
                     setPerformanceData(response.data || []);
                 }
@@ -177,7 +236,7 @@ function Dashboard() {
         const fetchTopAffiliates = async () => {
             try {
                 setTopAffiliatesLoading(true);
-                const response = await dashboardAPI.getTopAffiliates();
+                const response = await dashboardAPI.getTopAffiliates(dateRange);
                 if (response.success) {
                     setTopAffiliates(response.data || []);
                 }
@@ -191,7 +250,7 @@ function Dashboard() {
         const fetchTopCountries = async () => {
             try {
                 setTopCountriesLoading(true);
-                const response = await dashboardAPI.getTopCountries();
+                const response = await dashboardAPI.getTopCountries(dateRange);
                 if (response.success) {
                     setTopCountries(response.data || []);
                 }
@@ -207,7 +266,7 @@ function Dashboard() {
                 setSummaryLoading(true);
                 setSummaryError(null);
                 setSummaryData(null);
-                const response = await dashboardAPI.getSummary();
+                const response = await dashboardAPI.getSummary(dateRange);
                 if (response.success) {
                     setSummaryData(response.data);
                 } else {
@@ -225,7 +284,7 @@ function Dashboard() {
             try {
                 setDetailedLoading(true);
                 setDetailedError(null);
-                const response = await dashboardAPI.getDetailed();
+                const response = await dashboardAPI.getDetailed(dateRange);
                 if (response.success) {
                     setDetailedData(response.data);
                 } else {
@@ -243,7 +302,7 @@ function Dashboard() {
             try {
                 setPublisherLoading(true);
                 setPublisherError(null);
-                const response = await dashboardAPI.getPublisherConversions();
+                const response = await dashboardAPI.getPublisherConversions(dateRange);
                 if (response.success) {
                     setPublisherData(response.data);
                 } else {
@@ -304,6 +363,27 @@ function Dashboard() {
             }
         };
 
+        const fetchOfferStatsData = async () => {
+            try {
+                setOfferStatsLoading(true);
+                setOfferStatsError(null);
+                const response = await dashboardAPI.getOfferStatistics({
+                    limit: 20,
+                    ...dateRange
+                });
+                if (response.success && response.data) {
+                    setOfferStatsData(response.data);
+                } else {
+                    setOfferStatsError('Failed to load offer statistics');
+                }
+            } catch (err) {
+                console.error('Offer stats fetch error:', err);
+                setOfferStatsError(err.message || 'Failed to load offer statistics');
+            } finally {
+                setOfferStatsLoading(false);
+            }
+        };
+
         fetchDashboardData();
         fetchDashboardCards();
         fetchTopOffers();
@@ -314,7 +394,8 @@ function Dashboard() {
         fetchPublisherData();
         fetchOffersData();
         fetchAffiliatesData();
-    }, []);
+        fetchOfferStatsData();
+    }, [dateFilter]);
 
     const apiStats = dashboardCards || dashboardData || {};
 
@@ -355,6 +436,23 @@ function Dashboard() {
         day: 'numeric'
     });
 
+    const getFilterLabel = () => {
+        switch (dateFilter) {
+            case 'today':
+                return 'Today';
+            case 'yesterday':
+                return 'Yesterday';
+            case 'this_week':
+                return 'This Week';
+            case 'this_month':
+                return 'This Month';
+            case 'last_month':
+                return 'Last Month';
+            default:
+                return 'This Month';
+        }
+    };
+
     if (loading) {
         return (
             <div className="dashboard">
@@ -389,6 +487,21 @@ function Dashboard() {
                     </p>
                 </div>
                 <div className="dashboard-header-right">
+                    <div className="date-filter-container">
+                        <label htmlFor="date-filter">Filter:</label>
+                        <select
+                            id="date-filter"
+                            className="date-filter-select"
+                            value={dateFilter}
+                            onChange={(e) => setDateFilter(e.target.value)}
+                        >
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="this_week">This Week</option>
+                            <option value="this_month">This Month</option>
+                            <option value="last_month">Last Month</option>
+                        </select>
+                    </div>
                     <span className="welcome-text">Welcome, <strong>{user?.name || user?.fullName || 'User'}</strong></span>
                 </div>
             </div>
@@ -534,7 +647,7 @@ function Dashboard() {
                                 <div key={offer.id} className="offer-row">
                                     <div className="offer-info">
                                         <span className="offer-name">{offer.name}</span>
-                                        <span className="offer-id">ID: {offer.id}</span>
+                                        <span className="offer-id">ID: {offer.display_id || offer.id}</span>
                                         <span className="offer-description">{offer.description}</span>
                                     </div>
                                     <div className="offer-meta">
@@ -603,7 +716,7 @@ function Dashboard() {
                 <div className="dashboard-card summary-reports-card">
                     <div className="card-header">
                         <h3>Performance Summary</h3>
-                        <span className="period-indicator">Last 30 Days</span>
+                        <span className="period-indicator">{getFilterLabel()}</span>
                     </div>
                     {summaryLoading ? (
                         <div className="loading-spinner">Loading summary...</div>
@@ -678,7 +791,7 @@ function Dashboard() {
                                 <div key={item.click_id || index} className="table-row">
                                     <div className="activity-offer">
                                         <span className="offer-name">{item.offer_name || 'N/A'}</span>
-                                        <span className="offer-id">ID: {item.offer_id}</span>
+                                        <span className="offer-id">ID: {item.display_id || item.offer_id}</span>
                                     </div>
                                     <div className="activity-publisher">
                                         <span className="publisher-name">{item.publisher_company || item.publisher_email || 'N/A'}</span>
@@ -708,7 +821,7 @@ function Dashboard() {
                 <div className="dashboard-card publisher-performance-card">
                     <div className="card-header">
                         <h3>Publisher Performance</h3>
-                        <span className="period-indicator">This Month</span>
+                        <span className="period-indicator">{getFilterLabel()}</span>
                     </div>
                     {publisherLoading ? (
                         <div className="loading-spinner">Loading publisher data...</div>
@@ -770,7 +883,7 @@ function Dashboard() {
                                 <div key={offer.offer_id} className="offer-row">
                                     <div className="offer-info">
                                         <span className="offer-name">{offer.offer_name || 'N/A'}</span>
-                                        <span className="offer-id">ID: {offer.offer_id}</span>
+                                        <span className="offer-id">ID: {offer.display_id || offer.offer_id}</span>
                                     </div>
                                     <div className="offer-meta">
                                         <span className="offer-payout">{formatNumber(offer.conversions || 0)} conversions</span>
@@ -842,6 +955,60 @@ function Dashboard() {
                         </div>
                     ) : (
                         <div className="no-data">No country data available</div>
+                    )}
+                </div>
+
+                {/* Offer Statistics Table */}
+                <div className="dashboard-card offer-statistics-card">
+                    <div className="card-header">
+                        <h3>Offer Statistics</h3>
+                        <span className="period-indicator">{getFilterLabel()}</span>
+                    </div>
+                    {offerStatsLoading ? (
+                        <div className="loading-spinner">Loading offer statistics...</div>
+                    ) : offerStatsError ? (
+                        <div className="error-state">
+                            <p>Error: {offerStatsError}</p>
+                            <button onClick={() => window.location.reload()}>Retry</button>
+                        </div>
+                    ) : offerStatsData && offerStatsData.length > 0 ? (
+                        <div className="offer-stats-table-wrapper">
+                            <div className="offer-stats-table">
+                                <div className="stats-table-header">
+                                    <span>Offer Name</span>
+                                    <span>Clicks</span>
+                                    <span>Conversions</span>
+                                    <span>CR %</span>
+                                    <span>Affiliate Payout</span>
+                                    <span>Advertiser Payout</span>
+                                    <span>Profit</span>
+                                </div>
+                                {offerStatsData.map((stat, index) => (
+                                    <div key={stat.offer_id || index} className="stats-table-row">
+                                        <div className="offer-stats-name">
+                                            <span className="offer-name-text">{stat.offer_name}</span>
+                                            <span className="offer-id-text">ID: {stat.display_id || stat.offer_id}</span>
+                                        </div>
+                                        <div className="stats-value" data-label="Clicks">{formatNumber(stat.clicks)}</div>
+                                        <div className="stats-value" data-label="Conversions">{formatNumber(stat.conversions)}</div>
+                                        <div className="stats-value cr-value" data-label="CR %">
+                                            <span className={stat.conversion_ratio > 0 ? 'positive-cr' : ''}>
+                                                {stat.conversion_ratio}%
+                                            </span>
+                                        </div>
+                                        <div className="stats-value payout-value" data-label="Affiliate Payout">{formatCurrency(stat.affiliate_payout)}</div>
+                                        <div className="stats-value revenue-value" data-label="Advertiser Payout">{formatCurrency(stat.advertiser_payout)}</div>
+                                        <div className="stats-value profit-value" data-label="Profit">
+                                            <span className={stat.profit > 0 ? 'positive-profit' : stat.profit < 0 ? 'negative-profit' : ''}>
+                                                {formatCurrency(stat.profit)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="no-data">No offer statistics available</div>
                     )}
                 </div>
             </div>

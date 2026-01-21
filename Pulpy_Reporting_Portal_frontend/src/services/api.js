@@ -100,12 +100,15 @@ export const authAPI = {
 // Dashboard API
 export const dashboardAPI = {
     // Main dashboard data (KPI cards)
-    getDashboard: async () => {
-        return apiRequest('/api/admin/reports/dashboard');
+    // Main dashboard data (KPI cards)
+    getDashboard: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard?${queryString}`);
     },
     // Dashboard cards - main metrics for UI cards display
-    getDashboardCards: async () => {
-        return apiRequest('/api/admin/reports/dashboard/cards');
+    getDashboardCards: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/cards?${queryString}`);
     },
     // Top offers with conversions
     getTopOffers: async (params = {}) => {
@@ -144,6 +147,11 @@ export const dashboardAPI = {
     getConversions: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/conversions?${queryString}`);
+    },
+    // Offer Statistics
+    getOfferStatistics: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/offer-statistics?${queryString}`);
     },
 };
 

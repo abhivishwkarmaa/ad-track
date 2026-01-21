@@ -252,7 +252,7 @@ function OfferDetail() {
                     </button>
                     <div>
                         <h1>{offer.name}</h1>
-                        <p>Offer ID: {offer.id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
+                        <p>Offer ID: {offer.display_id || offer.id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>

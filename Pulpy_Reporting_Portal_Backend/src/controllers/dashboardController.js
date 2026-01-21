@@ -15,7 +15,12 @@ export class DashboardController {
         });
       }
 
-      const stats = await dashboardService.getDashboardStats(tenantId);
+      const filters = {
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+      };
+
+      const stats = await dashboardService.getDashboardStats(filters, tenantId);
       return reply.send({
         success: true,
         data: stats,
@@ -172,7 +177,12 @@ export class DashboardController {
         });
       }
 
-      const data = await dashboardService.getDashboardCards(tenantId);
+      const filters = {
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+      };
+
+      const data = await dashboardService.getDashboardCards(filters, tenantId);
       return reply.send({
         success: true,
         data,
@@ -225,6 +235,34 @@ export class DashboardController {
       });
     } catch (error) {
       logger.error('DashboardController.getRecentActivity error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getOfferStatistics(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {
+        limit: request.query.limit,
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+      };
+
+      const data = await dashboardService.getOfferStatistics(filters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getOfferStatistics error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
