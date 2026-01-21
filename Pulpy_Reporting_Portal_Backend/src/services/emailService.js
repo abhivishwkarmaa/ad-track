@@ -21,13 +21,17 @@ class EmailService {
     try {
       // SMTP configuration from environment variables
       const smtpConfig = {
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
+        host: process.env.SMTP_HOST || 'smtpout.secureserver.net',
+        port: parseInt(process.env.SMTP_PORT || '465'), // GoDaddy often works better with 465 (SSL) or 587 (TLS)
+        secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465', // true for 465, false for other ports
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASSWORD,
         },
+        tls: {
+          // Do not fail on invalid certs
+          rejectUnauthorized: false
+        }
       };
 
       // Validate required SMTP credentials
@@ -38,7 +42,11 @@ class EmailService {
       }
 
       // Create transporter
-      this.transporter = nodemailer.createTransport(smtpConfig);
+      this.transporter = nodemailer.createTransport({
+        ...smtpConfig,
+        debug: true, // show debug output
+        logger: true // log information in console
+      });
 
       // Verify connection
       await this.transporter.verify();
@@ -65,7 +73,7 @@ class EmailService {
 
     try {
       const mailOptions = {
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        from: process.env.SMTP_FROM || process.env.SMTP_USER || 'support@track-myads.com',
         to: options.to,
         subject: options.subject,
         html: options.html,
@@ -109,7 +117,7 @@ class EmailService {
    */
   async sendContactNotification(contactData) {
     const adminEmail = process.env.CONTACT_ADMIN_EMAIL || process.env.SMTP_USER;
-    
+
     if (!adminEmail) {
       logger.warn('⚠️ CONTACT_ADMIN_EMAIL not configured. Skipping notification email.');
       return;
@@ -133,6 +141,47 @@ class EmailService {
     return await this.sendEmail({
       to: contactData.email,
       subject: 'Thank You for Contacting TrackMyAds',
+      html,
+    });
+  }
+
+  /**
+   * Send OTP email
+   */
+  async sendOtpEmail(email, otp) {
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Password Reset OTP</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #ff6b35; margin: 0;">TrackMyAds</h1>
+  </div>
+  <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 30px; text-align: center;">
+    <h2 style="color: #333; margin-top: 0;">Password Reset Request</h2>
+    <p style="color: #666; font-size: 16px;">
+      Your One-Time Password (OTP) for password reset is:
+    </p>
+    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #2196F3; margin: 20px 0;">
+      ${otp}
+    </div>
+    <p style="color: #666; font-size: 14px;">
+      This OTP is valid for 10 minutes. Do not share this OTP with anyone.
+    </p>
+    <p style="color: #666; font-size: 14px;">
+      If you did not request this OTP, please ignore this email.
+    </p>
+  </div>
+</body>
+</html>
+    `;
+
+    return await this.sendEmail({
+      to: email,
+      subject: 'Your Password Reset OTP - TrackMyAds',
       html,
     });
   }

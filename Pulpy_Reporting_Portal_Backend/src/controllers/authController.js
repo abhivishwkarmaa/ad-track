@@ -4,6 +4,8 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import emailService from '../services/emailService.js';
+import crypto from 'crypto';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -53,7 +55,7 @@ export class AuthController {
       // Note: For tenant-scoped registration, check within tenant scope if tenant is specified
       let existingQuery = 'SELECT id FROM admin_users WHERE email = ?';
       const existingParams = [email];
-      
+
       // If tenant subdomain is present, only check within that tenant (if you want tenant-scoped emails)
       // For now, email uniqueness is global, but we'll assign tenant_id based on subdomain
       const [existingRows] = await pool.query(existingQuery, existingParams);
@@ -77,7 +79,7 @@ export class AuthController {
       // ✅ STEP 5: Create admin user with tenant_id
       let insertQuery;
       let insertParams;
-      
+
       try {
         // Try insert with tenant_id
         insertQuery = 'INSERT INTO admin_users (email, name, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)';
@@ -308,11 +310,11 @@ export class AuthController {
 
       // Generate JWT token (include tenant_id and token type)
       const token = jwt.sign(
-        { 
-          id: admin.id, 
-          email: admin.email, 
-          name: admin.name, 
-          role: admin.role, 
+        {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          role: admin.role,
           tenant_id: tenantId,
           token_type: tokenType
         },
@@ -347,6 +349,7 @@ export class AuthController {
     }
   }
 
+
   async getProfile(request, reply) {
     try {
       // Admin info is already attached by auth middleware
@@ -356,6 +359,153 @@ export class AuthController {
       });
     } catch (error) {
       logger.error('AuthController.getProfile error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async ensureOtpTable() {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS password_resets (
+          email VARCHAR(255) NOT NULL,
+          otp VARCHAR(10) NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending',
+          expires_at DATETIME NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (email)
+        )
+      `);
+    } catch (error) {
+      logger.error('Error creating password_resets table:', error);
+    }
+  }
+
+  async requestOtp(request, reply) {
+    try {
+      await this.ensureOtpTable(); // Ensure table exists
+
+      const email = request.body?.email || request.admin?.email;
+      if (!email) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Email is required'
+        });
+      }
+
+      // Check if user exists
+      const [users] = await pool.query('SELECT id, email, name FROM admin_users WHERE email = ?', [email]);
+      if (!users || users.length === 0) {
+        // Security: Don't reveal user doesn't exist
+        return reply.send({
+          success: true,
+          message: 'If an account exists with this email, an OTP has been sent.'
+        });
+      }
+
+      const otp = crypto.randomInt(100000, 999999).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      // Store OTP (Upsert)
+      await pool.query(`
+        INSERT INTO password_resets (email, otp, expires_at, status)
+        VALUES (?, ?, ?, 'pending')
+        ON DUPLICATE KEY UPDATE otp = VALUES(otp), expires_at = VALUES(expires_at), status = 'pending'
+      `, [email, otp, expiresAt]);
+
+      // Send Email
+      await emailService.sendOtpEmail(email, otp);
+
+      return reply.send({
+        success: true,
+        message: 'OTP sent to your email'
+      });
+    } catch (error) {
+      logger.error('requestOtp error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async verifyResetOtp(request, reply) {
+    try {
+      const { email, otp } = request.body;
+      const userEmail = email || request.admin?.email;
+
+      if (!userEmail || !otp) {
+        return reply.code(400).send({ success: false, message: 'Email and OTP are required' });
+      }
+
+      const [rows] = await pool.query(
+        'SELECT * FROM password_resets WHERE email = ? AND otp = ? AND expires_at > NOW()',
+        [userEmail, otp]
+      );
+
+      if (!rows || rows.length === 0) {
+        return reply.code(400).send({ success: false, message: 'Invalid or expired OTP' });
+      }
+
+      // Mark OTP as verified/used so it can be used to reset password
+      // We can issue a temporary token here
+
+      // Generate a short-lived reset token
+      const resetToken = jwt.sign(
+        { email: userEmail, type: 'password_reset' },
+        ADMIN_JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+
+      return reply.send({
+        success: true,
+        message: 'OTP verified',
+        resetToken
+      });
+
+    } catch (error) {
+      logger.error('verifyResetOtp error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async resetPassword(request, reply) {
+    try {
+      const { resetToken, newPassword } = request.body;
+      if (!resetToken || !newPassword) {
+        return reply.code(400).send({ success: false, message: 'Token and new password required' });
+      }
+
+      if (newPassword.length < 6) {
+        return reply.code(400).send({ success: false, message: 'Password must be at least 6 characters' });
+      }
+
+      // Verify token
+      let decoded;
+      try {
+        decoded = jwt.verify(resetToken, ADMIN_JWT_SECRET);
+      } catch (err) {
+        return reply.code(401).send({ success: false, message: 'Invalid or expired reset token' });
+      }
+
+      if (decoded.type !== 'password_reset') {
+        return reply.code(401).send({ success: false, message: 'Invalid token type' });
+      }
+
+      const email = decoded.email;
+
+      // Hash new password
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+
+      // Update password
+      await pool.query('UPDATE admin_users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+
+      // Clear OTP
+      await pool.query('DELETE FROM password_resets WHERE email = ?', [email]);
+
+      return reply.send({
+        success: true,
+        message: 'Password updated successfully'
+      });
+
+    } catch (error) {
+      logger.error('resetPassword error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }

@@ -95,6 +95,41 @@ export const authAPI = {
             body: JSON.stringify({ email, password }),
         });
     },
+    requestPasswordResetOtp: async (email) => {
+        return apiRequest('/api/auth/forgot-password/request-otp', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+    },
+    verifyPasswordResetOtp: async (email, otp) => {
+        return apiRequest('/api/auth/forgot-password/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify({ email, otp }),
+        });
+    },
+    resetPassword: async (resetToken, newPassword) => {
+        return apiRequest('/api/auth/forgot-password/reset', {
+            method: 'POST',
+            body: JSON.stringify({ resetToken, newPassword }),
+        });
+    },
+    requestChangePasswordOtp: async () => {
+        return apiRequest('/api/auth/change-password/request-otp', {
+            method: 'POST',
+        });
+    },
+    verifyChangePasswordOtp: async (otp) => {
+        return apiRequest('/api/auth/change-password/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify({ otp }),
+        });
+    },
+    changePassword: async (resetToken, newPassword) => {
+        return apiRequest('/api/auth/change-password/reset', {
+            method: 'POST',
+            body: JSON.stringify({ resetToken, newPassword }),
+        });
+    },
 };
 
 // Dashboard API

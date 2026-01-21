@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { Link } from 'react-router-dom';
 import logoImage from '../../assets/logo.png';
 import './Login.css';
 
@@ -83,6 +84,7 @@ function Login() {
                                 />
                                 Remember me
                             </label>
+                            <Link to="/forgot-password" style={{ color: '#2563EB', textDecoration: 'none', fontSize: '14px' }}>Forgot Password?</Link>
                         </div>
 
                         <button type="submit" className="login-btn" disabled={loading}>
@@ -90,7 +92,7 @@ function Login() {
                         </button>
                     </form>
 
-            
+
                 </div>
             </div>
 

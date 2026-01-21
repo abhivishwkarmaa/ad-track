@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-
 import { useState, useEffect } from 'react';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Login/Login';
+import ForgotPassword from './pages/Login/ForgotPassword';
 import Dashboard from './pages/Dashboard/Dashboard';
 import OfferList from './pages/Offer/OfferList';
 import NewOffer from './pages/Offer/NewOffer';
@@ -46,6 +47,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
+      <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
       <Route
         path="/"
         element={

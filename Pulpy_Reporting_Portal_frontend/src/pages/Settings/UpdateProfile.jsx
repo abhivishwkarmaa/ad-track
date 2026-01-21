@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { authAPI } from '../../services/api';
 import './Settings.css';
 
 function UpdateProfile() {
@@ -12,71 +13,75 @@ function UpdateProfile() {
         fullName: user?.fullName || '',
         email: user?.email || '',
         companyName: user?.companyName || '',
-        phone: user?.phone || '',
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
+        phone: user?.phone || ''
     });
 
-    const [errors, setErrors] = useState({});
+    // Password Change State
+    const [passStep, setPassStep] = useState(0); // 0: Idle, 1: Verify OTP, 2: New Password
+    const [otp, setOtp] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [resetToken, setResetToken] = useState('');
+    const [passLoading, setPassLoading] = useState(false);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
-        if (errors[name]) {
-            setErrors(prev => ({ ...prev, [name]: '' }));
-        }
     };
 
-    const validatePassword = () => {
-        const newErrors = {};
-
-        if (formData.newPassword) {
-            if (!formData.currentPassword) {
-                newErrors.currentPassword = 'Current password is required';
-            }
-            if (formData.newPassword.length < 6) {
-                newErrors.newPassword = 'Password must be at least 6 characters';
-            }
-            if (formData.newPassword !== formData.confirmPassword) {
-                newErrors.confirmPassword = 'Passwords do not match';
-            }
-        }
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
-
-    const handleSubmit = async (e) => {
+    const handleProfileUpdate = async (e) => {
         e.preventDefault();
-
-        if (!validatePassword()) return;
-
         setLoading(true);
-
         try {
-            const updates = {
-                fullName: formData.fullName,
-                companyName: formData.companyName,
-                phone: formData.phone
-            };
-
-            updateProfile(updates);
-
-            // Clear password fields
-            setFormData(prev => ({
-                ...prev,
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: ''
-            }));
-
+            await updateProfile(formData);
             toast.success('Profile updated successfully!');
         } catch (error) {
             toast.error('Failed to update profile');
         } finally {
             setLoading(false);
         }
+    };
+
+    // Password Handlers
+    const requestOtp = async () => {
+        setPassLoading(true);
+        try {
+            await authAPI.requestChangePasswordOtp();
+            setPassStep(1);
+            toast.info(`OTP sent to ${user.email}`);
+        } catch (err) {
+            toast.error(err.message || 'Failed to send OTP');
+        } finally { setPassLoading(false); }
+    };
+
+    const verifyOtp = async () => {
+        setPassLoading(true);
+        try {
+            const res = await authAPI.verifyChangePasswordOtp(otp);
+            setResetToken(res.resetToken);
+            setPassStep(2);
+            toast.success('OTP Verified');
+        } catch (err) {
+            toast.error(err.message || 'Invalid OTP');
+        } finally { setPassLoading(false); }
+    };
+
+    const changePassword = async () => {
+        if (newPassword !== confirmPassword) return toast.error('Passwords do not match');
+        if (newPassword.length < 6) return toast.error('Password too short');
+
+        setPassLoading(true);
+        try {
+            await authAPI.changePassword(resetToken, newPassword);
+            toast.success('Password changed successfully');
+            setPassStep(0);
+            setOtp('');
+            setNewPassword('');
+            setConfirmPassword('');
+            setResetToken('');
+        } catch (err) {
+            toast.error(err.message || 'Failed to change password');
+        } finally { setPassLoading(false); }
     };
 
     return (
@@ -86,20 +91,20 @@ function UpdateProfile() {
                 <p>Manage your account settings and preferences</p>
             </div>
 
-            <form onSubmit={handleSubmit}>
-                <div className="settings-form-container">
-                    {/* Avatar Section */}
-                    <div className="settings-avatar-section">
-                        <div className="settings-avatar">
-                            {user?.fullName?.charAt(0) || 'U'}
-                        </div>
-                        <div className="settings-avatar-info">
-                            <h3>{user?.fullName || 'User'}</h3>
-                            <p>{user?.email || 'user@example.com'}</p>
-                        </div>
+            <div className="settings-form-container">
+                {/* Avatar Section */}
+                <div className="settings-avatar-section">
+                    <div className="settings-avatar">
+                        {user?.fullName?.charAt(0) || 'U'}
                     </div>
+                    <div className="settings-avatar-info">
+                        <h3>{user?.fullName || 'User'}</h3>
+                        <p>{user?.email || 'user@example.com'}</p>
+                    </div>
+                </div>
 
-                    {/* Personal Information */}
+                {/* Personal Information Form */}
+                <form onSubmit={handleProfileUpdate}>
                     <div className="settings-form-section">
                         <h3 className="settings-form-section-title">Personal Information</h3>
                         <div className="settings-form-row two-col">
@@ -111,7 +116,6 @@ function UpdateProfile() {
                                     name="fullName"
                                     value={formData.fullName}
                                     onChange={handleChange}
-                                    placeholder="Enter full name"
                                 />
                             </div>
                             <div className="form-group">
@@ -119,10 +123,9 @@ function UpdateProfile() {
                                 <input
                                     type="email"
                                     className="form-control"
-                                    name="email"
                                     value={formData.email}
                                     disabled
-                                    style={{ opacity: 0.7, cursor: 'not-allowed' }}
+                                    style={{ opacity: 0.7 }}
                                 />
                                 <div className="form-helper">Email cannot be changed</div>
                             </div>
@@ -137,7 +140,6 @@ function UpdateProfile() {
                                     name="companyName"
                                     value={formData.companyName}
                                     onChange={handleChange}
-                                    placeholder="Enter company name"
                                 />
                             </div>
                             <div className="form-group">
@@ -148,64 +150,83 @@ function UpdateProfile() {
                                     name="phone"
                                     value={formData.phone}
                                     onChange={handleChange}
-                                    placeholder="+1 234 567 8900"
                                 />
                             </div>
                         </div>
+                        <button type="submit" className="btn btn-primary" disabled={loading}>
+                            {loading ? 'Saving...' : 'Update Profile'}
+                        </button>
                     </div>
+                </form>
 
-                    {/* Change Password */}
-                    <div className="settings-form-section">
-                        <h3 className="settings-form-section-title">Change Password</h3>
-                        <div className="form-group" style={{ maxWidth: '400px' }}>
-                            <label className="form-label">Current Password</label>
-                            <input
-                                type="password"
-                                className="form-control"
-                                name="currentPassword"
-                                value={formData.currentPassword}
-                                onChange={handleChange}
-                                placeholder="Enter current password"
-                            />
-                            {errors.currentPassword && <div className="form-error">{errors.currentPassword}</div>}
+                <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+                {/* Change Password with OTP */}
+                <div className="settings-form-section">
+                    <h3 className="settings-form-section-title">Change Password</h3>
+                    <p style={{ color: '#666', marginBottom: '15px' }}>
+                        To change your password, you must verify your identity via email OTP.
+                    </p>
+
+                    {passStep === 0 && (
+                        <button className="btn btn-outline" onClick={requestOtp} disabled={passLoading}>
+                            {passLoading ? 'Sending OTP...' : 'Change Password via OTP'}
+                        </button>
+                    )}
+
+                    {passStep === 1 && (
+                        <div style={{ maxWidth: '400px' }}>
+                            <div className="form-group">
+                                <label className="form-label">Enter OTP sent to {user?.email}</label>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        placeholder="6-digit OTP"
+                                        value={otp}
+                                        onChange={(e) => setOtp(e.target.value)}
+                                    />
+                                    <button className="btn btn-primary" onClick={verifyOtp} disabled={passLoading}>
+                                        Verify
+                                    </button>
+                                </div>
+                            </div>
+                            <button className="btn btn-link" onClick={() => setPassStep(0)}>Cancel</button>
                         </div>
+                    )}
 
-                        <div className="settings-form-row two-col">
+                    {passStep === 2 && (
+                        <div style={{ maxWidth: '400px' }}>
                             <div className="form-group">
                                 <label className="form-label">New Password</label>
                                 <input
                                     type="password"
                                     className="form-control"
-                                    name="newPassword"
-                                    value={formData.newPassword}
-                                    onChange={handleChange}
                                     placeholder="Enter new password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
                                 />
-                                {errors.newPassword && <div className="form-error">{errors.newPassword}</div>}
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Confirm New Password</label>
+                                <label className="form-label">Confirm Password</label>
                                 <input
                                     type="password"
                                     className="form-control"
-                                    name="confirmPassword"
-                                    value={formData.confirmPassword}
-                                    onChange={handleChange}
                                     placeholder="Confirm new password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
                                 />
-                                {errors.confirmPassword && <div className="form-error">{errors.confirmPassword}</div>}
+                            </div>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button className="btn btn-success" onClick={changePassword} disabled={passLoading}>
+                                    {passLoading ? 'Updating...' : 'Set New Password'}
+                                </button>
+                                <button className="btn btn-link" onClick={() => setPassStep(0)}>Cancel</button>
                             </div>
                         </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="settings-form-actions">
-                        <button type="submit" className="btn btn-success" disabled={loading}>
-                            {loading ? 'Saving...' : 'Save Changes'}
-                        </button>
-                    </div>
+                    )}
                 </div>
-            </form>
+            </div>
         </div>
     );
 }
