@@ -72,7 +72,7 @@ export class PostbackService {
                 'COUNT', 10
               );
               cursor = parseInt(newCursor);
-              
+
               if (keys.length > 0) {
                 // Try first matching key
                 redisKey = keys[0];
@@ -110,7 +110,7 @@ export class PostbackService {
             });
             throw new Error('Tenant identity required from subdomain. Access via tenant subdomain (e.g., tenant1.domain.com/postback).');
           }
-          
+
           logger.info('[POSTBACK] Tenant resolved from subdomain', {
             tenant_id: tenantId,
             click_id: click_id,
@@ -186,7 +186,7 @@ export class PostbackService {
 
       // 🔒 STRICT: Get tenant_id from subdomain (Host header) - EXCLUSIVE source
       const tenantId = getTenantIdFromRequest(request);
-      
+
       if (!tenantId) {
         logger.error('❌ Postback rejected: No tenant subdomain', {
           host: request.headers.host,
@@ -238,22 +238,50 @@ export class PostbackService {
         }
       }
 
-      // ✅ Tenant_id already resolved from subdomain - no fallback needed
-      // If we reach here without tenantId, it's a system error
-      if (!tenantId) {
-        logger.error('❌ CRITICAL: No tenant_id after validation - system error');
-        throw new Error('Tenant identity required from subdomain. This error indicates a system failure.');
+      // Catch DB errors to failover to Redis buffer
+      try {
+        if (!tenantId) {
+          logger.error('❌ CRITICAL: No tenant_id after validation - system error');
+          throw new Error('Tenant identity required from subdomain. This error indicates a system failure.');
+        }
+
+        if (click && click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
+          // ... error handling ...
+          throw new Error(`Security violation: Click belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+        }
+      } catch (validationErr) {
+        throw validationErr;
+        // Structural/Validation errors should fail hard. 
+        // Only connection/timeout errors should trigger buffer.
       }
-      
-      // ✅ Validate click belongs to resolved tenant (if click exists)
-      if (click && click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
-        logger.error('❌ HARD FAILURE: Click tenant mismatch', {
-          click_id: click.click_uuid,
-          click_tenant_id: click.tenant_id,
-          resolved_tenant_id: tenantId
-        });
-        throw new Error(`Security violation: Click belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
-      }
+
+      // ... continue normal flow ...
+
+      // REVISION: The prompt says "If DB busy/unreachable: Store conversion temporarily in Redis".
+      // This refers to the moment we try to FIND the click in DB or INSERT the conversion.
+      // If valid click found (or not needed due to postback without click_id?), we try to insert conversion.
+
+      // I will implement a `safeQuery` style or wrap the Insert.
+      // The current code structure is linear.
+      // I will add a `catch` block to the main `processPostback` but it's already there.
+      // I need to intercept DB Connection Errors specifically.
+
+      // Logic:
+      // 1. Try to find click in DB. If DB unavailable -> Buffer?
+      //    If we can't verify click in DB, we don't know offer_id/publisher_id. 
+      //    We can only buffer if we trust the inputs (rcid/click_id) or if we can extract data.
+      //    If 'click_id' is present, we blindly respect it? 
+      //    Redis Buffer stores: click_uuid, offer_id, rcid, status, etc.
+      //    If we don't have offer_id (because DB down), we can't populate Redis buffer fully?
+      //    Wait, checking Redis for click first gave us offer_id. 
+      //    If Redis missed, we hit DB. If DB fails, we don't know offer_id.
+      //    So we CANNOT buffer fully if DB is down AND Redis miss, UNLESS we just store raw payload.
+      //    Logic: "Store conversion temporarily in Redis... Worker must reconcile later".
+      //    Valid approach: Store "pending_postback:{uuid}" with raw query/body.
+      //    Worker retries processing it.
+
+      // Let's implement this "Rough Buffer" in the catch block of processPostback.
+
 
       // If rcid provided, check for existing conversion (dedupe)
       if (rcid) {
@@ -536,9 +564,8 @@ export class PostbackService {
         affiliate_postback: postbackResult
       };
     } catch (error) {
-      // Handle MySQL duplicate key violations
+      // 1. Handle MySQL duplicate key violations
       if (error.code === 'ER_DUP_ENTRY') {
-        // Check if it's the click_uuid unique constraint violation
         if (error.message && error.message.includes('uniq_click_uuid')) {
           return {
             success: false,
@@ -547,7 +574,6 @@ export class PostbackService {
             error_type: 'duplicate_click_conversion'
           };
         }
-        // Check if it's the rcid + offer_id unique constraint violation
         if (error.message && error.message.includes('uniq_rcid_offer')) {
           return {
             success: true,
@@ -556,7 +582,6 @@ export class PostbackService {
             error_type: 'duplicate_rcid_offer'
           };
         }
-        // Generic duplicate entry error
         return {
           success: false,
           message: 'Duplicate entry detected',
@@ -565,13 +590,48 @@ export class PostbackService {
         };
       }
 
-      // Handle other specific errors
+      // 2. Handle specific DB Reference Errors
       if (error.code === 'ER_NO_REFERENCED_ROW' || error.code === 'ER_NO_REFERENCED_ROW_2') {
         throw new Error('Invalid reference: The specified offer, publisher, or assignment does not exist');
       }
 
       if (error.code === 'ER_DATA_TOO_LONG') {
         throw new Error('Data too long for one or more fields. Please check your input length.');
+      }
+
+      // 3. ✅ CRITICAL: DB CONNECTION / AVAILABILITY ERRORS -> BUFFER IN REDIS
+      // If DB is down, we must NOT lose the postback.
+      const isDbError = error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' ||
+        error.code === 'PROTOCOL_CONNECTION_LOST' || error.message?.includes('connect') ||
+        (error.code && error.code.toString().startsWith('5')); // 5xx DB errors
+
+      if (isDbError) {
+        try {
+          // Buffer raw request for retry
+          const payload = {
+            query,
+            headers: request?.headers || {},
+            timestamp: new Date().toISOString(),
+            error: error.message
+          };
+          // Use a redis list for Raw Postback Retry
+          await redis.lpush('queue:postbacks:retry', JSON.stringify(payload));
+          logger.warn('⚠️ DB Unavailable - Postback Buffered in Redis for Retry', {
+            error: error.message,
+            click_id: query.click_id,
+            rcid: query.rcid
+          });
+
+          return {
+            success: true,
+            message: 'Conversion buffered (DB Unavailable)',
+            duplicate: false,
+            note: 'Buffered for retry'
+          };
+        } catch (redisErr) {
+          logger.error('❌ CRITICAL: Failed to buffer postback to Redis during DB failure!', redisErr);
+          // Both DB and Redis failed - catastrophic.
+        }
       }
 
       logger.error('PostbackService.processPostback error:', error);

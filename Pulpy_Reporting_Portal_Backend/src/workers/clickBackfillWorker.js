@@ -75,7 +75,7 @@ async function backfillUnflushedClicks() {
 
                         // ✅ CRITICAL: Validate tenant_id (required in strict multi-tenant)
                         let tenantId = null;
-                        if (clickData.tenant_id && clickData.tenant_id !== '' && 
+                        if (clickData.tenant_id && clickData.tenant_id !== '' &&
                             clickData.tenant_id !== 'null' && clickData.tenant_id !== 'undefined') {
                             const parsed = parseInt(clickData.tenant_id);
                             if (!isNaN(parsed) && parsed > 0) {
@@ -141,7 +141,7 @@ async function backfillUnflushedClicks() {
                         if (!clickData.click_uuid || !clickData.offer_id || !clickData.publisher_id) continue;
 
                         let tenantId = null;
-                        if (clickData.tenant_id && clickData.tenant_id !== '' && 
+                        if (clickData.tenant_id && clickData.tenant_id !== '' &&
                             clickData.tenant_id !== 'null' && clickData.tenant_id !== 'undefined') {
                             const parsed = parseInt(clickData.tenant_id);
                             if (!isNaN(parsed) && parsed > 0) {
@@ -190,7 +190,7 @@ async function insertClickIntoDB(clickData) {
     const publisherOfferId = clickData.publisher_offer_id ? parseInt(clickData.publisher_offer_id) : null;
 
     let tenantId = null;
-    if (clickData.tenant_id && clickData.tenant_id !== '' && 
+    if (clickData.tenant_id && clickData.tenant_id !== '' &&
         clickData.tenant_id !== 'null' && clickData.tenant_id !== 'undefined') {
         const parsed = parseInt(clickData.tenant_id);
         if (!isNaN(parsed) && parsed > 0) {
@@ -211,15 +211,15 @@ async function insertClickIntoDB(clickData) {
 
     const values = [
         clickData.click_uuid, offerId, publisherId, publisherOfferId, tenantId,
-        clickData.ip || '', clickData.user_agent || '', clickData.referrer || '', 
+        clickData.ip || '', clickData.user_agent || '', clickData.referrer || '',
         clickData.country || '', clickData.region || null, clickData.city || null,
         clickData.isp || null, clickData.location || null, clickData.domain || '',
-        clickData.device_type || '', clickData.browser || '', clickData.os || '', 
+        clickData.device_type || '', clickData.browser || '', clickData.os || '',
         clickData.os_version || '', clickData.device_brand || '', clickData.device_model || '',
-        clickData.source_id || null, clickData.device_id || null, 
+        clickData.source_id || null, clickData.device_id || null,
         clickData.google_id || null, clickData.android_id || null,
         clickData.rcid || null, clickData.tid || null,
-        clickData.timestamp ? new Date(clickData.timestamp) : new Date(), 
+        clickData.timestamp ? new Date(clickData.timestamp) : new Date(),
         new Date()
     ];
 
@@ -238,10 +238,71 @@ async function startBackfillWorker() {
     // Run immediately on startup (catch any missed clicks)
     await backfillUnflushedClicks();
 
+    // Retry buffered postbacks
+    await retryBufferedPostbacks();
+
     // Then run periodically
     setInterval(async () => {
         await backfillUnflushedClicks();
+        await retryBufferedPostbacks();
     }, BACKFILL_INTERVAL_MS);
+}
+
+/**
+ * Retry buffered postbacks from DB failure
+ */
+import { PostbackService } from '../services/postbackService.js';
+const postbackService = new PostbackService();
+
+async function retryBufferedPostbacks() {
+    try {
+        const RETRY_KEY = 'queue:postbacks:retry';
+        const batchSize = 50;
+
+        // Check length
+        const len = await redis.llen(RETRY_KEY);
+        if (len === 0) return;
+
+        logger.info(`🔄 Retrying ${Math.min(len, batchSize)} buffered postbacks...`);
+
+        for (let i = 0; i < batchSize; i++) {
+            // RPOP - Process oldest first
+            const itemStr = await redis.rpop(RETRY_KEY);
+            if (!itemStr) break;
+
+            try {
+                const item = JSON.parse(itemStr);
+                const { query, headers } = item;
+
+                // Mock Request Object
+                const mockReq = { headers, url: '/postback' };
+
+                await postbackService.processPostback(query, mockReq);
+                logger.info(`✅ Successfully reprocessed buffered postback: ${query.click_id || query.rcid}`);
+
+            } catch (err) {
+                // If it fails again due to DB error, maybe push back to LEFT (Head) or just log
+                // If we push back, we might loop. 
+                // Better: Log and maybe push to a DLQ if it's not a DB error.
+                // If it IS a DB error, we should probably stop processing this batch to avoid spamming.
+
+                const isDbError = err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT' || err.message?.includes('connect');
+
+                if (isDbError) {
+                    logger.warn(`⚠️ DB still unavailable during retry, stopping batch.`);
+                    // Push back to list (Right side? No, we RPOP, so we should RPUSH to put it back at the end? Or LPUSH to put it back at front?)
+                    // If we want to retry it "next", we put it back where we took it. We took from Right (Tail). So put back at Right.
+                    await redis.rpush(RETRY_KEY, itemStr);
+                    break; // Stop processing
+                } else {
+                    logger.error(`❌ Failed to retry postback (permanent failure?): ${err.message}`);
+                    // Maybe move to DLQ?
+                }
+            }
+        }
+    } catch (e) {
+        logger.error(`Error retrying buffered postbacks: ${e.message}`);
+    }
 }
 
 export default startBackfillWorker;

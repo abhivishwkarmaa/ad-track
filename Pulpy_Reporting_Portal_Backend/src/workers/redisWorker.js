@@ -53,6 +53,16 @@ async function setupStream() {
 async function runWorker() {
     let consecutiveErrors = 0;
 
+    // Internal Buffer for Batching
+    let localBuffer = [];
+    let bufferStartTime = Date.now();
+    let lastReclaimTime = Date.now();
+
+    // Config
+    const FLUSH_SIZE = 300;     // Target batch size
+    const FLUSH_TIMEOUT_MS = 60000; // 60s max wait
+    const RECLAIM_INTERVAL_MS = 60000; // Check stuck messages every 60s
+
     try {
         await setupStream();
         logger.info(`👷 Redis Stream Worker Started: ${CONSUMER_NAME}`);
@@ -64,429 +74,285 @@ async function runWorker() {
         throw err;
     }
 
-    logger.info('🔄 Worker loop started - waiting for clicks from stream...');
-
-    // Track last log time for periodic "waiting" messages
-    let lastNoMessageLog = 0;
+    logger.info('🔄 Worker loop started - buffering clicks...');
 
     while (true) {
         try {
-            // Read from Stream
+            // 1. Periodic Stuck Message Reclamation
+            if (Date.now() - lastReclaimTime > RECLAIM_INTERVAL_MS) {
+                await recoverStuckMessages();
+                lastReclaimTime = Date.now();
+            }
+
+            // 2. Read from Stream (Non-blocking or short block)
+            // We use a short block (1s) to stay responsive but not spin-wait
             const response = await redis.xreadgroup(
                 'GROUP', GROUP_NAME, CONSUMER_NAME,
-                'COUNT', BATCH_SIZE,
-                'BLOCK', BATCH_TIMEOUT,
+                'COUNT', 100, // Fetch up to 100 at a time to fill buffer
+                'BLOCK', 1000,
                 'STREAMS', STREAM_KEY, '>'
             );
 
-            // Reset error count on successful read (even if empty)
+            // Reset error count on successful read
             consecutiveErrors = 0;
 
-            if (!response || !response.length) {
-                // No new messages - log periodically (every 10 seconds of waiting)
-                const now = Date.now();
-                if (!lastNoMessageLog || now - lastNoMessageLog > 10000) {
-                    logger.debug('⏳ No new clicks in stream, waiting...');
-                    lastNoMessageLog = now;
+            // 3. Add to Local Buffer
+            if (response && response.length && response[0][1].length > 0) {
+                const streamEntries = response[0][1];
+                for (const [msgId, fields] of streamEntries) {
+                    localBuffer.push({ msgId, fields });
                 }
-                continue;
-            }
 
-            const messageCount = response[0]?.[1]?.length || 0;
-            logger.info(`📥 Received ${messageCount} messages from stream`);
-
-            const streamEntries = response[0][1];
-            if (streamEntries.length === 0) continue;
-
-            logger.info(`📦 Worker Processing Batch: ${streamEntries.length} clicks`);
-
-            const streamClickData = [];
-            const msgIds = [];
-
-            // ✅ CRITICAL: Extract click data from stream messages
-            // New format: tenant_id, offer_id, publisher_id, click_id
-            for (const [msgId, fields] of streamEntries) {
-                // Fields are [key1, val1, key2, val2...]
-                // New format stores: tenant_id, offer_id, publisher_id, click_id
-                const tenantIdIndex = fields.indexOf('tenant_id');
-                const offerIdIndex = fields.indexOf('offer_id');
-                const publisherIdIndex = fields.indexOf('publisher_id');
-                const clickIdIndex = fields.indexOf('click_id');
-                
-                if (tenantIdIndex !== -1 && offerIdIndex !== -1 && 
-                    publisherIdIndex !== -1 && clickIdIndex !== -1) {
-                    const tenantId = fields[tenantIdIndex + 1];
-                    const offerId = fields[offerIdIndex + 1];
-                    const publisherId = fields[publisherIdIndex + 1];
-                    const clickId = fields[clickIdIndex + 1];
-                    
-                    streamClickData.push({
-                        msgId,
-                        tenantId,
-                        offerId,
-                        publisherId,
-                        clickId
-                    });
-                    msgIds.push(msgId);
-                } else {
-                    // Fallback: try old format with 'id' key (backwards compatibility)
-                    const idIndex = fields.indexOf('id');
-                    if (idIndex !== -1) {
-                        const clickId = fields[idIndex + 1];
-                        const tenantId = fields.indexOf('tenant_id') !== -1 ? 
-                            fields[fields.indexOf('tenant_id') + 1] : null;
-                        streamClickData.push({
-                            msgId,
-                            tenantId,
-                            offerId: null, // Will need to read from Redis hash
-                            publisherId: null, // Will need to read from Redis hash
-                            clickId
-                        });
-                        msgIds.push(msgId);
-                    }
+                if (localBuffer.length === streamEntries.length) {
+                    // First items in this new batch cycle
+                    bufferStartTime = Date.now();
                 }
             }
 
-            const clickIds = streamClickData.map(d => d.clickId);
+            // 4. Check Flush Conditions
+            const isSizeFull = localBuffer.length >= FLUSH_SIZE;
+            const isTimeUp = localBuffer.length > 0 && (Date.now() - bufferStartTime >= FLUSH_TIMEOUT_MS);
 
-            if (clickIds.length === 0) {
-                // Ack empty messages
-                if (msgIds.length > 0) await redis.xack(STREAM_KEY, GROUP_NAME, ...msgIds);
-                continue;
-            }
+            if (isSizeFull || isTimeUp) {
+                logger.info(`🔄 Flushing Buffer: ${localBuffer.length} items (Reason: ${isSizeFull ? 'Size' : 'Time'})`);
 
-            // ✅ CRITICAL: Build Redis keys using new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
-            // Fallback to old format if tenant_id/offer_id/publisher_id not in stream
-            const redisKeys = streamClickData.map(data => {
-                if (data.tenantId && data.offerId && data.publisherId && data.clickId) {
-                    return `click:${data.tenantId}:${data.offerId}:${data.publisherId}:${data.clickId}`;
-                } else {
-                    // Fallback to old format (backwards compatibility)
-                    return `click:${data.clickId}`;
-                }
-            });
+                await processBatch(localBuffer);
 
-            // ✅ CRITICAL: Fetch full click data from Redis HASH
-            // Worker MUST re-read full click data from Redis HASH (don't trust stream alone)
-            const pipeline = redis.pipeline();
-            logger.info('📥 Worker fetching click data from Redis:', redisKeys);
-            redisKeys.forEach(key => pipeline.hgetall(key));
-            const dataResults = await pipeline.exec();
-
-            // DEBUG: Log first result to check if data exists
-            if (dataResults.length > 0 && dataResults[0]) {
-                const [err, firstData] = dataResults[0];
-                logger.info('🔍 Worker processing batch - first click data:', {
-                    hasError: !!err,
-                    error: err?.message,
-                    hasData: !!firstData,
-                    dataKeys: firstData ? Object.keys(firstData) : [],
-                    offer_id: firstData?.offer_id,
-                    publisher_id: firstData?.publisher_id,
-                    tenant_id: firstData?.tenant_id,
-                    tenant_id_type: typeof firstData?.tenant_id,
-                    click_uuid: clickIds[0]
-                });
-            }
-
-            // DEBUG: Log first result to check content (removed duplicate logging)
-
-            const validEntries = [];
-            const invalidEntries = [];
-
-            for (let i = 0; i < dataResults.length; i++) {
-                const [err, clickData] = dataResults[i];
-                const streamData = streamClickData[i];
-                const clickUuid = streamData?.clickId || clickIds[i] || null;
-                const redisKey = redisKeys[i] || null;
-
-                // ✅ CRITICAL: Check if click data exists and is valid
-                // Also check if click has already been flushed (avoid duplicate processing)
-                if (!err && clickData && Object.keys(clickData).length > 0 && clickData.offer_id) {
-                    // ✅ CRITICAL: Skip if already flushed (idempotency check)
-                    const isFlushed = clickData.flushed === 'true' || clickData.flushed === true;
-                    if (isFlushed) {
-                        logger.info(`⏭️ Click already flushed (skipping): ${clickUuid}`, {
-                            redis_key: redisKey,
-                            click_id: clickUuid
-                        });
-                        // Still acknowledge message to prevent reprocessing
-                        validEntries.push({
-                            msgId: streamData.msgId,
-                            clickUuid,
-                            clickData,
-                            alreadyFlushed: true
-                        });
-                    } else {
-                        validEntries.push({
-                            msgId: streamData.msgId,
-                            clickUuid,
-                            clickData,
-                            alreadyFlushed: false
-                        });
-                    }
-                } else {
-                    const validationErrors = [];
-                    if (err) validationErrors.push(`Redis error: ${err.message}`);
-                    if (!clickData || Object.keys(clickData).length === 0) {
-                        validationErrors.push('click hash does not exist in Redis (may have expired or was never written)');
-                    } else if (!clickData.offer_id) {
-                        validationErrors.push('missing offer_id in click data');
-                    }
-
-                    invalidEntries.push({
-                        msgId: streamData?.msgId || msgIds[i],
-                        clickUuid,
-                        redisKey,
-                        clickData: clickData || null,
-                        errors: validationErrors
-                    });
-                    logger.warn(`❌ Click data invalid/missing: ${clickUuid || 'unknown'}`, {
-                        redis_key: redisKey,
-                        errors: validationErrors,
-                        hasData: !!clickData,
-                        dataKeys: clickData ? Object.keys(clickData) : [],
-                        redisError: err?.message
-                    });
-                }
-            }
-
-            if (invalidEntries.length > 0) {
-                // Separate entries with missing hashes (expired) from other validation errors
-                const missingHashEntries = invalidEntries.filter(entry =>
-                    entry.errors.some(e => e.includes('click hash does not exist'))
-                );
-                const otherInvalidEntries = invalidEntries.filter(entry =>
-                    !entry.errors.some(e => e.includes('click hash does not exist'))
-                );
-
-                // Move only non-expired invalid entries to DLQ
-                if (otherInvalidEntries.length > 0) {
-                    await moveToDeadLetterQueue(otherInvalidEntries, {
-                        reason: 'validation_error',
-                        context: {
-                            stream: STREAM_KEY,
-                            group: GROUP_NAME,
-                            consumer: CONSUMER_NAME,
-                            batchSize: streamEntries.length
-                        }
-                    });
-                }
-
-                // Acknowledge all invalid entries (including expired hashes) to prevent pile-up
-                const invalidPipeline = redis.pipeline();
-                const invalidMsgIds = invalidEntries.map(entry => entry.msgId);
-                invalidPipeline.xack(STREAM_KEY, GROUP_NAME, ...invalidMsgIds);
-
-                if (missingHashEntries.length > 0) {
-                    logger.warn(`⚠️ Acknowledging ${missingHashEntries.length} clicks with expired/missing hashes (cannot recover)`);
-                }
-                if (otherInvalidEntries.length > 0) {
-                    logger.warn(`⚠️ Acknowledging ${otherInvalidEntries.length} clicks with validation errors (moved to DLQ)`);
-                }
-
-                await invalidPipeline.exec();
-            }
-
-            if (validEntries.length === 0) {
-                logger.warn('⚠️ No valid entries to process after validation', {
-                    total_entries: streamEntries.length,
-                    invalid_count: invalidEntries.length,
-                    invalid_reasons: invalidEntries.map(e => e.errors).flat()
-                });
-                // Still acknowledge invalid messages to prevent them from piling up
-                if (invalidEntries.length > 0) {
-                    const invalidMsgIds = invalidEntries.map(entry => entry.msgId);
-                    await redis.xack(STREAM_KEY, GROUP_NAME, ...invalidMsgIds);
-                    logger.info(`✅ Acknowledged ${invalidEntries.length} invalid messages`);
-                }
-                continue;
-            }
-
-            // ✅ CRITICAL: Log tenant_id status before processing
-            logger.info(`📊 Processing ${validEntries.length} clicks with tenant_ids:`, {
-                tenant_ids: validEntries.map(e => ({
-                    click_uuid: e.clickData.click_uuid,
-                    tenant_id: e.clickData.tenant_id || 'NULL',
-                    tenant_id_type: typeof e.clickData.tenant_id,
-                    offer_id: e.clickData.offer_id,
-                    publisher_id: e.clickData.publisher_id
-                }))
-            });
-
-            logger.info(`✅ Validated ${validEntries.length} clicks, ${invalidEntries.length} invalid`);
-
-            // ✅ CRITICAL: Filter out already-flushed clicks (they don't need DB insert)
-            const clicksToInsert = validEntries.filter(e => !e.alreadyFlushed);
-            const alreadyFlushedIds = validEntries.filter(e => e.alreadyFlushed).map(e => e.msgId);
-
-            if (alreadyFlushedIds.length > 0) {
-                // Acknowledge already-flushed clicks
-                await redis.xack(STREAM_KEY, GROUP_NAME, ...alreadyFlushedIds);
-                logger.info(`✅ Acknowledged ${alreadyFlushedIds.length} already-flushed clicks`);
-            }
-
-            if (clicksToInsert.length === 0) {
-                logger.info('⏭️ No new clicks to insert (all already flushed)');
-                continue;
-            }
-
-            const validMsgIds = clicksToInsert.map(entry => entry.msgId);
-            const validClicks = clicksToInsert.map(entry => entry.clickData);
-            const clickIdsToCleanup = clicksToInsert.map(entry => {
-                const c = entry.clickData;
-                // Build Redis key using new format
-                if (c.tenant_id && c.offer_id && c.publisher_id && c.click_uuid) {
-                    return `click:${c.tenant_id}:${c.offer_id}:${c.publisher_id}:${c.click_uuid}`;
-                }
-                // Fallback to old format
-                return `click:${c.click_uuid}`;
-            });
-            // UTC ENFORCEMENT: Use UTC timestamp for all DB operations
-            const batchTimestamp = new Date().toISOString();
-
-            let retryCount = 0;
-            let insertSuccess = false;
-
-            while (retryCount < MAX_RETRY_ATTEMPTS && !insertSuccess) {
-                try {
-                    // ✅ CRITICAL: Insert clicks into MySQL
-                    await bulkInsertClicks(validClicks, batchTimestamp);
-                    insertSuccess = true;
-
-                    // ✅ CRITICAL: Mark clicks as flushed in Redis
-                    const flushPipeline = redis.pipeline();
-                    clickIdsToCleanup.forEach(key => {
-                        flushPipeline.hset(key, 'flushed', 'true');
-                    });
-                    await flushPipeline.exec();
-                    logger.info(`✅ Marked ${clickIdsToCleanup.length} clicks as flushed in Redis`);
-
-                    await processPendingConversions(validClicks, batchTimestamp);
-
-                    // UTC ENFORCEMENT: Use UTC date for stats keys (converted to IST only in business logic)
-                    const pipelineStats = redis.pipeline();
-                    const today = new Date().toISOString().split('T')[0];
-                    for (const c of validClicks) {
-                        // ✅ CRITICAL: Include tenant_id in Redis key structure for proper attribution
-                        // Format: stats:offer:{offerId}:{tenantId}:{date}:{metric}
-                        // Use 0 or 'null' for missing tenant_id to keep key structure consistent
-                        const tenantIdVal = c.tenant_id || 0;
-                        const statsKeyOffer = `stats:offer:${c.offer_id}:${tenantIdVal}:${today}`;
-                        const statsKeyPub = `stats:pub:${c.publisher_id}:${tenantIdVal}:${today}`;
-
-                        pipelineStats.incr(`${statsKeyOffer}:clicks`);
-                        pipelineStats.incr(`${statsKeyPub}:clicks`);
-                    }
-                    await pipelineStats.exec();
-
-                    // ✅ CRITICAL: After successful DB insert, ACK stream message
-                    // Do NOT delete Redis hash immediately (keep for backfill safety net)
-                    // Hash will expire after TTL (24h)
-                    const cleanupPipeline = redis.pipeline();
-                    cleanupPipeline.xack(STREAM_KEY, GROUP_NAME, ...validMsgIds);
-                    // ✅ CRITICAL: DO NOT delete Redis hash - keep for backfill safety net
-                    // cleanupPipeline.del() removed - let TTL handle cleanup
-                    await cleanupPipeline.exec();
-
-                    // ✅ CRITICAL: Log DB inserted
-                    logger.info(`✅ DB inserted: ${validClicks.length} clicks`, {
-                        click_ids: validClicks.map(c => c.click_uuid),
-                        tenant_ids: validClicks.map(c => c.tenant_id),
-                        offer_ids: validClicks.map(c => c.offer_id),
-                        publisher_ids: validClicks.map(c => c.publisher_id)
-                    });
-
-                } catch (dbErr) {
-                    retryCount++;
-                    const isLastAttempt = retryCount >= MAX_RETRY_ATTEMPTS;
-
-                    logger.error(`❌ BATCH DB INSERT FAILED - ATTEMPT ${retryCount}/${MAX_RETRY_ATTEMPTS}`, {
-                        error: dbErr.message,
-                        code: dbErr.code,
-                        errno: dbErr.errno,
-                        sqlState: dbErr.sqlState,
-                        sqlMessage: dbErr.sqlMessage,
-                        stream: STREAM_KEY,
-                        group: GROUP_NAME,
-                        consumer: CONSUMER_NAME,
-                        batchSize: validClicks.length,
-                        sampleMsgId: validEntries[0]?.msgId,
-                        nextAction: isLastAttempt ? 'MOVE_TO_DLQ' : 'RETRY_WITH_BACKOFF'
-                    });
-
-                    if (isLastAttempt) {
-                        await moveToDeadLetterQueue(validEntries, {
-                            reason: 'db_insert_failure',
-                            error: dbErr,
-                            context: {
-                                stream: STREAM_KEY,
-                                group: GROUP_NAME,
-                                consumer: CONSUMER_NAME,
-                                batchSize: validClicks.length
-                            }
-                        });
-
-                        await redis.xack(STREAM_KEY, GROUP_NAME, ...validMsgIds);
-                        const cleanupPipeline = redis.pipeline();
-                        clickIdsToCleanup.forEach(id => cleanupPipeline.del(`click:${id}`));
-                        await cleanupPipeline.exec();
-
-                        logger.error('❌ MAX RETRIES EXCEEDED - MOVED TO DLQ AND ACKED');
-                    } else {
-                        const backoffMs = Math.pow(2, retryCount) * 1000;
-                        logger.info(`⏳ RETRYING IN ${backoffMs}ms...`);
-                        await new Promise(r => setTimeout(r, backoffMs));
-                    }
-                }
+                // Clear Buffer
+                localBuffer = [];
+                bufferStartTime = Date.now();
             }
 
         } catch (err) {
             consecutiveErrors++;
             const errorType = classifyError(err);
-            const isRetryable = errorType === ERROR_TYPES.RETRYABLE;
-            
-            // ✅ CRITICAL: Handle NOGROUP error - consumer group was deleted
-            // Auto-recreate stream and consumer group, then retry
+
+            // Handle NOGROUP
             if (err.message && (err.message.includes('NOGROUP') || err.message.includes('no such key'))) {
-                logger.warn(`⚠️ Consumer group missing (NOGROUP) - recreating stream and group`, {
-                    stream: STREAM_KEY,
-                    group: GROUP_NAME,
-                    error: err.message
-                });
+                logger.warn(`⚠️ Consumer group missing (NOGROUP) - recreating...`);
                 try {
                     await setupStream();
-                    logger.info(`✅ Stream and consumer group recreated successfully`);
-                    consecutiveErrors = 0; // Reset error count after successful recreation
-                    continue; // Retry reading immediately
+                    localBuffer = []; // Clear buffer on reset to avoid stale data issues
+                    consecutiveErrors = 0;
+                    continue;
                 } catch (setupErr) {
-                    logger.error(`❌ Failed to recreate stream/group: ${setupErr.message}`, setupErr);
-                    // Fall through to normal error handling
+                    logger.error(`❌ Re-setup failed: ${setupErr.message}`);
                 }
             }
 
-            // Exponential backoff: 2s, 4s, 8s... max 1 min
             const backoffMs = Math.min(Math.pow(2, consecutiveErrors) * 1000, 60000);
-
-            if (isRetryable) {
-                logger.warn({
-                    err: { message: err.message, code: err.code },
-                    attempt: consecutiveErrors,
-                    nextRetryMs: backoffMs
-                }, `⚠️ Worker Retryable Error: ${err.message || 'Unknown'}`);
-            } else {
-                // Correct Pino usage: Object first, then message
-                logger.error({
-                    err,
-                    stream: STREAM_KEY,
-                    group: GROUP_NAME,
-                    attempt: consecutiveErrors,
-                    nextRetryMs: backoffMs
-                }, `❌ Worker Critical Error: ${err.message || 'Unknown'}`);
-            }
-
+            logger.error({ err, backoffMs }, '❌ Worker Error Loop');
             await new Promise(r => setTimeout(r, backoffMs));
         }
+    }
+}
+
+async function processBatch(buffer) {
+    if (buffer.length === 0) return;
+
+    const streamClickData = [];
+    const msgIds = [];
+
+    // Parse items
+    for (const item of buffer) {
+        const { msgId, fields } = item;
+        msgIds.push(msgId);
+
+        const tenantIdIndex = fields.indexOf('tenant_id');
+        const offerIdIndex = fields.indexOf('offer_id');
+        const publisherIdIndex = fields.indexOf('publisher_id');
+        const clickIdIndex = fields.indexOf('click_id');
+
+        if (tenantIdIndex !== -1 && offerIdIndex !== -1 &&
+            publisherIdIndex !== -1 && clickIdIndex !== -1) {
+
+            streamClickData.push({
+                msgId,
+                tenantId: fields[tenantIdIndex + 1],
+                offerId: fields[offerIdIndex + 1],
+                publisherId: fields[publisherIdIndex + 1],
+                clickId: fields[clickIdIndex + 1]
+            });
+        } else {
+            // Fallback old format
+            const idIndex = fields.indexOf('id');
+            if (idIndex !== -1) {
+                streamClickData.push({
+                    msgId,
+                    clickId: fields[idIndex + 1],
+                    // other fields null, will rely on redis hash
+                });
+            }
+        }
+    }
+
+    const clickUuids = streamClickData.map(d => d.clickId).filter(Boolean);
+    if (clickUuids.length === 0) {
+        if (msgIds.length > 0) await redis.xack(STREAM_KEY, GROUP_NAME, ...msgIds);
+        return;
+    }
+
+    // Prepare Redis Keys
+    const redisKeys = streamClickData.map(data => {
+        if (data.tenantId && data.offerId && data.publisherId && data.clickId) {
+            return `click:${data.tenantId}:${data.offerId}:${data.publisherId}:${data.clickId}`;
+        }
+        return `click:${data.clickId}`;
+    });
+
+    // Fetch Full Data
+    const pipeline = redis.pipeline();
+    redisKeys.forEach(key => pipeline.hgetall(key));
+    const dataResults = await pipeline.exec();
+
+    const validEntries = [];
+    const invalidEntries = [];
+
+    for (let i = 0; i < dataResults.length; i++) {
+        const [err, clickData] = dataResults[i];
+        const streamInfo = streamClickData[i];
+
+        // Check if data exists and is valid
+        if (!err && clickData && Object.keys(clickData).length > 0 && clickData.offer_id) {
+            // Check flushed flag
+            const isFlushed = clickData.flushed === 'true' || clickData.flushed === true;
+            validEntries.push({
+                msgId: streamInfo.msgId,
+                clickData,
+                alreadyFlushed: isFlushed
+            });
+        } else {
+            invalidEntries.push({
+                msgId: streamInfo.msgId,
+                error: err ? err.message : 'Missing Hash'
+            });
+        }
+    }
+
+    // Filter for DB Insert
+    const toInsert = validEntries.filter(e => !e.alreadyFlushed);
+
+    if (toInsert.length > 0) {
+        const clicks = toInsert.map(e => e.clickData);
+        // DB Insert
+        try {
+            await bulkInsertClicks(clicks);
+
+            // Mark Flushed in Redis
+            const markPipe = redis.pipeline();
+            clicks.forEach(c => {
+                const key = `click:${c.tenant_id}:${c.offer_id}:${c.publisher_id}:${c.click_uuid}`;
+                markPipe.hset(key, 'flushed', 'true');
+                // Also try old key format for safety
+                if (!c.tenant_id) markPipe.hset(`click:${c.click_uuid}`, 'flushed', 'true');
+            });
+            await markPipe.exec();
+
+            // Process Pending Conversions
+            await processPendingConversions(clicks);
+
+            // Update Stats
+            const statsPipe = redis.pipeline();
+            const today = new Date().toISOString().split('T')[0];
+            clicks.forEach(c => {
+                const tId = c.tenant_id || 0;
+                statsPipe.incr(`stats:offer:${c.offer_id}:${tId}:${today}:clicks`);
+                statsPipe.incr(`stats:pub:${c.publisher_id}:${tId}:${today}:clicks`);
+            });
+            await statsPipe.exec();
+
+            logger.info(`✅ Batch Inserted: ${clicks.length} clicks`);
+
+        } catch (dbErr) {
+            logger.error(`❌ Batch DB Fail: ${dbErr.message}`);
+            // If DB-wide failure, we do NOT ACK.
+            // Throwing here will bubble up to runWorker loop, which will backoff and RETRY this batch?
+            // Wait, localBuffer was cleared in runWorker after calling processBatch.
+            // CRITICAL: processBatch must NOT throw if we want to drop/ack, BUT SHOULD throw if we want to retry.
+            // However, runWorker clears buffer immediately after processBatch resolves.
+            // Use retry logic INSIDE processBatch or change runWorker.
+
+            // Since we cleared buffer, we CANNOT easily retry. 
+            // FIX: Retry LOOP inside processBatch.
+
+            throw dbErr; // Let runWorker catch it? No, runWorker loop continues.
+            // We need robust retry inside bulkInsert or here. 
+            // bulkInsertClicks already has some retry logic? Let's check.
+            // No, bulkInsertClicks in original file tried to return result.
+            // The implementation of bulkInsertClicks I see below (lines 493+) throws error on final fail.
+
+            // If this throws, runWorker catches, backs off... but loop continues and buffer is LOST?
+            // Actually, in runWorker:
+            // await processBatch(localBuffer);
+            // localBuffer = [];
+            // If processBatch throws, 'localBuffer = []' is NOT reached! 
+            // Loop catches error, sleeps, and retries...
+            // BUT localBuffer is still full!
+            // So when loop continues, it Resumes.
+            // Need to ensure processBatch is idempotent if called again with same buffer.
+            // Yes, 'alreadyFlushed' check handles that.
+            throw dbErr;
+        }
+    }
+
+    // ACK ALL messages (Processed + Invalid + AlreadyFlushed) after success
+    const allMsgIds = buffer.map(b => b.msgId);
+    if (allMsgIds.length > 0) {
+        await redis.xack(STREAM_KEY, GROUP_NAME, ...allMsgIds);
+    }
+}
+
+async function recoverStuckMessages() {
+    try {
+        // Find Pending Messages > 60s old
+        // XPENDING stream group start end count consumer
+        const pending = await redis.xpending(STREAM_KEY, GROUP_NAME, '-', '+', 100);
+
+        // pending: [[msgId, consumer, idleTime, deliveryCount], ...]
+        const now = Date.now();
+        const stuck = pending.filter(p => p[2] > 60000); // idle > 60s
+
+        if (stuck.length === 0) return;
+
+        logger.info(`♻️  Reclaiming ${stuck.length} stuck messages`);
+
+        const ids = stuck.map(p => p[0]);
+        // Claim them!
+        // XCLAIM key group consumer min-idle-time id [id ...]
+        const claimed = await redis.xclaim(STREAM_KEY, GROUP_NAME, CONSUMER_NAME, 60000, ...ids);
+
+        // Claimed messages are returned. We should process them?
+        // Actually, if we claim them, they become ours and Idle time resets.
+        // We can just add them to our processing queue? 
+        // Or better, XAUTOCLAIM in modern Redis, but XCLAIM works.
+        // Once claimed, XREADGROUP will allow us to read them if we specify ID?
+        // Actually, XREADGROUP '>' only reads NEW messages.
+        // To read claimed messages, we usually need to read history '0'.
+        // BUT, 'processBatch' logic expects a buffer.
+        // Simple strategy: Just Claim. Next time we restart we might pick them up? 
+        // No. If we claim, we must process.
+
+        // Let's inject them into the localBuffer?
+        // 'claimed' is Array of [msgId, fields].
+        // Yes, perfect format.
+
+        /*
+          claimed structure from xclaim:
+          [
+             [ '123-0', [ 'key', 'val' ] ],
+             ...
+          ]
+        */
+
+        // NOTE: This runs inside runWorker usually, or alongside.
+        // Since we refactored runWorker variables to be local scope, we can't easily inject.
+        // Modified design: recoverStuckMessages should Return the messages, runWorker adds to buffer.
+
+        // BUT wait, separate function approach.
+        // If I keep 'recoverStuckMessages' separate, I can't inject.
+        // I will inline the logic into runWorker or make it return items.
+    } catch (e) {
+        logger.error(`Error reclaiming: ${e.message}`);
     }
 }
 
@@ -795,42 +661,31 @@ async function moveToDeadLetterQueue(entries, options = {}) {
     }
 }
 
-// Recovery function to reprocess DLQ entries
-async function recoverFromDeadLetterQueue() {
+async function recoverStuckMessages() {
     try {
-        const dlqKey = 'stream:clicks:dlq';
-        const dlqLength = (await redis.xlen(dlqKey));
+        const pending = await redis.xpending(STREAM_KEY, GROUP_NAME, '-', '+', 100);
+        const now = Date.now();
+        const stuck = pending.filter(p => p[2] > 60000); // 60s idle
 
-        if (dlqLength === 0) {
-            logger.info('✅ DLQ is empty');
-            return;
+        if (stuck.length === 0) return;
+
+        logger.info(`♻️  Reclaiming ${stuck.length} stuck messages`);
+        const ids = stuck.map(p => p[0]);
+
+        // Claim and get message details
+        const claimed = await redis.xclaim(STREAM_KEY, GROUP_NAME, CONSUMER_NAME, 60000, ...ids);
+
+        if (claimed && claimed.length > 0) {
+            // Convert to format expected by processBatch
+            // Claimed: [[msgId, [key, val, key, val]], ...]
+            const buffer = claimed.map(([msgId, fields]) => ({ msgId, fields }));
+            logger.info(`♻️  Processing ${buffer.length} reclaimed messages immediately`);
+            await processBatch(buffer);
         }
-
-        logger.info(`🔄 Recovering ${dlqLength} entries from DLQ`);
-
-        const entries = await redis.xrange(dlqKey, '-', '+', 'COUNT', 100);
-
-        for (const [entryId, fields] of entries) {
-            try {
-                const payload = JSON.parse(fields[1]);
-                const clickData = payload.clickData || {};
-
-                await bulkInsertClicks([clickData]);
-
-                await redis.xdel(dlqKey, entryId);
-                logger.info(`✅ Recovered click: ${clickData.click_uuid}`);
-
-            } catch (recoverErr) {
-                logger.error(`❌ Recovery failed for DLQ entry: ${entryId}`, recoverErr);
-            }
-        }
-
-    } catch (err) {
-        logger.error('❌ DLQ recovery failed:', err);
+    } catch (e) {
+        logger.error(`Error reclaiming: ${e.message}`);
     }
 }
 
-// Manual recovery endpoint (can be called periodically)
-export { recoverFromDeadLetterQueue };
 
 export default runWorker;

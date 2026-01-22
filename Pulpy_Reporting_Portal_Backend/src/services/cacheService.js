@@ -9,7 +9,7 @@ const TTL = {
     OFFER: 300,        // 5 Minutes (Reference data doesn't change often)
     PUBLISHER: 300,
     ASSIGNMENT: 300,
-    CAP_COUNTERS: 86400 // 24 Hours
+    CAP_COUNTERS: 14400, // 4 Hours
 };
 
 export class CacheService {

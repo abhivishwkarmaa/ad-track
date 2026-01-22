@@ -35,7 +35,7 @@ export class TrackingService {
       // ✅ REQUIREMENT: Never check Redis for existing clicks
       // ✅ REQUIREMENT: Every valid incoming click must be counted
       const tenantId = getTenantIdFromRequest(request);
-      
+
       // 🔒 STRICT: Reject if no tenant from subdomain
       if (!tenantId) {
         logger.error('❌ CRITICAL: No tenant resolved from subdomain - REJECTED', {
@@ -100,7 +100,7 @@ export class TrackingService {
 
       // ✅ STEP 4: HARD VALIDATION - Ensure business data belongs to resolved tenant
       // This is a security check to prevent any cross-tenant access
-      
+
       // Check if offer has tenant_id set (should always be set in multi-tenant system)
       if (offer.tenant_id === null || offer.tenant_id === undefined) {
         logger.error('❌ CRITICAL: Offer has no tenant_id - data integrity issue', {
@@ -109,7 +109,7 @@ export class TrackingService {
         });
         throw new Error(`Data integrity error: Offer ${offerId} has no tenant_id assigned. All offers must belong to a tenant.`);
       }
-      
+
       if (parseInt(offer.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ HARD FAILURE: Offer tenant mismatch', {
           offer_id: offerId,
@@ -128,7 +128,7 @@ export class TrackingService {
         });
         throw new Error(`Data integrity error: Publisher ${publisherId} has no tenant_id assigned. All publishers must belong to a tenant.`);
       }
-      
+
       if (parseInt(publisher.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ HARD FAILURE: Publisher tenant mismatch', {
           publisher_id: publisherId,
@@ -165,7 +165,7 @@ export class TrackingService {
             [publisherId, offerId, 'active', tenantId]
           );
           assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
-          
+
           // ✅ Validate assignment belongs to resolved tenant
           if (assignment && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
             logger.error('❌ HARD FAILURE: Assignment tenant mismatch', {
@@ -207,6 +207,8 @@ export class TrackingService {
       let fallbackRedirect = await this.getFallbackRedirect(offer, request);
       if (!fallbackRedirect) fallbackRedirect = '/error?message=offer_unavailable';
 
+      let redirectUrl = '';
+
       // Validation
       const offerValidation = offerService.checkOfferValidity(offer);
       if (!offerValidation.valid) {
@@ -227,7 +229,11 @@ export class TrackingService {
       const isTotalCapHit = offer.total_cap > 0 && !(await cacheService.checkAndIncrementCap(offerId, 'total', offer.total_cap, false, tenantId));
 
       if (isDailyCapHit || isTotalCapHit) {
-        return await this.applyCapAction(offer, fallbackRedirect);
+        const capAction = await this.applyCapAction(offer, fallbackRedirect);
+        redirectUrl = capAction.redirect;
+        // Continue to persist click...
+      } else {
+        redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
       }
 
       // Assignment Caps? (omitted for brevity, can implement similar pattern in CacheService)
@@ -256,13 +262,13 @@ export class TrackingService {
         isp = await getISP(ip);
       } catch (e) { /* ignore */ }
 
-      const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+      // redirectUrl is already set above based on cap checks
 
       // ✅ CRITICAL: Use resolved tenant_id (from subdomain) - NO FALLBACKS
       // Tenant identity was already resolved from subdomain and validated
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
       const finalTenantId = tenantId;
-      
+
       if (!finalTenantId) {
         logger.error('❌ CRITICAL: No tenant_id available - this should never happen after validation');
         throw new Error('Tenant identity required. This error indicates a system failure.');
@@ -324,7 +330,7 @@ export class TrackingService {
         // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
         // This ensures clicks from different publishers on same offer are isolated
         const redisKey = `click:${finalTenantId}:${offerId}:${publisherId}:${clickUuid}`;
-        
+
         // ✅ CRITICAL: Log click received
         logger.info('[CLICK] Click received', {
           tenant_id: finalTenantId,
@@ -339,7 +345,7 @@ export class TrackingService {
         const pipeline = redis.pipeline();
         pipeline.hset(redisKey, clickData);
         pipeline.expire(redisKey, 86400); // 24 hours TTL
-        
+
         // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
         const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
         if (!tenantIdStr) {
@@ -350,34 +356,34 @@ export class TrackingService {
           });
           throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
         }
-        
+
         // ✅ CRITICAL: Add to stream - if XADD fails, DO NOT drop the click (log but continue)
-        pipeline.xadd('stream:clicks', '*', 
+        pipeline.xadd('stream:clicks', '*',
           'tenant_id', tenantIdStr,
           'offer_id', String(offerId),
           'publisher_id', String(publisherId),
           'click_id', clickUuid
         );
-        
+
         // ✅ OPTIONAL: Cache redirect URL for quick lookup (performance optimization, not blocking)
         // This cache does NOT affect click counting or DB insertion
         pipeline.setex(redirectCacheKey, 5, redirectUrl);
-        
+
         const results = await pipeline.exec();
-        
+
         // ✅ CRITICAL: Verify hash write succeeded (MANDATORY)
         // Stream write failure is NON-FATAL - click is still in Redis hash and can be backfilled
         let hashWriteSuccess = false;
         let streamWriteSuccess = false;
         let hashWriteError = null;
         let streamWriteError = null;
-        
+
         for (let i = 0; i < results.length; i++) {
           const [err, result] = results[i];
           if (err) {
             const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
             logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
-            
+
             if (i === 0) {
               // Hash write failure is FATAL - click data is lost
               hashWriteError = err;
@@ -434,7 +440,7 @@ export class TrackingService {
           if (hashCheck) break;
           if (attempt < 2) await new Promise(r => setTimeout(r, 100)); // Wait 100ms before retry
         }
-        
+
         if (hashCheck) {
           logger.info(`✅ Verified click hash exists: ${redisKey} (offer_id: ${hashCheck})`);
         } else {
@@ -585,12 +591,12 @@ export class TrackingService {
     if (offer.fallback_offer_id) {
       // 🔒 STRICT: Tenant must come from subdomain - NO FALLBACKS
       const tenantId = request ? getTenantIdFromRequest(request) : null;
-      
+
       if (!tenantId) {
         logger.warn('Cannot get fallback offer: no tenant context from subdomain');
         return null;
       }
-      
+
       // ✅ Validate fallback offer belongs to resolved tenant
       // (This will be validated when fetching the fallback offer)
 
@@ -635,7 +641,7 @@ export class TrackingService {
 
       // ✅ STEP 1: Get tenant from subdomain (Host header) - EXCLUSIVE source of truth
       const tenantId = getTenantIdFromRequest(request);
-      
+
       // 🔒 STRICT: Reject if no tenant from subdomain
       if (!tenantId) {
         logger.error('❌ CRITICAL: No tenant resolved from subdomain for impression - REJECTED', {
@@ -644,9 +650,9 @@ export class TrackingService {
           offer_id: offerId,
           pub_id: publisherId
         });
-        return { 
-          success: false, 
-          error: 'Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/imp for local testing). Business identifiers cannot be used for tenant resolution.' 
+        return {
+          success: false,
+          error: 'Tenant identity required. Access via tenant subdomain (e.g., tenant1.localhost:5001/imp for local testing). Business identifiers cannot be used for tenant resolution.'
         };
       }
 
@@ -732,12 +738,12 @@ export class TrackingService {
       // 🔒 STRICT: Tenant must come from subdomain - NO FALLBACKS
       // Tenant identity was already resolved from subdomain
       const finalTenantId = tenantId;
-      
+
       if (!finalTenantId) {
         logger.error('❌ No tenant resolved from subdomain for impression');
         return { success: false, error: 'Tenant identity required from subdomain. Cannot track impression without tenant context.' };
       }
-      
+
       // ✅ Validate offer belongs to resolved tenant
       if (offer && offer.tenant_id && parseInt(offer.tenant_id) !== parseInt(finalTenantId)) {
         logger.error('❌ HARD FAILURE: Offer tenant mismatch for impression', {
