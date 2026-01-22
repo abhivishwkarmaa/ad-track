@@ -80,7 +80,12 @@ async function runWorker() {
         try {
             // 1. Periodic Stuck Message Reclamation
             if (Date.now() - lastReclaimTime > RECLAIM_INTERVAL_MS) {
-                await recoverStuckMessages();
+                const reclaimed = await recoverStuckMessages();
+                if (reclaimed && reclaimed.length > 0) {
+                    if (localBuffer.length === 0) bufferStartTime = Date.now();
+                    localBuffer.push(...reclaimed);
+                    logger.info(`📥 Injected ${reclaimed.length} reclaimed messages into processing buffer`);
+                }
                 lastReclaimTime = Date.now();
             }
 
