@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import './Dashboard.css';
 
@@ -83,6 +84,7 @@ const ListIcon = () => (
 
 function Dashboard() {
     const { user } = useAuth();
+    const { refreshKey } = useRefresh();
     const [dashboardData, setDashboardData] = useState(null);
     const [dashboardCards, setDashboardCards] = useState(null);
     const [topOffers, setTopOffers] = useState([]);
@@ -395,7 +397,7 @@ function Dashboard() {
         fetchOffersData();
         fetchAffiliatesData();
         fetchOfferStatsData();
-    }, [dateFilter]);
+    }, [dateFilter, refreshKey]);
 
     const apiStats = dashboardCards || dashboardData || {};
 

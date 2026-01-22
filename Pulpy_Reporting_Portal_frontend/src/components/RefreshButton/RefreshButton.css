@@ -1,0 +1,141 @@
+/* Draggable Refresh Button Styles */
+.refresh-button {
+    position: fixed;
+    z-index: 9999;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: var(--primary-gradient);
+    color: #ffffff;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow:
+        0 4px 12px rgba(27, 182, 184, 0.4),
+        0 2px 4px rgba(0, 0, 0, 0.1);
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease,
+        background 0.2s ease;
+    user-select: none;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.refresh-button:hover {
+    transform: scale(1.08);
+    box-shadow:
+        0 6px 20px rgba(27, 182, 184, 0.5),
+        0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.refresh-button:active,
+.refresh-button.dragging {
+    cursor: grabbing;
+    transform: scale(1.05);
+    box-shadow:
+        0 8px 25px rgba(27, 182, 184, 0.6),
+        0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.refresh-button.dragging {
+    opacity: 0.9;
+    transition: none;
+}
+
+.refresh-button.refreshing {
+    pointer-events: none;
+}
+
+.refresh-button.refreshing .refresh-icon {
+    animation: spin 0.6s linear infinite;
+}
+
+.refresh-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
+}
+
+.refresh-button:not(.dragging):hover .refresh-icon {
+    transform: rotate(45deg);
+}
+
+/* Spin animation for refresh */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Pulse animation on idle */
+@keyframes pulse {
+
+    0%,
+    100% {
+        box-shadow:
+            0 4px 12px rgba(27, 182, 184, 0.4),
+            0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    50% {
+        box-shadow:
+            0 4px 16px rgba(27, 182, 184, 0.6),
+            0 2px 6px rgba(0, 0, 0, 0.15);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .refresh-button {
+        width: 50px;
+        height: 50px;
+    }
+
+    .refresh-icon {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .refresh-button {
+    box-shadow:
+        0 4px 12px rgba(27, 182, 184, 0.3),
+        0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .refresh-button:hover {
+    box-shadow:
+        0 6px 20px rgba(27, 182, 184, 0.4),
+        0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* Accessibility - Focus state */
+.refresh-button:focus {
+    outline: none;
+    box-shadow:
+        0 0 0 3px rgba(27, 182, 184, 0.4),
+        0 4px 12px rgba(27, 182, 184, 0.4),
+        0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.refresh-button:focus:not(:focus-visible) {
+    box-shadow:
+        0 4px 12px rgba(27, 182, 184, 0.4),
+        0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.refresh-button:focus-visible {
+    box-shadow:
+        0 0 0 3px rgba(27, 182, 184, 0.6),
+        0 4px 12px rgba(27, 182, 184, 0.4),
+        0 2px 4px rgba(0, 0, 0, 0.1);
+}

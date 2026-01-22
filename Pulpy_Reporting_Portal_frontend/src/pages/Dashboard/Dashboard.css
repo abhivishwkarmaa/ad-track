@@ -123,7 +123,7 @@
 }
 
 .stat-card.green::before {
-    background: #00ff88;
+    background: green;
 }
 
 .stat-card.orange::before {
@@ -164,7 +164,7 @@
 
 .stat-card.green .stat-icon {
     background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
+    color: green;
 }
 
 .stat-card.orange .stat-icon {
@@ -220,7 +220,7 @@
     top: 12px;
     right: 12px;
     background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
+    color: green;
     font-size: 10px;
     font-weight: 600;
     padding: 4px 8px;
@@ -243,7 +243,7 @@
 }
 
 .stat-trend.up {
-    color: #00ff88;
+    color: green;
 }
 
 .stat-trend.down {
@@ -339,7 +339,7 @@
 
 .action-icon.green {
     background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
+    color: green;
 }
 
 .action-icon.orange {
@@ -408,7 +408,7 @@
 
 .offer-payout {
     font-size: 11px;
-    color: #00ff88;
+    color: green;
     font-weight: 600;
     background: rgba(0, 255, 136, 0.1);
     padding: 2px 6px;
@@ -440,7 +440,7 @@
 
 .offer-status.active {
     background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
+    color: green;
 }
 
 .offer-status.paused {
@@ -525,7 +525,7 @@
 
 .affiliate-status.active {
     background: rgba(0, 255, 136, 0.15);
-    color: #00ff88;
+    color: green;
 }
 
 .affiliate-status.pending {
@@ -666,7 +666,7 @@
 }
 
 .summary-value.profit {
-    color: #00ff88;
+    color: green;
 }
 
 /* Recent Activity */
@@ -743,7 +743,7 @@
 }
 
 .conversion-status.approved {
-    color: #00ff88;
+    color: green;
 }
 
 .conversion-status.pending {
@@ -892,6 +892,7 @@
 
 /* Desktop large screens */
 @media (min-width: 1025px) {
+
     .summary-reports-card,
     .recent-activity-card,
     .publisher-performance-card {
@@ -1145,13 +1146,13 @@
     }
 
     .table-header span,
-    .table-row > div {
+    .table-row>div {
         padding: 6px 0;
         border-bottom: 1px solid var(--border-light);
     }
 
     .table-header span:last-child,
-    .table-row > div:last-child {
+    .table-row>div:last-child {
         border-bottom: none;
     }
 
@@ -1280,7 +1281,7 @@
 }
 
 .positive-cr {
-    color: #00ff88;
+    color: green;
     font-weight: 600;
 }
 
@@ -1297,7 +1298,7 @@
 }
 
 .positive-profit {
-    color: #00ff88;
+    color: green;
     font-weight: 600;
 }
 

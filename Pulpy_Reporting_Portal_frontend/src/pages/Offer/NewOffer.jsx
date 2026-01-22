@@ -173,6 +173,27 @@ const platformTokens = [
     '{random}'
 ];
 
+// Helper function to get default dates
+const getDefaultDates = () => {
+    const now = new Date();
+
+    // Format current date as YYYY-MM-DD
+    const startDate = now.toISOString().split('T')[0];
+
+    // Format current time as HH:MM:SS
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const startTime = `${hours}:${minutes}:${seconds}`;
+
+    // Calculate end date (5 years from now)
+    const endDateObj = new Date(now);
+    endDateObj.setFullYear(endDateObj.getFullYear() + 5);
+    const endDate = endDateObj.toISOString().split('T')[0];
+    const endTime = `${hours}:${minutes}:${seconds}`;
+    return { startDate, startTime, endDate,endTime };
+};
+
 function NewOffer() {
     const navigate = useNavigate();
     const toast = useToast();
@@ -184,6 +205,9 @@ function NewOffer() {
     const [tokenMappings, setTokenMappings] = useState([]);
 
     const [showCustomCategory, setShowCustomCategory] = useState(false);
+
+    // Get default dates on component initialization
+    const defaultDates = getDefaultDates();
     const [formData, setFormData] = useState({
         advertiser_id: '',
         name: '',
@@ -202,10 +226,10 @@ function NewOffer() {
         offer_visibility: 'PUBLIC',
         preview_url: '',
         token_type: '',
-        start_date: '',
-        start_time: '00:00:00',
-        end_date: '',
-        end_time: '23:59:59',
+        start_date: defaultDates.startDate,
+        start_time: defaultDates.startTime,
+        end_date: defaultDates.endDate,
+        end_time: defaultDates.endTime,
         capping_type: 'none',
         daily_cap: '',
         weekly_cap: '',

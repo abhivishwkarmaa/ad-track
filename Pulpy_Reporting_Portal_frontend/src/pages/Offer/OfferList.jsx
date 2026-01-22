@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI } from '../../services/api';
 import './Offer.css';
 
@@ -48,6 +49,7 @@ function OfferList() {
 
     const toast = useToast();
     const navigate = useNavigate();
+    const { refreshKey } = useRefresh();
     const [offers, setOffers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -82,7 +84,7 @@ function OfferList() {
         };
 
         fetchOffers();
-    }, []);
+    }, [refreshKey]);
 
     const filteredOffers = offers.filter(offer => {
         const matchesSearch = offer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||

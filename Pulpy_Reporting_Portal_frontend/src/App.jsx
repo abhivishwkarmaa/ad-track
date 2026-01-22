@@ -30,6 +30,8 @@ import ManageContactSubmissions from './pages/ContactSubmissions/ManageContactSu
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { RefreshProvider } from './context/RefreshContext';
+import RefreshButton from './components/RefreshButton/RefreshButton';
 import './App.css';
 
 function PrivateRoute({ children }) {
@@ -124,7 +126,10 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <AppRoutes />
+            <RefreshProvider>
+              <AppRoutes />
+              <RefreshButton />
+            </RefreshProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>
