@@ -60,7 +60,7 @@ async function runWorker() {
 
     // Config
     const FLUSH_SIZE = 300;     // Target batch size
-    const FLUSH_TIMEOUT_MS = 60000; // 60s max wait
+    const FLUSH_TIMEOUT_MS = 5000; // 5s max wait (Reduced from 60s for faster DB sync)
     const RECLAIM_INTERVAL_MS = 60000; // Check stuck messages every 60s
 
     try {

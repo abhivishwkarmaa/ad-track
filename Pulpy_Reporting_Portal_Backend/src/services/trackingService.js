@@ -58,6 +58,23 @@ export class TrackingService {
       // ============================================
       // 2. STRICT MULTI-TENANT: TENANT RESOLUTION
       // ============================================
+
+      // ✅ QUICK DEDUPLICATION CHECK
+      // If we saw this exact same User+IP+Offer+Tenant in the last 5 seconds, 
+      // return the cached redirect immediately without recording a new click.
+      const cachedRedirect = await redis.get(redirectCacheKey);
+      if (cachedRedirect) {
+        logger.info('[CLICK] Duplicate click detected - returning cached redirect', {
+          tenant_id: tenantId,
+          offer_id: offerId,
+          ip,
+          cache_key: redirectCacheKey
+        });
+        return {
+          redirect: cachedRedirect,
+          clickId: 'duplicate'
+        };
+      }
       // ✅ NOTE: Tenant already resolved above
       // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
