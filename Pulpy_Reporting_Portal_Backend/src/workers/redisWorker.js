@@ -326,38 +326,17 @@ async function recoverStuckMessages() {
         // XCLAIM key group consumer min-idle-time id [id ...]
         const claimed = await redis.xclaim(STREAM_KEY, GROUP_NAME, CONSUMER_NAME, 60000, ...ids);
 
-        // Claimed messages are returned. We should process them?
-        // Actually, if we claim them, they become ours and Idle time resets.
-        // We can just add them to our processing queue? 
-        // Or better, XAUTOCLAIM in modern Redis, but XCLAIM works.
-        // Once claimed, XREADGROUP will allow us to read them if we specify ID?
-        // Actually, XREADGROUP '>' only reads NEW messages.
-        // To read claimed messages, we usually need to read history '0'.
-        // BUT, 'processBatch' logic expects a buffer.
-        // Simple strategy: Just Claim. Next time we restart we might pick them up? 
-        // No. If we claim, we must process.
+        if (claimed && claimed.length > 0) {
+            return claimed.map(entry => ({
+                msgId: entry[0],
+                fields: entry[1]
+            }));
+        }
 
-        // Let's inject them into the localBuffer?
-        // 'claimed' is Array of [msgId, fields].
-        // Yes, perfect format.
-
-        /*
-          claimed structure from xclaim:
-          [
-             [ '123-0', [ 'key', 'val' ] ],
-             ...
-          ]
-        */
-
-        // NOTE: This runs inside runWorker usually, or alongside.
-        // Since we refactored runWorker variables to be local scope, we can't easily inject.
-        // Modified design: recoverStuckMessages should Return the messages, runWorker adds to buffer.
-
-        // BUT wait, separate function approach.
-        // If I keep 'recoverStuckMessages' separate, I can't inject.
-        // I will inline the logic into runWorker or make it return items.
+        return [];
     } catch (e) {
         logger.error(`Error reclaiming: ${e.message}`);
+        return [];
     }
 }
 
