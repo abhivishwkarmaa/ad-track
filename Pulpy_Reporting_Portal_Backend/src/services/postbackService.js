@@ -170,14 +170,24 @@ export class PostbackService {
             postback_payload: JSON.stringify({ query, headers: request.headers })
           };
 
-          // Save to Redis (Worker will pick this up after inserting the click)
-          await redis.setex(`conversion:${click_id}`, 3600, JSON.stringify(conversionData));
+          // Save to Redis (Worker will pick this up)
+          // Short TTL logic: 15 mins. Worker should process it by then. 
+          await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(conversionData));
+
+          // ✅ NEW ARCHITECTURE: Push to Conversion Stream
+          // This decouples conversion processing from click flushing
+          await redis.xadd('stream:conversions', '*',
+            'click_uuid', click_id,
+            'timestamp', new Date().toISOString()
+          );
+
+          logger.info(`✅ Conversion Queued [Stream]: ${click_id}`);
 
           return {
             success: true,
-            message: 'Conversion recorded (Buffered in Redis)',
+            message: 'Conversion queued for processing',
             duplicate: false,
-            note: 'Click handled via Redis buffer'
+            note: 'Handled via independent conversion pipeline'
           };
         }
       }

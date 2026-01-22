@@ -221,6 +221,11 @@ export class TrackingService {
       // ============================================
       // 4. REDIS: CHECK CAPS (Zero DB)
       // ============================================
+
+      // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
+      // This ensures unique click identity across publishers and tenants
+      const clickUuid = generateClickId(tenantId, offerId, publisherId, 36);
+
       // Check Global Offer Caps (Daily/Total Conversions)
       // We READ the current counter from Redis. We do NOT increment here (only on conversion).
 
@@ -242,9 +247,7 @@ export class TrackingService {
       // 5. GENERATE & PERSIST
       // ============================================
 
-      // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
-      // This ensures unique click identity across publishers and tenants
-      const clickUuid = generateClickId(tenantId, offerId, publisherId, 36);
+      // (clickUuid generated above for cap support)
 
       // Parse params
       const deviceInfo = parseDevice(userAgent);

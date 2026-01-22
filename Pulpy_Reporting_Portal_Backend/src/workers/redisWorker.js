@@ -248,8 +248,8 @@ async function processBatch(buffer) {
             });
             await markPipe.exec();
 
-            // Process Pending Conversions
-            await processPendingConversions(clicks);
+            // Process Pending Conversions (REMOVED - now handled by conversionWorker)
+            // await processPendingConversions(clicks);
 
             // Update Stats
             const statsPipe = redis.pipeline();
@@ -562,66 +562,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
     }
 }
 
-async function processPendingConversions(clicks, batchTimestamp = new Date()) {
-    // Check Redis for conversion:{click_id}
-    const pipeline = redis.pipeline();
-    clicks.forEach(c => pipeline.get(`conversion:${c.click_uuid}`));
-    const results = await pipeline.exec();
 
-    for (let i = 0; i < results.length; i++) {
-        const [err, conversionJson] = results[i];
-        if (!err && conversionJson) {
-            try {
-                const conv = JSON.parse(conversionJson);
-                // Insert Conversion - UTC ENFORCEMENT: All timestamps stored as UTC only
-                await pool.query(
-                    `INSERT INTO conversions (
-                      conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id,
-                      rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        uuidv4(), // Generate new DB internal ID or use one if we generated?
-                        conv.click_uuid, conv.offer_id, conv.publisher_id, conv.publisher_offer_id,
-                        conv.rcid, conv.status, conv.amount, conv.payout, conv.ip,
-                        conv.postback_payload, new Date(), new Date(), new Date()
-                    ]
-                );
-
-                // Update Stats (Redis Atomic Counters) - UTC ENFORCEMENT: UTC date for stats keys
-                // stats:offer:{id}:{date}:conversions
-                // stats:offer:{id}:{date}:revenue
-                // stats:offer:{id}:{date}:payout
-
-                const today = new Date().toISOString().split('T')[0];
-                const pipe = redis.pipeline();
-
-                // ✅ CRITICAL: Include tenant_id in stats keys
-                const tenantIdVal = conv.tenant_id || 0;
-                const statsKeyOffer = `stats:offer:${conv.offer_id}:${tenantIdVal}:${today}`;
-                const statsKeyPub = `stats:pub:${conv.publisher_id}:${tenantIdVal}:${today}`; // If we track pub stats
-
-                pipe.incr(`${statsKeyOffer}:conversions`);
-                pipe.incrbyfloat(`${statsKeyOffer}:revenue`, conv.amount); // Redis doesn't support float well in old versions, but incrbyfloat is standard now
-                pipe.incrbyfloat(`${statsKeyOffer}:payout`, conv.payout);
-
-                // Also Pub Stats?
-                pipe.incr(`${statsKeyPub}:conversions`);
-                pipe.incrbyfloat(`${statsKeyPub}:revenue`, conv.amount);
-                pipe.incrbyfloat(`${statsKeyPub}:payout`, conv.payout);
-
-                await pipe.exec();
-
-                // Cleanup Conversion Key
-                await redis.del(`conversion:${conv.click_uuid}`);
-
-                logger.info(`✅ Pending Conversion Processed & Stats Updated (Redis): ${conv.click_uuid}`);
-
-            } catch (insertErr) {
-                logger.error(`Failed to process pending conversion for ${clicks[i].click_uuid}`, insertErr);
-            }
-        }
-    }
-}
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -661,31 +602,7 @@ async function moveToDeadLetterQueue(entries, options = {}) {
     }
 }
 
-async function recoverStuckMessages() {
-    try {
-        const pending = await redis.xpending(STREAM_KEY, GROUP_NAME, '-', '+', 100);
-        const now = Date.now();
-        const stuck = pending.filter(p => p[2] > 60000); // 60s idle
 
-        if (stuck.length === 0) return;
-
-        logger.info(`♻️  Reclaiming ${stuck.length} stuck messages`);
-        const ids = stuck.map(p => p[0]);
-
-        // Claim and get message details
-        const claimed = await redis.xclaim(STREAM_KEY, GROUP_NAME, CONSUMER_NAME, 60000, ...ids);
-
-        if (claimed && claimed.length > 0) {
-            // Convert to format expected by processBatch
-            // Claimed: [[msgId, [key, val, key, val]], ...]
-            const buffer = claimed.map(([msgId, fields]) => ({ msgId, fields }));
-            logger.info(`♻️  Processing ${buffer.length} reclaimed messages immediately`);
-            await processBatch(buffer);
-        }
-    } catch (e) {
-        logger.error(`Error reclaiming: ${e.message}`);
-    }
-}
 
 
 export default runWorker;
