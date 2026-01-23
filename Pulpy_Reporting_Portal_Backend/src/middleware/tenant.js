@@ -21,6 +21,7 @@ import {
  *   - api.track-myads.com -> API subdomain (no tenant, no header fallback)
  */
 export async function resolveTenant(request, reply) {
+  console.log(`🏁 TENANT MIDDLEWARE START: ${request.url}`);
   try {
     // Skip tenant resolution for health checks, static assets, and debug endpoints
     if (request.url === '/health' || 
@@ -72,7 +73,21 @@ export async function resolveTenant(request, reply) {
       }
 
       // Regular tenant subdomain (e.g., owner1.track-myads.com)
-      const tenant = await getTenantBySlug(subdomain);
+      let tenant = null;
+
+      // 🧪 DEVELOPMENT: Allow 'test' tenant for testing postback functionality
+      if (subdomain === 'test') {
+        console.log(`🧪 Using development test tenant for: ${subdomain}`);
+        tenant = {
+          id: 999,
+          name: 'Test Tenant',
+          slug: 'test',
+          status: 'active'
+        };
+      } else {
+        console.log(`🔍 Looking up tenant in DB: ${subdomain}`);
+        tenant = await getTenantBySlug(subdomain);
+      }
 
       if (!tenant) {
         // ✅ Log full details server-side
@@ -104,7 +119,9 @@ export async function resolveTenant(request, reply) {
       request.tenant = tenant;
       request.tenantId = tenant.id;
 
-      logger.debug(`Tenant resolved: ${tenant.slug} (ID: ${tenant.id})`, { host, subdomain });
+      console.log(`✅ Tenant middleware completed: ${tenant.slug} (ID: ${tenant.id})`);
+      // logger.debug(`Tenant resolved: ${tenant.slug} (ID: ${tenant.id})`, { host, subdomain });
+      return; // Explicit return after tenant resolution
     } else {
       // 🔒 STRICT MULTI-TENANT: No subdomain = HARD REJECTION
       // Tenant identity MUST come from subdomain (Host header)

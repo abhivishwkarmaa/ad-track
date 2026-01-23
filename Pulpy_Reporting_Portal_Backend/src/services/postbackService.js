@@ -16,188 +16,29 @@ import redis from '../config/redis.js';
 export class PostbackService {
   async processPostback(query, request) {
     try {
+      console.log('🔍 Postback request received - basic check');
+      console.log('Query object:', JSON.stringify(query));
+      console.log('Headers host:', request.headers?.host);
+
       const { click_id, rcid, amount, status = 'approved' } = query;
 
       if (!click_id && !rcid) {
         throw new Error('Either click_id or rcid is required');
       }
 
+      console.log('🔍 Starting Redis-first processing...');
+
       // ============================================
-      // REDIS FIRST CHECK
+      // REDIS-FIRST ARCHITECTURE — NO DB QUERIES IN HTTP PATH
       // ============================================
-      // Check if click exists in Redis (pending DB insert)
-      // ✅ CRITICAL: Try new key format first, then fallback to old format
-      if (click_id) {
-        let redisClick = null;
-        let redisKey = null;
 
-        // ✅ CRITICAL: Get tenant_id from request first (for new key format)
-        const tenantId = getTenantIdFromRequest(request);
-
-        // Strategy 1: If we have tenant_id, try to get click from DB first to get offer_id/publisher_id
-        if (tenantId) {
-          try {
-            const [dbRows] = await pool.query(
-              'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-              [click_id, tenantId]
-            );
-            if (dbRows && dbRows.length > 0) {
-              const dbClick = dbRows[0];
-              // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
-              redisKey = `click:${dbClick.tenant_id}:${dbClick.offer_id}:${dbClick.publisher_id}:${click_id}`;
-              redisClick = await redis.hgetall(redisKey);
-            }
-          } catch (dbErr) {
-            // DB lookup failed - continue to Redis lookup
-            logger.debug('Could not lookup click in DB, trying Redis directly');
-          }
-        }
-
-        // Strategy 2: If click not found with new format, try old format (backwards compatibility)
-        if (!redisClick || !redisClick.offer_id) {
-          redisKey = `click:${click_id}`;
-          redisClick = await redis.hgetall(redisKey);
-        }
-
-        // Strategy 3: If still not found and we have tenant_id, try pattern scan (last resort)
-        if ((!redisClick || !redisClick.offer_id) && tenantId) {
-          try {
-            // Scan for pattern: click:*:*:*:${click_id}
-            let cursor = 0;
-            let found = false;
-            do {
-              const [newCursor, keys] = await redis.scan(
-                cursor,
-                'MATCH', `click:*:*:*:${click_id}`,
-                'COUNT', 10
-              );
-              cursor = parseInt(newCursor);
-
-              if (keys.length > 0) {
-                // Try first matching key
-                redisKey = keys[0];
-                redisClick = await redis.hgetall(redisKey);
-                if (redisClick && redisClick.offer_id) {
-                  found = true;
-                  break;
-                }
-              }
-            } while (cursor !== 0 && !found);
-          } catch (scanErr) {
-            // Scan failed - log but continue
-            logger.debug('Redis SCAN failed, continuing with fallback', scanErr);
-          }
-        }
-
-        if (redisClick && redisClick.offer_id) {
-          // Click found in Redis! Process conversion in Redis.
-
-          // 1. Rehydrate click data object
-          const clickData = {
-            ...redisClick,
-            offer_id: parseInt(redisClick.offer_id),
-            publisher_id: parseInt(redisClick.publisher_id),
-            publisher_offer_id: parseInt(redisClick.publisher_offer_id || 0)
-          };
-
-          // 🔒 STRICT: Get tenant_id from subdomain (Host header) - EXCLUSIVE source
-          const tenantId = getTenantIdFromRequest(request);
-          if (!tenantId) {
-            logger.error('❌ Postback rejected: No tenant subdomain', {
-              host: request.headers.host,
-              click_id: click_id,
-              rcid: rcid
-            });
-            throw new Error('Tenant identity required from subdomain. Access via tenant subdomain (e.g., tenant1.domain.com/postback).');
-          }
-
-          logger.info('[POSTBACK] Tenant resolved from subdomain', {
-            tenant_id: tenantId,
-            click_id: click_id,
-            rcid: rcid
-          });
-
-          // 2. Validate Offer / Fetch Payout (using existing services with tenant_id)
-          const offer = await offerService.getOfferById(clickData.offer_id, tenantId);
-          if (!offer) throw new Error('Offer not found (Redis path)');
-
-          // ✅ CRITICAL: Verify tenant ownership
-          if (offer.tenant_id !== tenantId) {
-            throw new Error('Offer does not belong to this tenant');
-          }
-
-          const offerValidation = offerService.checkOfferValidity(offer, true);
-          if (!offerValidation.valid) {
-            return { success: false, message: offerValidation.message, duplicate: false };
-          }
-
-          // 3. Get Assignment & Payout (with tenant_id filtering)
-          let assignment = null;
-          if (clickData.publisher_offer_id) {
-            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId);
-
-            // ✅ CRITICAL: Verify assignment belongs to tenant
-            // if (assignment && assignment.tenant_id !== tenantId) {
-            //   throw new Error('Assignment does not belong to this tenant');
-            // }
-          }
-
-          let payout = parseFloat(offer.affiliate_amount);
-          if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
-          const conversionAmount = amount ? parseFloat(amount) : payout;
-
-          // 4. Status Determination
-          let finalStatus = status;
-          if (assignment?.conversion_approval_percentage) {
-            const randomValue = Math.random() * 100;
-            finalStatus = (randomValue <= parseFloat(assignment.conversion_approval_percentage)) ? 'approved' : 'pending';
-          }
-
-          // 5. Store Conversion in Redis - UTC ENFORCEMENT: Store UTC timestamp only
-          // ✅ CRITICAL: Include tenant_id in conversion data
-          const conversionData = {
-            click_uuid: click_id,
-            offer_id: clickData.offer_id,
-            publisher_id: clickData.publisher_id,
-            publisher_offer_id: clickData.publisher_offer_id,
-            tenant_id: tenantId, // ✅ CRITICAL: Include tenant_id
-            rcid: rcid || redisClick.rcid || uuidv4(),
-            status: finalStatus,
-            amount: conversionAmount,
-            payout: payout,
-            ip: extractIP(request),
-            timestamp: new Date().toISOString(),
-            postback_payload: JSON.stringify({ query, headers: request.headers })
-          };
-
-          // Save to Redis (Worker will pick this up)
-          // Short TTL logic: 15 mins. Worker should process it by then. 
-          await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(conversionData));
-
-          // ✅ NEW ARCHITECTURE: Push to Conversion Stream
-          // This decouples conversion processing from click flushing
-          await redis.xadd('stream:conversions', '*',
-            'click_uuid', click_id,
-            'timestamp', new Date().toISOString()
-          );
-
-          logger.info(`✅ Conversion Queued [Stream]: ${click_id}`);
-
-          return {
-            success: true,
-            message: 'Conversion queued for processing',
-            duplicate: false,
-            note: 'Handled via independent conversion pipeline'
-          };
-        }
-      }
-
-      // NO REDIS MATCH? FALLBACK TO DB LOGIC BELOW...
-
-      // 🔒 STRICT: Get tenant_id from subdomain (Host header) - EXCLUSIVE source
+      // ✅ CRITICAL: Get tenant_id from request (for Redis key construction)
+      console.log('🔍 About to get tenant ID from request...');
       const tenantId = getTenantIdFromRequest(request);
+      console.log('🔍 Got tenant ID:', tenantId);
 
       if (!tenantId) {
+        console.log('❌ No tenant ID found');
         logger.error('❌ Postback rejected: No tenant subdomain', {
           host: request.headers.host,
           click_id: click_id,
@@ -206,445 +47,464 @@ export class PostbackService {
         throw new Error('Tenant identity required from subdomain. Access via tenant subdomain (e.g., tenant1.domain.com/postback).');
       }
 
-      // Find click if click_id provided (WITH tenant filtering)
-      let click = null;
+      console.log('[POSTBACK] Processing for tenant', {
+        tenant_id: tenantId,
+        click_id: click_id,
+        rcid: rcid
+      });
+
+      // FAST PATH: Check Redis for click data (no DB queries here!)
+      console.log('🔍 Checking Redis for click data...');
+      let redisClick = null;
+      let redisKey = null;
+
       if (click_id) {
-        // RETRY LOGIC: Handle async queue lag (race condition)
-        // If postback arrives before click insert commit, retry a few times.
-        let attempts = 0;
-        while (attempts < 5) {
-          // ✅ STRICT: Always filter by tenant_id (from subdomain)
-          const query = 'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ?';
-          const params = [click_id, tenantId];
-
-          const [clickRows] = await pool.query(query, params);
-          click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
-
-          if (click) {
-            // ✅ Validate click belongs to resolved tenant
-            if (click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
-              logger.error('❌ HARD FAILURE: Click tenant mismatch', {
-                click_id: click_id,
-                click_tenant_id: click.tenant_id,
-                resolved_tenant_id: tenantId
-              });
-              throw new Error(`Security violation: Click ${click_id} belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
-            }
-            break; // Found it!
-          }
-
-          // Wait 200ms before retry
-          attempts++;
-          if (attempts < 5) {
-            await new Promise(resolve => setTimeout(resolve, 200));
-          }
+        console.log(`🔍 Trying Redis key: click:${tenantId}:${click_id}`);
+        // Strategy 1: Try new tenant-scoped format first
+        redisKey = `click:${tenantId}:${click_id}`;
+        redisClick = await redis.hgetall(redisKey);
+        console.log(`🔍 Redis result for ${redisKey}:`, redisClick ? 'HIT' : 'MISS');
+        if (redisClick) {
+          console.log(`🔍 Redis data:`, JSON.stringify(redisClick));
+          console.log(`🔍 Has offer_id:`, !!redisClick.offer_id);
         }
 
-        if (!click) {
-          // Check if queue has backend pressure, but since we use Redis now, 
-          // a missing click means it's truly missing (or Redis evicted it and DB write failed?)
-          // We will stick to standard logic: if not in Redis and not in DB, it's invalid.
-          throw new Error('Click not found');
+        // Strategy 2: If not found, try old format (backwards compatibility)
+        if (!redisClick || !redisClick.offer_id) {
+          console.log(`🔍 Trying fallback Redis key: click:${click_id}`);
+          redisKey = `click:${click_id}`;
+          redisClick = await redis.hgetall(redisKey);
+          console.log(`🔍 Redis result for ${redisKey}:`, redisClick ? 'HIT' : 'MISS');
+        }
+
+        // Strategy 3: Pattern scan as last resort (DISABLED for now - causing issues)
+        // TODO: Re-enable SCAN with better error handling
+        if ((!redisClick || !redisClick.offer_id) && tenantId) {
+          console.log('🔍 Skipping Redis SCAN (disabled)');
         }
       }
 
-      // Catch DB errors to failover to Redis buffer
+      console.log('🔍 Redis check complete, result:', redisClick && redisClick.offer_id ? 'HIT' : 'MISS');
+
+      // REDIS HIT: Process conversion immediately, enqueue DB write
+      if (redisClick && redisClick.offer_id) {
+        logger.info(`✅ Redis hit for click: ${click_id}`);
+
+        // 1. Rehydrate click data object
+        const clickData = {
+          ...redisClick,
+          offer_id: parseInt(redisClick.offer_id),
+          publisher_id: parseInt(redisClick.publisher_id),
+          publisher_offer_id: parseInt(redisClick.publisher_offer_id || 0)
+        };
+
+        // 2. Create conversion data (all Redis-based, no DB queries!)
+        const conversionData = {
+          click_uuid: click_id,
+          offer_id: clickData.offer_id,
+          publisher_id: clickData.publisher_id,
+          publisher_offer_id: clickData.publisher_offer_id,
+          tenant_id: tenantId,
+          rcid: rcid || redisClick.rcid || uuidv4(),
+          amount: amount ? parseFloat(amount) : parseFloat(redisClick.payout || 0),
+          status: status,
+          ip: extractIP(request),
+          timestamp: new Date().toISOString(),
+          postback_payload: JSON.stringify({ query, headers: request.headers }),
+          source: 'redis_hit' // Track processing path
+        };
+
+        // 3. Try synchronous postback sending (we have all data from Redis)
+        let affiliatePostbackResult = null;
+        try {
+          affiliatePostbackResult = await this.sendPostbackFromRedisData(conversionData, clickData);
+        } catch (postbackError) {
+          logger.warn(`Postback sending failed for Redis hit ${click_id}:`, postbackError.message);
+        }
+
+        // 4. Enqueue for async DB processing (regardless of postback result)
+        await this.enqueueConversionForProcessing(conversionData);
+
+        logger.info(`✅ Conversion queued for click: ${click_id}`);
+
+        return {
+          success: true,
+          message: 'Conversion processed and queued',
+          duplicate: false,
+          affiliate_postback: affiliatePostbackResult,
+          processing_path: 'redis_hit'
+        };
+      }
+
+      // ============================================
+      // REDIS MISS: Try synchronous processing or buffer for async
+      // ============================================
+
+      logger.info(`⚠️ Redis miss for click: ${click_id}, attempting synchronous processing`);
+
       try {
-        if (!tenantId) {
-          logger.error('❌ CRITICAL: No tenant_id after validation - system error');
-          throw new Error('Tenant identity required from subdomain. This error indicates a system failure.');
-        }
+        // Try to process synchronously (limited DB queries)
+        const syncResult = await this.processPostbackSynchronously(query, request, tenantId, click_id, rcid, amount, status);
 
-        if (click && click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
-          // ... error handling ...
-          throw new Error(`Security violation: Click belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
-        }
-      } catch (validationErr) {
-        throw validationErr;
-        // Structural/Validation errors should fail hard. 
-        // Only connection/timeout errors should trigger buffer.
-      }
-
-      // ... continue normal flow ...
-
-      // REVISION: The prompt says "If DB busy/unreachable: Store conversion temporarily in Redis".
-      // This refers to the moment we try to FIND the click in DB or INSERT the conversion.
-      // If valid click found (or not needed due to postback without click_id?), we try to insert conversion.
-
-      // I will implement a `safeQuery` style or wrap the Insert.
-      // The current code structure is linear.
-      // I will add a `catch` block to the main `processPostback` but it's already there.
-      // I need to intercept DB Connection Errors specifically.
-
-      // Logic:
-      // 1. Try to find click in DB. If DB unavailable -> Buffer?
-      //    If we can't verify click in DB, we don't know offer_id/publisher_id. 
-      //    We can only buffer if we trust the inputs (rcid/click_id) or if we can extract data.
-      //    If 'click_id' is present, we blindly respect it? 
-      //    Redis Buffer stores: click_uuid, offer_id, rcid, status, etc.
-      //    If we don't have offer_id (because DB down), we can't populate Redis buffer fully?
-      //    Wait, checking Redis for click first gave us offer_id. 
-      //    If Redis missed, we hit DB. If DB fails, we don't know offer_id.
-      //    So we CANNOT buffer fully if DB is down AND Redis miss, UNLESS we just store raw payload.
-      //    Logic: "Store conversion temporarily in Redis... Worker must reconcile later".
-      //    Valid approach: Store "pending_postback:{uuid}" with raw query/body.
-      //    Worker retries processing it.
-
-      // Let's implement this "Rough Buffer" in the catch block of processPostback.
-
-
-      // If rcid provided, check for existing conversion (dedupe)
-      if (rcid) {
-        const [existingRows] = await pool.query(
-          'SELECT * FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ?',
-          [rcid, click ? click.offer_id : null, tenantId]
-        );
-
-        if (existingRows && existingRows.length > 0) {
+        if (syncResult.processed && syncResult.affiliate_postback) {
+          logger.info(`✅ Synchronous postback processed for ${click_id}`);
           return {
             success: true,
-            message: 'Conversion already exists (deduplicated)',
-            conversion: existingRows[0],
-            duplicate: true,
+            message: 'Postback processed synchronously',
+            duplicate: syncResult.duplicate || false,
+            affiliate_postback: syncResult.affiliate_postback,
+            processing_path: 'redis_miss_sync'
           };
+        }
+      } catch (syncError) {
+        logger.warn(`Synchronous processing failed for ${click_id}:`, syncError.message);
+      }
+
+      // Fallback: Buffer for async processing
+      logger.info(`📦 Buffering postback for async processing: ${click_id}`);
+
+      const bufferedPostback = {
+        click_id,
+        rcid,
+        amount: amount ? parseFloat(amount) : null,
+        status,
+        tenant_id: tenantId,
+        ip: extractIP(request),
+        timestamp: new Date().toISOString(),
+        postback_payload: JSON.stringify({ query, headers: request.headers }),
+        source: 'redis_miss_buffered',
+        retry_count: 0
+      };
+
+      await this.bufferPostbackForProcessing(bufferedPostback);
+
+      return {
+        success: true,
+        message: 'Postback buffered for async processing',
+        buffered: true,
+        affiliate_postback: null, // Will be processed asynchronously
+        processing_path: 'redis_miss_buffered'
+      };
+    } catch (error) {
+      // Handle any remaining errors (Redis failures, etc.)
+      logger.error('PostbackService.processPostback error:', {
+        message: error.message,
+        stack: error.stack,
+        click_id,
+        tenant_id
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Attempt synchronous postback processing for Redis misses
+   * This tries to process the postback immediately using limited DB queries
+   */
+  async processPostbackSynchronously(query, request, tenantId, click_id, rcid, amount, status) {
+    try {
+      // 1. Try to find click in DB (limited retry)
+      let click = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const [clickRows] = await pool.query(
+            'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ?',
+            [click_id, tenantId]
+          );
+          click = clickRows[0];
+          if (click) break;
+        } catch (dbError) {
+          // DB connection issue, don't retry
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100)); // Short delay
+      }
+
+      if (!click && rcid) {
+        // Try to find via rcid
+        try {
+          const [clickRows] = await pool.query(
+            'SELECT * FROM clicks WHERE rcid = ? AND tenant_id = ? LIMIT 1',
+            [rcid, tenantId]
+          );
+          click = clickRows[0];
+        } catch (dbError) {
+          // Ignore DB errors
         }
       }
 
       if (!click && !rcid) {
-        throw new Error('Cannot process postback without click_id or rcid');
+        throw new Error('Cannot process postback without click or rcid');
       }
 
-      // Get offer and assignment
-      let offerId = click ? click.offer_id : null;
+      // 2. Get offer and publisher info
+      let offerId = click?.offer_id;
+      let publisherId = click?.publisher_id;
 
-      // If no offerId from click, try to find it from rcid (check previous conversion or click)
       if (!offerId && rcid) {
-        // Try to find from existing conversion (scoped by tenant)
-        const [convRows] = await pool.query(
-          'SELECT offer_id FROM conversions WHERE rcid = ? AND tenant_id = ? LIMIT 1',
-          [rcid, tenantId]
-        );
-        if (convRows && convRows.length > 0) {
-          offerId = convRows[0].offer_id;
-        } else {
-          // Try to find from click with this rcid (scoped by tenant)
-          const [clickRows] = await pool.query(
-            'SELECT offer_id FROM clicks WHERE rcid = ? AND tenant_id = ? LIMIT 1',
+        // Try to resolve from existing conversions
+        try {
+          const [convRows] = await pool.query(
+            'SELECT offer_id, publisher_id FROM conversions WHERE rcid = ? AND tenant_id = ? LIMIT 1',
             [rcid, tenantId]
           );
-          if (clickRows && clickRows.length > 0) {
-            offerId = clickRows[0].offer_id;
+          if (convRows.length > 0) {
+            offerId = convRows[0].offer_id;
+            publisherId = convRows[0].publisher_id;
           }
+        } catch (dbError) {
+          // Ignore DB errors
         }
       }
 
       if (!offerId) {
-        throw new Error('Offer ID not found. Cannot determine offer from click_id or rcid');
+        throw new Error('Cannot determine offer for postback');
       }
 
-      // ✅ CRITICAL: Get offer with tenant_id filtering
-      const offer = await offerService.getOfferById(offerId, tenantId);
+      // 3. Get offer details
+      let offer = null;
+      try {
+        const [offerRows] = await pool.query(
+          'SELECT * FROM offers WHERE id = ? AND tenant_id = ?',
+          [offerId, tenantId]
+        );
+        offer = offerRows[0];
+      } catch (dbError) {
+        // Ignore DB errors
+      }
+
       if (!offer) {
-        throw new Error('Offer not found or does not belong to this tenant');
+        throw new Error('Offer not found');
       }
 
-      // ✅ CRITICAL: Verify tenant ownership
-      if (offer.tenant_id !== tenantId) {
-        throw new Error('Offer does not belong to this tenant');
-      }
+      // 4. Try to send postback immediately
+      let affiliatePostbackResult = null;
 
-      // Validate offer is active and not expired before processing conversion
-      // Pass checkTimeRestrictions=true for conversions
-      const offerValidation = offerService.checkOfferValidity(offer, true);
-      if (!offerValidation.valid) {
-        return {
-          success: false,
-          message: offerValidation.message,
-          error_type: offerValidation.error_type,
-          conversion: null,
-          duplicate: false,
-        };
-      }
-
-      const publisherId = click ? click.publisher_id : null;
-      const publisherOfferId = click ? click.publisher_offer_id : null;
-
-      // ✅ CRITICAL: Get assignment with tenant_id filtering
-      let assignment = null;
-      if (publisherOfferId) {
-        assignment = await assignmentService.findById(publisherOfferId, tenantId);
-
-        // ✅ CRITICAL: Verify assignment belongs to tenant
-        // if (assignment && assignment.tenant_id !== tenantId) {
-        //   throw new Error('Assignment does not belong to this tenant');
-        // }
-      }
-
-      // Get payout (use assignment payout_override if available, otherwise offer affiliate_amount)
-      let payout = parseFloat(offer.affiliate_amount);
-      if (assignment?.payout_override) {
-        payout = parseFloat(assignment.payout_override);
-      }
-
-      // Use provided amount or default to payout
-      const conversionAmount = amount ? parseFloat(amount) : payout;
-
-      // Determine conversion status based on conversion_approval_percentage
-      let finalStatus = status;
-      if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
-        const approvalPercentage = parseFloat(assignment.conversion_approval_percentage);
-        // Random percentage check for auto-approval
-        const randomValue = Math.random() * 100;
-        if (randomValue <= approvalPercentage) {
-          finalStatus = 'approved';
-        } else {
-          finalStatus = 'pending';
+      // Check for assignment-specific URL
+      if (click?.publisher_offer_id) {
+        try {
+          const [assignmentRows] = await pool.query(
+            'SELECT callback_url FROM assignments WHERE id = ? AND tenant_id = ?',
+            [click.publisher_offer_id, tenantId]
+          );
+          if (assignmentRows.length > 0 && assignmentRows[0].callback_url) {
+            affiliatePostbackResult = await this.sendImmediatePostback(
+              assignmentRows[0].callback_url,
+              { click_uuid: click_id, conversion_uuid: `temp_${Date.now()}`, rcid, amount, status: status || 'approved' },
+              click
+            );
+          }
+        } catch (dbError) {
+          // Ignore DB errors
         }
       }
 
-      // Extract IP
-      const ip = extractIP(request);
-
-      // Store postback payload - UTC ENFORCEMENT: Store UTC timestamp only
-      const postbackPayload = {
-        query: query,
-        headers: request.headers,
-        timestamp: new Date().toISOString(),
-      };
-
-      // ✅ CRITICAL: Check assignment-level capping (budget) with tenant_id
-      if (assignment && await this.isAssignmentBudgetCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = uuidv4();
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            0,
-            0,
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
-        return {
-          success: false,
-          message: 'Conversion rejected due to assignment budget cap exceeded',
-          conversion: null,
-          duplicate: false,
-        };
-      }
-
-      // ✅ CRITICAL: Check assignment-level capping (conversions) with tenant_id
-      if (assignment && await this.isAssignmentConversionCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = uuidv4();
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            0,
-            0,
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
-        return {
-          success: false,
-          message: 'Conversion rejected due to assignment conversion cap exceeded',
-          conversion: null,
-          duplicate: false,
-        };
-      }
-
-      // ✅ CRITICAL: Cap checks before inserting conversion (offer-level) with tenant_id
-      const capExceeded = await this.isCapExceeded(offer, tenantId);
-      if (capExceeded) {
-        // Insert rejected_cap record (no payout, no stats)
-        const conversionUuid = uuidv4();
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            0,
-            0,
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
-
-        return {
-          success: false,
-          message: 'Conversion rejected due to cap exceeded',
-          conversion: null,
-          duplicate: false,
-        };
-      }
-
-      // Insert conversion
-      const conversionUuid = uuidv4();
-      const [insertResult] = await pool.query(
-        `INSERT INTO conversions (
-          conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-          rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [
-          conversionUuid,
-          click ? click.click_uuid : null,
-          offerId,
-          publisherId,
-          publisherOfferId,
-          tenantId,
-          rcid || click?.rcid || uuidv4(),
-          finalStatus,
-          conversionAmount,
-          payout,
-          ip,
-          JSON.stringify(postbackPayload),
-        ]
-      );
-
-      const insertId = insertResult.insertId || insertResult[0]?.insertId;
-      // ✅ CRITICAL: Fetch conversion with tenant_id filtering
-      const [convRows] = await pool.query('SELECT * FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
-      const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
-
-      // Update daily stats
-      await this.updateDailyStats(offerId, conversionAmount, payout);
-
-      // ✅ CRITICAL: Get publisher with tenant_id filtering
-      let publisher = null;
-      if (publisherId) {
-        publisher = await publisherService.findById(publisherId, tenantId);
-
-        // ✅ CRITICAL: Verify publisher belongs to tenant
-        if (publisher && publisher.tenant_id !== tenantId) {
-          throw new Error('Publisher does not belong to this tenant');
+      // Fallback to global postback URL
+      if (!affiliatePostbackResult && publisherId) {
+        try {
+          const [publisherRows] = await pool.query(
+            'SELECT global_postback_url FROM publishers WHERE id = ? AND tenant_id = ?',
+            [publisherId, tenantId]
+          );
+          if (publisherRows.length > 0 && publisherRows[0].global_postback_url) {
+            affiliatePostbackResult = await this.sendImmediatePostback(
+              publisherRows[0].global_postback_url,
+              { click_uuid: click_id, conversion_uuid: `temp_${Date.now()}`, rcid, amount, status: status || 'approved' },
+              click
+            );
+          }
+        } catch (dbError) {
+          // Ignore DB errors
         }
-      }
-
-      // Resolve callback URL: assignment.callback_url OR publisher.global_postback_url
-      const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
-
-      // Send postback to publisher's callback URL if available
-      console.log(callbackUrl);
-      let postbackResult = null;
-      if (callbackUrl && conversion) {
-        postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
-      } else {
-        postbackResult = {
-          success: false,
-          executed: false,
-          reason: !callbackUrl ? 'No callback URL configured' : 'No conversion created'
-        };
       }
 
       return {
-        success: true,
-        message: 'Conversion recorded successfully',
-        conversion,
-        duplicate: false,
-        affiliate_postback: postbackResult
+        processed: true,
+        affiliate_postback: affiliatePostbackResult,
+        duplicate: false
       };
+
     } catch (error) {
-      // 1. Handle MySQL duplicate key violations
-      if (error.code === 'ER_DUP_ENTRY') {
-        if (error.message && error.message.includes('uniq_click_uuid')) {
-          return {
-            success: false,
-            message: 'This click has already generated a conversion. One click can only give one conversion.',
-            duplicate: false,
-            error_type: 'duplicate_click_conversion'
-          };
-        }
-        if (error.message && error.message.includes('uniq_rcid_offer')) {
-          return {
-            success: true,
-            message: 'Conversion already exists (deduplicated by rcid)',
-            duplicate: true,
-            error_type: 'duplicate_rcid_offer'
-          };
-        }
-        return {
-          success: false,
-          message: 'Duplicate entry detected',
-          duplicate: true,
-          error_type: 'duplicate_entry'
-        };
-      }
+      logger.debug('Synchronous postback processing failed:', error.message);
+      return { processed: false };
+    }
+  }
 
-      // 2. Handle specific DB Reference Errors
-      if (error.code === 'ER_NO_REFERENCED_ROW' || error.code === 'ER_NO_REFERENCED_ROW_2') {
-        throw new Error('Invalid reference: The specified offer, publisher, or assignment does not exist');
-      }
+  /**
+   * Send postback immediately (synchronous path)
+   */
+  async sendImmediatePostback(callbackUrl, conversion, click) {
+    try {
+      const startTime = Date.now();
 
-      if (error.code === 'ER_DATA_TOO_LONG') {
-        throw new Error('Data too long for one or more fields. Please check your input length.');
-      }
+      // Get affiliate click ID (tid from click data)
+      const affiliateClickId = click?.tid || conversion.click_uuid || '';
 
-      // 3. ✅ CRITICAL: DB CONNECTION / AVAILABILITY ERRORS -> BUFFER IN REDIS
-      // If DB is down, we must NOT lose the postback.
-      const isDbError = error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' ||
-        error.code === 'PROTOCOL_CONNECTION_LOST' || error.message?.includes('connect') ||
-        (error.code && error.code.toString().startsWith('5')); // 5xx DB errors
+      // Comprehensive macro replacement
+      let finalUrl = callbackUrl
+        .replace(/{click_id}/gi, conversion.click_uuid || '')
+        .replace(/{affiliate_click_id}/gi, affiliateClickId)
+        .replace(/{conversion_id}/gi, conversion.conversion_uuid || '')
+        .replace(/{rcid}/gi, conversion.rcid || '')
+        .replace(/{amount}/gi, (conversion.amount || 0).toString())
+        .replace(/{payout}/gi, (conversion.payout || 0).toString())
+        .replace(/{status}/gi, conversion.status || 'pending');
 
-      if (isDbError) {
-        try {
-          // Buffer raw request for retry
-          const payload = {
-            query,
-            headers: request?.headers || {},
-            timestamp: new Date().toISOString(),
-            error: error.message
-          };
-          // Use a redis list for Raw Postback Retry
-          await redis.lpush('queue:postbacks:retry', JSON.stringify(payload));
-          logger.warn('⚠️ DB Unavailable - Postback Buffered in Redis for Retry', {
-            error: error.message,
-            click_id: query.click_id,
-            rcid: query.rcid
+      const urlObj = new URL(finalUrl);
+      const client = urlObj.protocol === 'https:' ? https : http;
+
+      return new Promise((resolve) => {
+        const req = client.get(finalUrl, { timeout: 3000 }, (res) => {
+          const executionTime = Date.now() - startTime;
+          resolve({
+            success: res.statusCode >= 200 && res.statusCode < 300,
+            fired_url: finalUrl,
+            http_status: res.statusCode,
+            execution_time_ms: executionTime
           });
+        });
 
-          return {
-            success: true,
-            message: 'Conversion buffered (DB Unavailable)',
-            duplicate: false,
-            note: 'Buffered for retry'
-          };
-        } catch (redisErr) {
-          logger.error('❌ CRITICAL: Failed to buffer postback to Redis during DB failure!', redisErr);
-          // Both DB and Redis failed - catastrophic.
+        req.on('error', () => {
+          const executionTime = Date.now() - startTime;
+          resolve({
+            success: false,
+            fired_url: finalUrl,
+            http_status: 0,
+            execution_time_ms: executionTime
+          });
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          const executionTime = Date.now() - startTime;
+          resolve({
+            success: false,
+            fired_url: finalUrl,
+            http_status: 0,
+            execution_time_ms: executionTime
+          });
+        });
+
+        req.setTimeout(3000);
+      });
+
+    } catch (error) {
+      return {
+        success: false,
+        fired_url: callbackUrl,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Send postback using Redis data (no DB queries needed)
+   */
+  async sendPostbackFromRedisData(conversionData, clickData) {
+    try {
+      // For Redis hits, we need to check Redis for assignment and publisher data
+      let callbackUrl = null;
+      let postbackType = null;
+
+      // 1. Check for assignment-specific callback URL
+      if (clickData.publisher_offer_id) {
+        const assignmentKey = `assignment:${conversionData.tenant_id}:${clickData.publisher_offer_id}`;
+        try {
+          const assignmentData = await redis.hgetall(assignmentKey);
+          if (assignmentData?.callback_url) {
+            callbackUrl = assignmentData.callback_url;
+            postbackType = 'assignment';
+          }
+        } catch (redisError) {
+          logger.debug('Redis assignment lookup failed:', redisError.message);
         }
       }
 
-      logger.error('PostbackService.processPostback error:', error);
+      // 2. Fallback to publisher's global postback URL
+      if (!callbackUrl && clickData.publisher_id) {
+        const publisherKey = `publisher:${conversionData.tenant_id}:${clickData.publisher_id}`;
+        try {
+          const publisherData = await redis.hgetall(publisherKey);
+          if (publisherData?.global_postback_url) {
+            callbackUrl = publisherData.global_postback_url;
+            postbackType = 'global';
+          }
+        } catch (redisError) {
+          logger.debug('Redis publisher lookup failed:', redisError.message);
+        }
+      }
+
+      // 3. Send postback if we have a URL
+      if (callbackUrl) {
+        logger.info(`📤 Sending ${postbackType} postback for Redis hit: ${conversionData.click_uuid}`);
+
+        const result = await this.sendImmediatePostback(callbackUrl, conversionData, {
+          tid: conversionData.click_uuid, // affiliate click ID
+          publisher_id: clickData.publisher_id
+        });
+
+        result.type = postbackType;
+        return result;
+      }
+
+      logger.debug(`No postback URL found for Redis hit: ${conversionData.click_uuid}`);
+      return null;
+
+    } catch (error) {
+      logger.warn(`Postback sending failed for Redis hit ${conversionData.click_uuid}:`, error.message);
+      return null;
+    }
+  }
+
+  // ============================================
+  // NEW REDIS-FIRST ARCHITECTURE METHODS
+  // ============================================
+
+  /**
+   * Enqueue conversion for async DB processing (Redis hit path)
+   */
+  async enqueueConversionForProcessing(conversionData) {
+    try {
+      console.log('🔄 Enqueueing conversion to Redis Stream...');
+      // Use Redis Stream for reliable delivery
+      await redis.xadd('stream:conversion_processing', '*',
+        'conversion_data', JSON.stringify(conversionData),
+        'timestamp', new Date().toISOString(),
+        'type', 'conversion'
+      );
+      console.log('✅ Conversion enqueued to stream');
+
+      // Also keep in queue for backwards compatibility with existing workers
+      await redis.lpush('queue:conversions', JSON.stringify(conversionData));
+      console.log('✅ Conversion enqueued to queue');
+
+      console.log(`✅ Enqueued conversion for processing: ${conversionData.click_uuid}`);
+      return { success: true, message: 'Queued' };
+    } catch (error) {
+      console.log('❌ Failed to enqueue conversion:', error.message);
+      logger.error('Failed to enqueue conversion:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Buffer postback for async processing (Redis miss path)
+   */
+  async bufferPostbackForProcessing(postbackData) {
+    try {
+      // Use Redis Stream for reliable delivery
+      await redis.xadd('stream:postback_processing', '*',
+        'postback_data', JSON.stringify(postbackData),
+        'timestamp', new Date().toISOString(),
+        'type', 'postback'
+      );
+
+      // Also keep in queue for backwards compatibility
+      await redis.lpush('queue:postbacks_pending', JSON.stringify(postbackData));
+
+      logger.debug(`Buffered postback for processing: ${postbackData.click_id}`);
+    } catch (error) {
+      logger.error('Failed to buffer postback:', error);
       throw error;
     }
   }

@@ -85,6 +85,48 @@ async function initializeServer() {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
 
+  // Postback metrics endpoint
+  fastify.get('/metrics/postback', async (request, reply) => {
+    try {
+      const redis = (await import('./config/redis.js')).default;
+
+      // Get all postback-related metrics
+      const metricsKeys = [
+        'metrics:postback:processed',
+        'metrics:postback:errors',
+        'metrics:postback:redis_hits',
+        'metrics:postback:redis_misses',
+        'metrics:postback:duplicates',
+        'metrics:queue:postback_processing:depth',
+        'metrics:queue:conversion_processing:depth'
+      ];
+
+      const values = await redis.mget(...metricsKeys);
+
+      const metrics = {
+        processed: parseInt(values[0]) || 0,
+        errors: parseInt(values[1]) || 0,
+        redis_hits: parseInt(values[2]) || 0,
+        redis_misses: parseInt(values[3]) || 0,
+        duplicates: parseInt(values[4]) || 0,
+        queue_depth_postback_processing: parseInt(values[5]) || 0,
+        queue_depth_conversion_processing: parseInt(values[6]) || 0,
+        timestamp: new Date().toISOString()
+      };
+
+      // Calculate derived metrics
+      metrics.hit_rate = metrics.processed > 0 ?
+        ((metrics.redis_hits / metrics.processed) * 100).toFixed(2) : 0;
+      metrics.error_rate = metrics.processed > 0 ?
+        ((metrics.errors / (metrics.processed + metrics.errors)) * 100).toFixed(2) : 0;
+
+      return metrics;
+    } catch (error) {
+      logger.error('Metrics endpoint error:', error);
+      return { error: 'Failed to fetch metrics', timestamp: new Date().toISOString() };
+    }
+  });
+
   // Register routes
   await fastify.register(authRoutes, { prefix: '/api/auth' });
   await fastify.register(adminRoutes, { prefix: '/api/admin' });

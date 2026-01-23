@@ -104,6 +104,31 @@ module.exports = {
       error_file: 'logs/conversion-worker-error.log',
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
+    },
+
+    {
+      name: 'postback-worker',
+      script: 'postback-worker.js',
+      instances: 2,  // Run multiple instances for higher throughput
+      exec_mode: 'fork',
+
+      env: {
+        NODE_ENV: 'production',
+        PROCESS_TYPE: 'worker'
+      },
+      env_development: {
+        NODE_ENV: 'development',
+        PROCESS_TYPE: 'worker'
+      },
+
+      max_memory_restart: '400M',
+      max_restarts: 5,
+      min_uptime: '30s',
+
+      out_file: 'logs/postback-worker-out.log',
+      error_file: 'logs/postback-worker-error.log',
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
     }
   ]
 };
