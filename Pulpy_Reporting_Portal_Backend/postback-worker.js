@@ -269,6 +269,33 @@ class PostbackWorker {
         postback_payload
       });
 
+      // 6.5. Store conversion hash in Redis BEFORE DB write (for visibility)
+      try {
+        const conversionKey = `conversion:${tenant_id}:${click_id || rcid}`;
+        const conversionHash = {
+          conversion_uuid: conversionData.conversion_uuid || `pending_${Date.now()}`,
+          click_uuid: click_id || '',
+          offer_id: conversionData.offer_id?.toString() || '',
+          publisher_id: conversionData.publisher_id?.toString() || '',
+          publisher_offer_id: conversionData.publisher_offer_id?.toString() || '',
+          tenant_id: tenant_id?.toString() || '',
+          rcid: rcid || '',
+          amount: conversionData.amount?.toString() || '0',
+          payout: conversionData.payout?.toString() || '0',
+          status: conversionData.status || 'pending',
+          ip: ip || '',
+          timestamp: conversionData.timestamp || new Date().toISOString(),
+          source: 'buffered_postback',
+          processed: 'false' // Will be updated by createConversion
+        };
+
+        await redis.hset(conversionKey, conversionHash);
+        await redis.expire(conversionKey, 3600); // 1 hour TTL
+        logger.info(`✅ Conversion hash stored (buffered): ${conversionKey}`);
+      } catch (redisError) {
+        logger.warn('Failed to store conversion hash:', redisError.message);
+      }
+
       // 7. Check caps and create conversion
       await this.createConversion(conversionData);
 
@@ -421,7 +448,22 @@ class PostbackWorker {
 
       await connection.commit();
 
-      // 6. Cache deduplication key in Redis (for fast future lookups)
+      // 6. Update conversion hash in Redis to mark as processed
+      try {
+        const conversionKey = `conversion:${conversionData.tenant_id}:${conversionData.click_uuid}`;
+        await redis.hset(conversionKey, {
+          conversion_uuid: conversionData.conversion_uuid,
+          processed: 'true',
+          db_id: insertResult.insertId?.toString() || '',
+          db_timestamp: new Date().toISOString()
+        });
+        await redis.expire(conversionKey, 3600); // Refresh TTL to 1 hour
+        logger.info(`✅ Updated conversion hash in Redis: ${conversionKey}`);
+      } catch (redisError) {
+        logger.warn('Failed to update conversion hash in Redis:', redisError.message);
+      }
+
+      // 7. Cache deduplication key in Redis (for fast future lookups)
       if (conversionData.rcid) {
         const dedupeKey = `dedupe:rcid:${conversionData.tenant_id}:${conversionData.rcid}`;
         await redis.setex(dedupeKey, 86400, insertResult.insertId.toString()); // 24h TTL
@@ -757,7 +799,17 @@ class PostbackWorker {
         const urlObj = new URL(finalUrl);
         const client = urlObj.protocol === 'https:' ? https : http;
 
-        const req = client.get(finalUrl, { timeout: 5000 }, async (res) => {
+        // Increased timeout to 10 seconds for postback requests
+        const POSTBACK_TIMEOUT = 10000;
+
+        const req = client.get(finalUrl, { 
+          timeout: POSTBACK_TIMEOUT,
+          headers: {
+            'User-Agent': 'Pulpy-Postback-Worker/1.0',
+            'Accept': '*/*',
+            'Connection': 'close'
+          }
+        }, async (res) => {
           httpStatus = res.statusCode;
 
           // Consume response
@@ -766,7 +818,13 @@ class PostbackWorker {
           res.on('end', async () => {
             responseBody = data.substring(0, 1000); // Truncate if too long
             executionTime = Date.now() - startTime;
-            logger.info(`Postback sent to publisher: ${finalUrl} - Status: ${res.statusCode}`);
+            
+            if (httpStatus >= 200 && httpStatus < 300) {
+              logger.info(`✅ Postback sent successfully: ${finalUrl} - Status: ${httpStatus} (${executionTime}ms)`);
+            } else {
+              logger.warn(`⚠️ Postback returned non-success status: ${finalUrl} - Status: ${httpStatus} (${executionTime}ms)`);
+              logger.warn(`⚠️ Response body: ${responseBody.substring(0, 200)}`);
+            }
 
             resolve({
               success: httpStatus >= 200 && httpStatus < 300,
@@ -781,33 +839,58 @@ class PostbackWorker {
         req.on('error', async (err) => {
           errorMessage = err.message;
           executionTime = Date.now() - startTime;
-          logger.error(`PostbackService.sendPublisherPostback error for ${finalUrl}:`, err.message);
+          logger.error(`❌ Postback error for ${finalUrl}:`, {
+            message: err.message,
+            code: err.code,
+            errno: err.errno,
+            syscall: err.syscall
+          });
 
           resolve({
             success: false,
             fired_url: finalUrl,
             http_status: 0,
             error: errorMessage,
+            error_code: err.code,
             execution_time_ms: executionTime
           });
         });
 
         req.on('timeout', () => {
           req.destroy();
-          errorMessage = 'Timeout';
+          errorMessage = `Timeout after ${POSTBACK_TIMEOUT}ms`;
           executionTime = Date.now() - startTime;
-          logger.warn(`PostbackService.sendPublisherPostback timeout for ${finalUrl}`);
+          logger.warn(`⏰ Postback timeout for ${finalUrl} after ${POSTBACK_TIMEOUT}ms`);
 
           resolve({
             success: false,
             fired_url: finalUrl,
             http_status: 0,
-            error: 'Timeout',
+            error: errorMessage,
+            error_type: 'TIMEOUT',
             execution_time_ms: executionTime
           });
         });
 
-        req.setTimeout(5000);
+        req.setTimeout(POSTBACK_TIMEOUT);
+
+        // Handle socket timeout (connection timeout)
+        req.on('socket', (socket) => {
+          socket.setTimeout(POSTBACK_TIMEOUT);
+          socket.on('timeout', () => {
+            logger.warn(`⏰ Socket timeout for ${finalUrl} - connection took too long`);
+            req.destroy();
+            const executionTime = Date.now() - startTime;
+            resolve({
+              success: false,
+              fired_url: finalUrl,
+              http_status: 0,
+              error: `Connection timeout after ${POSTBACK_TIMEOUT}ms`,
+              error_type: 'CONNECTION_TIMEOUT',
+              execution_time_ms: executionTime
+            });
+          });
+        });
       } catch (error) {
         errorMessage = error.message;
         executionTime = Date.now() - startTime;

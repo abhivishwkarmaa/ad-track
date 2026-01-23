@@ -117,7 +117,7 @@ This document verifies that the implementation meets **ALL** production-grade re
 - **Status**: ✅ VERIFIED
 - **Location**: `src/services/trackingService.js:324-341`
 - **Key Format**: `click:{tenant_id}:{offer_id}:{publisher_id}:{click_uuid}` ✅
-- **TTL**: 24 hours ✅
+- **TTL**: 3 hours ✅
 - **Result**: Full payload stored correctly
 
 ### ✅ Step 5: Append click_uuid to Redis Stream (append-only)

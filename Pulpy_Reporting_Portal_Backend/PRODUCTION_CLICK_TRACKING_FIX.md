@@ -91,7 +91,7 @@ async function setupStream() {
 
 ### ✅ Database Down
 - **Behavior**: Clicks stay in Redis Stream/HASH
-- **TTL**: 24 hours (plenty of time for DB recovery)
+- **TTL**: 3 hours (sufficient time for DB recovery)
 - **Backfill**: Worker scans for unflushed clicks every 5 minutes
 - **Result**: No click loss during DB downtime
 

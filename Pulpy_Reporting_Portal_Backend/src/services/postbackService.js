@@ -100,6 +100,7 @@ export class PostbackService {
 
         // 2. Create conversion data (all Redis-based, no DB queries!)
         const conversionData = {
+          conversion_uuid: uuidv4(), // Generate UUID for conversion
           click_uuid: click_id,
           offer_id: clickData.offer_id,
           publisher_id: clickData.publisher_id,
@@ -107,6 +108,7 @@ export class PostbackService {
           tenant_id: tenantId,
           rcid: rcid || redisClick.rcid || uuidv4(),
           amount: amount ? parseFloat(amount) : parseFloat(redisClick.payout || 0),
+          payout: parseFloat(redisClick.payout || 0), // Add payout field
           status: status,
           ip: extractIP(request),
           timestamp: new Date().toISOString(),
@@ -288,14 +290,29 @@ export class PostbackService {
             [click.publisher_offer_id, tenantId]
           );
           if (assignmentRows.length > 0 && assignmentRows[0].callback_url) {
+            const callbackUrl = assignmentRows[0].callback_url;
+            console.log('📤 Found assignment callback URL:', callbackUrl);
+            
+            // Validate URL format
+            const urlLower = callbackUrl.toLowerCase();
+            if (urlLower.includes('/click') || urlLower.includes('/click?')) {
+              console.log('⚠️ WARNING: Assignment callback_url appears to be a click URL!');
+              console.log('⚠️ Expected: Postback URL (e.g., /postback, /conversion, /pixel)');
+              console.log('⚠️ Found: Click URL (e.g., /click)');
+              console.log('⚠️ This will likely fail - please update the callback_url in the assignments table');
+            }
+            
             affiliatePostbackResult = await this.sendImmediatePostback(
-              assignmentRows[0].callback_url,
+              callbackUrl,
               { click_uuid: click_id, conversion_uuid: `temp_${Date.now()}`, rcid, amount, status: status || 'approved' },
               click
             );
+            console.log('📊 Assignment postback result:', affiliatePostbackResult);
+          } else {
+            console.log('❌ No assignment callback URL found for assignment:', click.publisher_offer_id);
           }
         } catch (dbError) {
-          // Ignore DB errors
+          console.log('❌ DB error checking assignment callback:', dbError.message);
         }
       }
 
@@ -307,15 +324,61 @@ export class PostbackService {
             [publisherId, tenantId]
           );
           if (publisherRows.length > 0 && publisherRows[0].global_postback_url) {
+            const globalPostbackUrl = publisherRows[0].global_postback_url;
+            console.log('📤 Found global postback URL:', globalPostbackUrl);
+            
+            // Validate URL format
+            const urlLower = globalPostbackUrl.toLowerCase();
+            if (urlLower.includes('/click') || urlLower.includes('/click?')) {
+              console.log('⚠️ WARNING: Global postback_url appears to be a click URL!');
+              console.log('⚠️ Expected: Postback URL (e.g., /postback, /conversion, /pixel)');
+              console.log('⚠️ Found: Click URL (e.g., /click)');
+              console.log('⚠️ This will likely fail - please update the global_postback_url in the publishers table');
+            }
+            
             affiliatePostbackResult = await this.sendImmediatePostback(
-              publisherRows[0].global_postback_url,
+              globalPostbackUrl,
               { click_uuid: click_id, conversion_uuid: `temp_${Date.now()}`, rcid, amount, status: status || 'approved' },
               click
             );
+            console.log('📊 Global postback result:', affiliatePostbackResult);
+          } else {
+            console.log('❌ No global postback URL found for publisher:', publisherId);
           }
         } catch (dbError) {
-          // Ignore DB errors
+          console.log('❌ DB error checking global postback:', dbError.message);
         }
+      }
+
+      if (!affiliatePostbackResult) {
+        console.log('⚠️ No postback URL found - neither assignment nor global');
+      }
+
+      // Store conversion in Redis for visibility (even if processed synchronously)
+      try {
+        const conversionId = click_id || rcid || `sync_${Date.now()}`;
+        const conversionKey = `conversion:${tenantId}:${conversionId}`;
+        const conversionHash = {
+          conversion_uuid: `sync_${Date.now()}`,
+          click_uuid: click_id || '',
+          offer_id: offerId?.toString() || '',
+          publisher_id: publisherId?.toString() || '',
+          publisher_offer_id: click?.publisher_offer_id?.toString() || '',
+          tenant_id: tenantId?.toString() || '',
+          rcid: rcid || '',
+          amount: amount ? parseFloat(amount).toString() : '0',
+          status: status || 'approved',
+          ip: extractIP(request),
+          timestamp: new Date().toISOString(),
+          source: 'sync_processing',
+          processed: 'true' // Already processed synchronously
+        };
+
+        await redis.hset(conversionKey, conversionHash);
+        await redis.expire(conversionKey, 3600); // 1 hour TTL
+        console.log(`✅ Conversion hash stored (sync): ${conversionKey}`);
+      } catch (redisError) {
+        console.log('⚠️ Failed to store conversion hash:', redisError.message);
       }
 
       return {
@@ -337,6 +400,14 @@ export class PostbackService {
     try {
       const startTime = Date.now();
 
+      // Validate URL - warn if it looks like a click URL instead of postback URL
+      const urlLower = callbackUrl.toLowerCase();
+      if (urlLower.includes('/click') || urlLower.includes('/click?')) {
+        console.log('⚠️ WARNING: URL appears to be a click tracking URL, not a postback URL!');
+        console.log('⚠️ URL:', callbackUrl);
+        console.log('⚠️ Postback URLs should typically contain: /postback, /conversion, /pixel, /track, /notify');
+      }
+
       // Get affiliate click ID (tid from click data)
       const affiliateClickId = click?.tid || conversion.click_uuid || '';
 
@@ -350,26 +421,86 @@ export class PostbackService {
         .replace(/{payout}/gi, (conversion.payout || 0).toString())
         .replace(/{status}/gi, conversion.status || 'pending');
 
+      console.log('🔗 Starting immediate postback to:', callbackUrl);
+      console.log('🔑 Affiliate click ID (tid):', affiliateClickId);
+      console.log('🔗 Final URL after macro replacement:', finalUrl);
+
       const urlObj = new URL(finalUrl);
       const client = urlObj.protocol === 'https:' ? https : http;
+      console.log('🌐 Making HTTP request to:', urlObj.hostname + urlObj.pathname);
+      console.log('⏱️  Timeout set to: 10000ms (10 seconds)');
+
+      // Increased timeout for postback requests (10 seconds instead of 3)
+      const POSTBACK_TIMEOUT = 10000;
 
       return new Promise((resolve) => {
-        const req = client.get(finalUrl, { timeout: 3000 }, (res) => {
-          const executionTime = Date.now() - startTime;
-          resolve({
-            success: res.statusCode >= 200 && res.statusCode < 300,
-            fired_url: finalUrl,
-            http_status: res.statusCode,
-            execution_time_ms: executionTime
+        const options = {
+          timeout: POSTBACK_TIMEOUT,
+          headers: {
+            'User-Agent': 'Pulpy-Postback-Service/1.0',
+            'Accept': '*/*',
+            'Connection': 'close'
+          }
+        };
+
+        const req = client.get(finalUrl, options, (res) => {
+          let responseBody = '';
+          
+          // Collect response body for error analysis
+          res.on('data', (chunk) => {
+            responseBody += chunk.toString();
+          });
+
+          res.on('end', () => {
+            const executionTime = Date.now() - startTime;
+            const isSuccess = res.statusCode >= 200 && res.statusCode < 300;
+            
+            if (!isSuccess) {
+              console.log(`❌ HTTP ${res.statusCode} response from postback URL`);
+              console.log(`❌ Response headers:`, JSON.stringify(res.headers));
+              console.log(`❌ Response body (first 500 chars):`, responseBody.substring(0, 500));
+            } else {
+              console.log(`✅ HTTP ${res.statusCode} - Postback successful`);
+              console.log(`✅ Response time: ${executionTime}ms`);
+              if (responseBody) {
+                console.log(`✅ Response body (first 200 chars):`, responseBody.substring(0, 200));
+              }
+            }
+
+            resolve({
+              success: isSuccess,
+              fired_url: finalUrl,
+              http_status: res.statusCode,
+              response_body: responseBody.substring(0, 1000), // Include more response for debugging
+              response_headers: res.headers,
+              execution_time_ms: executionTime
+            });
           });
         });
 
-        req.on('error', () => {
+        req.on('error', (err) => {
           const executionTime = Date.now() - startTime;
+          console.log('❌ HTTP request error:', err.message);
+          console.log('❌ Error code:', err.code);
+          console.log('❌ Error details:', {
+            code: err.code,
+            errno: err.errno,
+            syscall: err.syscall,
+            address: err.address,
+            port: err.port
+          });
+          
           resolve({
             success: false,
             fired_url: finalUrl,
             http_status: 0,
+            error: err.message,
+            error_code: err.code,
+            error_details: {
+              code: err.code,
+              errno: err.errno,
+              syscall: err.syscall
+            },
             execution_time_ms: executionTime
           });
         });
@@ -377,22 +508,52 @@ export class PostbackService {
         req.on('timeout', () => {
           req.destroy();
           const executionTime = Date.now() - startTime;
+          console.log(`⏰ HTTP request timeout after ${POSTBACK_TIMEOUT}ms`);
+          console.log(`⏰ URL: ${finalUrl}`);
+          console.log(`⏰ This might indicate:`);
+          console.log(`   - Server is slow or overloaded`);
+          console.log(`   - Network connectivity issues`);
+          console.log(`   - Server is not responding`);
+          
           resolve({
             success: false,
             fired_url: finalUrl,
             http_status: 0,
+            error: `Timeout after ${POSTBACK_TIMEOUT}ms`,
+            error_type: 'TIMEOUT',
             execution_time_ms: executionTime
           });
         });
 
-        req.setTimeout(3000);
+        // Set timeout
+        req.setTimeout(POSTBACK_TIMEOUT);
+
+        // Handle socket timeout (connection timeout)
+        req.on('socket', (socket) => {
+          socket.setTimeout(POSTBACK_TIMEOUT);
+          socket.on('timeout', () => {
+            console.log('⏰ Socket timeout - connection took too long');
+            req.destroy();
+            const executionTime = Date.now() - startTime;
+            resolve({
+              success: false,
+              fired_url: finalUrl,
+              http_status: 0,
+              error: `Connection timeout after ${POSTBACK_TIMEOUT}ms`,
+              error_type: 'CONNECTION_TIMEOUT',
+              execution_time_ms: executionTime
+            });
+          });
+        });
       });
 
     } catch (error) {
+      console.log('❌ Exception in sendImmediatePostback:', error.message);
       return {
         success: false,
         fired_url: callbackUrl,
-        error: error.message
+        error: error.message,
+        error_type: error.constructor.name
       };
     }
   }
@@ -466,7 +627,32 @@ export class PostbackService {
   async enqueueConversionForProcessing(conversionData) {
     try {
       console.log('🔄 Enqueueing conversion to Redis Stream...');
-      // Use Redis Stream for reliable delivery
+      
+      // 1. Store conversion as Redis Hash (for visibility/debugging)
+      const conversionKey = `conversion:${conversionData.tenant_id}:${conversionData.click_uuid}`;
+      const conversionHash = {
+        conversion_uuid: conversionData.conversion_uuid || `temp_${Date.now()}`,
+        click_uuid: conversionData.click_uuid,
+        offer_id: conversionData.offer_id?.toString() || '',
+        publisher_id: conversionData.publisher_id?.toString() || '',
+        publisher_offer_id: conversionData.publisher_offer_id?.toString() || '',
+        tenant_id: conversionData.tenant_id?.toString() || '',
+        rcid: conversionData.rcid || '',
+        amount: conversionData.amount?.toString() || '0',
+        payout: conversionData.payout?.toString() || '0',
+        status: conversionData.status || 'pending',
+        ip: conversionData.ip || '',
+        timestamp: conversionData.timestamp || new Date().toISOString(),
+        source: conversionData.source || 'unknown',
+        processed: 'false' // Will be set to 'true' by worker
+      };
+
+      // Store conversion hash with 1 hour TTL (similar to architecture doc)
+      await redis.hset(conversionKey, conversionHash);
+      await redis.expire(conversionKey, 3600); // 1 hour TTL
+      console.log(`✅ Conversion hash stored: ${conversionKey}`);
+
+      // 2. Use Redis Stream for reliable delivery
       await redis.xadd('stream:conversion_processing', '*',
         'conversion_data', JSON.stringify(conversionData),
         'timestamp', new Date().toISOString(),
@@ -474,7 +660,7 @@ export class PostbackService {
       );
       console.log('✅ Conversion enqueued to stream');
 
-      // Also keep in queue for backwards compatibility with existing workers
+      // 3. Also keep in queue for backwards compatibility with existing workers
       await redis.lpush('queue:conversions', JSON.stringify(conversionData));
       console.log('✅ Conversion enqueued to queue');
 

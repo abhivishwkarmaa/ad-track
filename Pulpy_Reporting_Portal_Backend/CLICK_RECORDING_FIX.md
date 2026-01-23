@@ -59,7 +59,7 @@ Look for:
 1. Worker not running - Check logs for `👷 Redis Stream Worker Started`
 2. Database insert failing - Check logs for `❌ BULK INSERT FAILED`
 3. Foreign key constraint - Check if tenant_id exists in tenants table
-4. Click hash expired - Hash TTL is 24 hours, should be fine
+4. Click hash expired - Hash TTL is 3 hours, should be fine
 
 ### Issue 3: Worker Not Processing
 **Check**:

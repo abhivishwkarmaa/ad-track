@@ -364,7 +364,7 @@ export class TrackingService {
         // Use pipeline for atomicity - ensure hash is written before stream entry
         const pipeline = redis.pipeline();
         pipeline.hset(redisKey, clickData);
-        pipeline.expire(redisKey, 86400); // 24 hours TTL
+        pipeline.expire(redisKey, 10800); // 3 hours TTL
 
         // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
         const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
@@ -469,7 +469,7 @@ export class TrackingService {
           // Try to write it again as a fallback
           try {
             await redis.hset(redisKey, clickData);
-            await redis.expire(redisKey, 86400);
+            await redis.expire(redisKey, 10800);
             logger.info(`✅ Fallback: Re-wrote click hash: ${redisKey}`);
           } catch (fallbackErr) {
             logger.error(`❌ Fallback hash write also failed: ${fallbackErr.message}`);

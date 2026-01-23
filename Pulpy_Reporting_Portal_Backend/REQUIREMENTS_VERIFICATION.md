@@ -55,7 +55,7 @@ This document verifies that the implementation meets **ALL** production-grade re
 ### Requirement: Redis TTL must not cause data loss
 - **Status**: ✅ VERIFIED
 - **Location**: `src/services/trackingService.js:341`
-- **Implementation**: 24-hour TTL (plenty of time for DB persistence)
+- **Implementation**: 3-hour TTL (sufficient time for DB persistence)
 - **Backfill**: Worker scans every 5 minutes
 - **Result**: TTL is safety net, not data lifetime
 
