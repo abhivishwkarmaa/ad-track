@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
 import './Assignment.css';
 
 function NewAssignment() {
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
@@ -29,7 +31,8 @@ function NewAssignment() {
             }
         };
         fetchData();
-    }, [toast]);
+        fetchData();
+    }, [toast, refreshKey]);
 
     const handleAddPublisher = (publisherId) => {
         if (!publisherId) return;

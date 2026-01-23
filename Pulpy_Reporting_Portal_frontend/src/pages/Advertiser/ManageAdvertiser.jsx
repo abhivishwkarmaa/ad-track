@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { advertisersAPI } from '../../services/api';
 import './Advertiser.css';
 
@@ -47,6 +48,7 @@ const AlertIcon = () => (
 function ManageAdvertiser() {
     const { deleteAdvertiser } = useData();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const navigate = useNavigate();
     const [advertisers, setAdvertisers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -88,7 +90,7 @@ function ManageAdvertiser() {
         };
 
         fetchAdvertisers();
-    }, [statusFilter]);
+    }, [statusFilter, refreshKey]);
 
     const filteredAdvertisers = advertisers.filter(advertiser => {
         const matchesSearch =

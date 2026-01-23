@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import './LiveLogs.css';
 
@@ -16,6 +17,7 @@ const ReportsIcon = () => (
 
 const LiveLogs = () => {
     const navigate = useNavigate();
+    const { refreshKey } = useRefresh();
     const [activeTab, setActiveTab] = useState('clicks');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -63,7 +65,7 @@ const LiveLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, limit, selectedOffer, selectedPublisher]);
+    }, [activeTab, limit, selectedOffer, selectedPublisher, refreshKey]);
 
     useEffect(() => {
         let interval;

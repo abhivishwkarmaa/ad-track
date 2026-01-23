@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import './Offer.css';
 
@@ -58,6 +59,7 @@ function OfferDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [offer, setOffer] = useState(null);
@@ -116,7 +118,7 @@ function OfferDetail() {
             fetchOfferDetails();
             fetchStats();
         }
-    }, [id]);
+    }, [id, refreshKey]);
 
     // Fetch publishers
     useEffect(() => {
@@ -136,7 +138,7 @@ function OfferDetail() {
         };
 
         fetchPublishers();
-    }, [toast]);
+    }, [toast, refreshKey]);
 
     // Fetch assignments
     useEffect(() => {
@@ -189,7 +191,7 @@ function OfferDetail() {
         };
 
         fetchAssignments();
-    }, [id, toast]);
+    }, [id, toast, refreshKey]);
 
     if (loading) {
         return (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI, advertisersAPI, assignmentsAPI, publishersAPI } from '../../services/api';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import './Offer.css';
@@ -247,6 +248,7 @@ function EditOffer() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [loadingOffer, setLoadingOffer] = useState(true);
     const [advertisers, setAdvertisers] = useState([]);
@@ -350,7 +352,8 @@ function EditOffer() {
         };
 
         fetchAdvertisers();
-    }, [toast]);
+        fetchAdvertisers();
+    }, [toast, refreshKey]);
 
     // Fetch publishers from API
     useEffect(() => {
@@ -370,7 +373,8 @@ function EditOffer() {
         };
 
         fetchPublishers();
-    }, [toast]);
+        fetchPublishers();
+    }, [toast, refreshKey]);
 
     // Fetch assignments for this offer
     useEffect(() => {
@@ -432,7 +436,8 @@ function EditOffer() {
         };
 
         fetchAssignments();
-    }, [id, toast]);
+        fetchAssignments();
+    }, [id, toast, refreshKey]);
 
     // Load offer data from API
     useEffect(() => {
@@ -532,7 +537,7 @@ function EditOffer() {
         if (id) {
             fetchOffer();
         }
-    }, [id, navigate, toast]);
+    }, [id, navigate, toast, refreshKey]);
 
     const toggleSection = (section) => {
         setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));

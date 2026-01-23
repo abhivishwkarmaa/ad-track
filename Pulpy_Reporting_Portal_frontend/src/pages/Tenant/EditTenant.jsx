@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI } from '../../services/api';
 import './Tenant.css';
 
@@ -8,6 +9,7 @@ function EditTenant() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -20,7 +22,7 @@ function EditTenant() {
 
     useEffect(() => {
         fetchTenant();
-    }, [id]);
+    }, [id, refreshKey]);
 
     const fetchTenant = async () => {
         try {
@@ -75,7 +77,7 @@ function EditTenant() {
                 name: formData.name.trim(),
                 status: formData.status,
             });
-            
+
             if (response.success) {
                 toast.success('Tenant updated successfully!');
                 navigate('/tenant/manage');

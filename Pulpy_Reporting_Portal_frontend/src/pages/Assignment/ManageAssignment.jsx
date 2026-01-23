@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import './Assignment.css';
@@ -58,6 +59,7 @@ const TrashIcon = () => (
 function ManageAssignment() {
     const toast = useToast();
     const navigate = useNavigate();
+    const { refreshKey } = useRefresh();
     const [assignments, setAssignments] = useState([]);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
@@ -126,7 +128,7 @@ function ManageAssignment() {
         };
 
         fetchAssignments();
-    }, [offerFilter, publisherFilter, statusFilter]);
+    }, [offerFilter, publisherFilter, statusFilter, refreshKey]);
 
     const filteredAssignments = assignments.filter(assignment => {
         const matchesSearch =
@@ -143,7 +145,7 @@ function ManageAssignment() {
             if (response.success && response.data) {
                 const trackingUrl = response.data.tracking_url || '';
                 setTrackingUrls(prev => ({ ...prev, [assignmentId]: trackingUrl }));
-                
+
                 // Copy to clipboard
                 if (trackingUrl) {
                     await navigator.clipboard.writeText(trackingUrl);
@@ -181,7 +183,7 @@ function ManageAssignment() {
         try {
             setDeleting(true);
             const response = await assignmentsAPI.deleteAssignment(deleteModal.assignment.id);
-            
+
             if (response.success) {
                 toast.success('Assignment deleted successfully');
                 setDeleteModal({ open: false, assignment: null });
@@ -193,7 +195,7 @@ function ManageAssignment() {
                 if (offerFilter !== 'all') params.offer_id = offerFilter;
                 if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
                 if (statusFilter !== 'all') params.status = statusFilter;
-                
+
                 const refreshResponse = await assignmentsAPI.getAssignments(params);
                 if (refreshResponse.success) {
                     setAssignments(refreshResponse.data);
@@ -332,7 +334,7 @@ function ManageAssignment() {
                                         </span>
                                     </td>
                                     <td>
-                                        {assignment.assigned_at 
+                                        {assignment.assigned_at
                                             ? new Date(assignment.assigned_at).toLocaleDateString()
                                             : '-'
                                         }
@@ -368,7 +370,7 @@ function ManageAssignment() {
                                                     title="Get Tracking URL"
                                                     onClick={() => handleGetTrackingUrl(assignment.id)}
                                                     disabled={loadingTrackingUrls[assignment.id]}
-                                                    style={{ 
+                                                    style={{
                                                         opacity: loadingTrackingUrls[assignment.id] ? 0.6 : 1,
                                                         cursor: loadingTrackingUrls[assignment.id] ? 'not-allowed' : 'pointer'
                                                     }}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { advertisersAPI } from '../../services/api';
 import './Advertiser.css';
 
@@ -23,6 +24,7 @@ function EditAdvertiser() {
     const navigate = useNavigate();
     const { updateAdvertiser } = useData();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [fetchLoading, setFetchLoading] = useState(true);
 
@@ -65,7 +67,8 @@ function EditAdvertiser() {
         };
 
         fetchAdvertiser();
-    }, [id, navigate, toast]);
+        fetchAdvertiser();
+    }, [id, navigate, toast, refreshKey]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI, advertisersAPI } from '../../services/api';
 import './Offer.css';
 
@@ -191,12 +192,13 @@ const getDefaultDates = () => {
     endDateObj.setFullYear(endDateObj.getFullYear() + 5);
     const endDate = endDateObj.toISOString().split('T')[0];
     const endTime = `${hours}:${minutes}:${seconds}`;
-    return { startDate, startTime, endDate,endTime };
+    return { startDate, startTime, endDate, endTime };
 };
 
 function NewOffer() {
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [advertisers, setAdvertisers] = useState([]);
     const [loadingAdvertisers, setLoadingAdvertisers] = useState(true);
@@ -283,7 +285,8 @@ function NewOffer() {
         };
 
         fetchAdvertisers();
-    }, [toast]);
+        fetchAdvertisers();
+    }, [toast, refreshKey]);
 
     // Function to build preview URL with tokens
     const buildPreviewUrl = (baseUrl, mappings) => {

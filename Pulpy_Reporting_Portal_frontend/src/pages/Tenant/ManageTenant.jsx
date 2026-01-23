@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI } from '../../services/api';
 import './Tenant.css';
 
@@ -56,6 +57,7 @@ const TrashIcon = () => (
 function ManageTenant() {
     const toast = useToast();
     const navigate = useNavigate();
+    const { refreshKey } = useRefresh();
     const [tenants, setTenants] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -66,7 +68,7 @@ function ManageTenant() {
     // Fetch tenants data
     useEffect(() => {
         fetchTenants();
-    }, [statusFilter]);
+    }, [statusFilter, refreshKey]);
 
     const fetchTenants = async () => {
         try {

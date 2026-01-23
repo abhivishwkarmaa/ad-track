@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { contactSubmissionsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import './ContactSubmissions.css';
 
 // Icons
@@ -41,6 +42,7 @@ const CloseIcon = () => (
 
 function ManageContactSubmissions() {
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [submissions, setSubmissions] = useState([]);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -56,12 +58,12 @@ function ManageContactSubmissions() {
     // Fetch stats
     useEffect(() => {
         fetchStats();
-    }, []);
+    }, [refreshKey]);
 
     // Fetch submissions
     useEffect(() => {
         fetchSubmissions();
-    }, [page, statusFilter]);
+    }, [page, statusFilter, refreshKey]);
 
     const fetchStats = async () => {
         try {
@@ -359,7 +361,7 @@ function ManageContactSubmissions() {
                                 <div className="contact-detail-value">
                                     <strong>{selectedSubmission.first_name} {selectedSubmission.last_name}</strong>
                                     <br />
-                                    <span 
+                                    <span
                                         style={{ cursor: 'pointer', color: 'var(--primary-color)' }}
                                         onClick={() => copyEmail(selectedSubmission.email)}
                                         title="Click to copy email"

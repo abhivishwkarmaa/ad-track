@@ -141,10 +141,11 @@ export class PostbackService {
             //   throw new Error('Assignment does not belong to this tenant');
             // }
           }
+          let offerPayout = parseFloat(offer.advertiser_amount);
 
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
-          const conversionAmount = amount ? parseFloat(amount) : payout;
+          const conversionAmount = amount ? parseFloat(amount) : offerPayout;
 
           // 4. Status Determination
           let finalStatus = status;

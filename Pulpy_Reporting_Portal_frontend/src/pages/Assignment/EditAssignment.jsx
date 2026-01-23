@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
 import './Assignment.css';
 
@@ -8,6 +9,7 @@ function EditAssignment() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [loadingAssignment, setLoadingAssignment] = useState(true);
     const [assignment, setAssignment] = useState(null);
@@ -41,7 +43,8 @@ function EditAssignment() {
             }
         };
         fetchData();
-    }, []);
+        fetchData();
+    }, [refreshKey]);
 
     useEffect(() => {
         const fetchAssignment = async () => {
@@ -87,7 +90,7 @@ function EditAssignment() {
         if (id) {
             fetchAssignment();
         }
-    }, [id, navigate, toast]);
+    }, [id, navigate, toast, refreshKey]);
 
     const handleChange = (field, value) => {
         if (field === 'capping_budget' || field === 'capping_conversions') {

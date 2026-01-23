@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import './Reports.css';
 
@@ -71,6 +72,7 @@ const AVAILABLE_METRICS = [
 function DetailedReports() {
     const toast = useToast();
     const navigate = useNavigate();
+    const { refreshKey } = useRefresh();
     const [reports, setReports] = useState([]);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
@@ -181,7 +183,7 @@ function DetailedReports() {
     // Initial load
     useEffect(() => {
         fetchReports();
-    }, [pagination.page, pagination.limit]);
+    }, [pagination.page, pagination.limit, refreshKey]);
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));

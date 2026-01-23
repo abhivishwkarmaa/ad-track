@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { publishersAPI } from '../../services/api';
 import './Affiliate.css';
 
@@ -47,6 +48,7 @@ const AlertIcon = () => (
 function ManageAffiliate() {
     const { deleteAffiliate } = useData();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const navigate = useNavigate();
     const [publishers, setPublishers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -88,7 +90,7 @@ function ManageAffiliate() {
         };
 
         fetchPublishers();
-    }, [statusFilter]);
+    }, [statusFilter, refreshKey]);
 
     const filteredAffiliates = publishers.filter(affiliate => {
         const matchesSearch =

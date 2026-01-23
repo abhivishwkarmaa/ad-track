@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { publishersAPI } from '../../services/api';
 import './Affiliate.css';
 
@@ -23,6 +24,7 @@ function EditAffiliate() {
     const navigate = useNavigate();
     const { updateAffiliate } = useData();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [fetchLoading, setFetchLoading] = useState(true);
 
@@ -63,7 +65,8 @@ function EditAffiliate() {
         };
 
         fetchPublisher();
-    }, [id, navigate, toast]);
+        fetchPublisher();
+    }, [id, navigate, toast, refreshKey]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
