@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import tenantResolutionService from '../services/tenantResolutionService.js';
 import {
   TenantNotFoundError,
   TenantSuspendedError,
@@ -23,9 +24,9 @@ import {
 export async function resolveTenant(request, reply) {
   try {
     // Skip tenant resolution for health checks, static assets, and debug endpoints
-    if (request.url === '/health' || 
-        request.url.startsWith('/static') || 
-        request.url.startsWith('/debug/')) {
+    if (request.url === '/health' ||
+      request.url.startsWith('/static') ||
+      request.url.startsWith('/debug/')) {
       return;
     }
 
@@ -34,11 +35,11 @@ export async function resolveTenant(request, reply) {
     // 1. X-Forwarded-Host (set by NGINX when behind reverse proxy)
     // 2. Host header (direct access or if X-Forwarded-Host not set)
     // 3. request.hostname (Fastify's parsed hostname, only works with trustProxy: true)
-    const host = request.headers['x-forwarded-host'] || 
-                 request.headers.host || 
-                 request.hostname || 
-                 '';
-    
+    const host = request.headers['x-forwarded-host'] ||
+      request.headers.host ||
+      request.hostname ||
+      '';
+
     // Log host resolution for debugging
     logger.debug('Tenant resolution - Host extraction', {
       'x-forwarded-host': request.headers['x-forwarded-host'],
@@ -72,7 +73,8 @@ export async function resolveTenant(request, reply) {
       }
 
       // Regular tenant subdomain (e.g., owner1.track-myads.com)
-      const tenant = await getTenantBySlug(subdomain);
+      // Use the new deterministic resolution service (Redis -> DB)
+      const tenant = await tenantResolutionService.resolveTenant(subdomain);
 
       if (!tenant) {
         // ✅ Log full details server-side
@@ -109,15 +111,15 @@ export async function resolveTenant(request, reply) {
       // 🔒 STRICT MULTI-TENANT: No subdomain = HARD REJECTION
       // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
-      
+
       // ✅ Log full details server-side
-      logger.warn('No subdomain detected in host - REJECTED', { 
-        host, 
+      logger.warn('No subdomain detected in host - REJECTED', {
+        host,
         url: request.url,
         ip: request.ip,
         userAgent: request.headers['user-agent']
       });
-      
+
       // ✅ Throw error instead of sending response directly
       // Error handler will create appropriate response based on endpoint type
       throw new TenantRequiredError('Tenant required');
@@ -126,27 +128,6 @@ export async function resolveTenant(request, reply) {
     logger.error('Tenant resolution error:', error);
     // Don't fail the request, but log the error
     // Some endpoints might work without tenant (like health checks)
-  }
-}
-
-/**
- * Get tenant by slug
- */
-async function getTenantBySlug(slug) {
-  try {
-    const [rows] = await pool.query(
-      'SELECT id, name, slug, status, created_at FROM tenants WHERE slug = ? LIMIT 1',
-      [slug]
-    );
-
-    if (!rows || rows.length === 0) {
-      return null;
-    }
-
-    return rows[0];
-  } catch (error) {
-    logger.error('Error fetching tenant by slug:', error);
-    return null;
   }
 }
 

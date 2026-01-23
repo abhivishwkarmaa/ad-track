@@ -146,6 +146,7 @@ export class PostbackService {
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
+          console.log('conversionAmount', conversionAmount);
 
           // 4. Status Determination
           let finalStatus = status;

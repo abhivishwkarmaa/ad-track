@@ -3,6 +3,8 @@ import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import bcrypt from 'bcrypt';
 
+import tenantResolutionService from '../services/tenantResolutionService.js';
+
 export class TenantController {
   /**
    * Create a new tenant
@@ -225,7 +227,7 @@ export class TenantController {
 
       // Check if tenant exists
       const [existingRows] = await pool.query(
-        'SELECT id FROM tenants WHERE id = ?',
+        'SELECT id, slug FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -258,6 +260,11 @@ export class TenantController {
         params
       );
 
+      // Invalidate cache
+      if (existingRows[0] && existingRows[0].slug) {
+        await tenantResolutionService.invalidateTenantCache(existingRows[0].slug);
+      }
+
       // Fetch updated tenant
       const [tenantRows] = await pool.query(
         'SELECT id, name, slug, status, created_at, updated_at FROM tenants WHERE id = ?',
@@ -284,7 +291,7 @@ export class TenantController {
 
       // Check if tenant exists
       const [existingRows] = await pool.query(
-        'SELECT id, name, status FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -312,6 +319,11 @@ export class TenantController {
         ['suspended', id]
       );
 
+      // Invalidate cache
+      if (tenant.slug) {
+        await tenantResolutionService.invalidateTenantCache(tenant.slug);
+      }
+
       logger.info(`Tenant suspended: ${tenant.name} (ID: ${id})`);
 
       return reply.send({
@@ -337,7 +349,7 @@ export class TenantController {
 
       // Check if tenant exists
       const [existingRows] = await pool.query(
-        'SELECT id, name, status FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -364,6 +376,11 @@ export class TenantController {
         'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
         ['active', id]
       );
+
+      // Invalidate cache
+      if (tenant.slug) {
+        await tenantResolutionService.invalidateTenantCache(tenant.slug);
+      }
 
       logger.info(`Tenant resumed: ${tenant.name} (ID: ${id})`);
 
@@ -419,149 +436,7 @@ export class TenantController {
     }
   }
 
-  /**
-   * Suspend tenant (blocks all access immediately)
-   */
-  async suspendTenant(request, reply) {
-    try {
-      const { id } = request.params;
 
-      // Check if tenant exists
-      const [existingRows] = await pool.query(
-        'SELECT id, name, status FROM tenants WHERE id = ?',
-        [id]
-      );
-
-      if (!existingRows || existingRows.length === 0) {
-        return reply.code(404).send({
-          success: false,
-          error: 'Not Found',
-          message: 'Tenant not found',
-        });
-      }
-
-      const tenant = existingRows[0];
-
-      if (tenant.status === 'suspended') {
-        return reply.code(400).send({
-          success: false,
-          error: 'Bad Request',
-          message: 'Tenant is already suspended',
-        });
-      }
-
-      // Suspend tenant
-      await pool.query(
-        'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
-        ['suspended', id]
-      );
-
-      logger.info(`Tenant suspended: ${tenant.name} (ID: ${id})`);
-
-      return reply.send({
-        success: true,
-        message: 'Tenant suspended successfully. All access is now blocked.',
-        data: {
-          tenant_id: id,
-          status: 'suspended',
-        },
-      });
-    } catch (error) {
-      logger.error('TenantController.suspendTenant error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
-    }
-  }
-
-  /**
-   * Resume tenant (restores access)
-   */
-  async resumeTenant(request, reply) {
-    try {
-      const { id } = request.params;
-
-      // Check if tenant exists
-      const [existingRows] = await pool.query(
-        'SELECT id, name, status FROM tenants WHERE id = ?',
-        [id]
-      );
-
-      if (!existingRows || existingRows.length === 0) {
-        return reply.code(404).send({
-          success: false,
-          error: 'Not Found',
-          message: 'Tenant not found',
-        });
-      }
-
-      const tenant = existingRows[0];
-
-      if (tenant.status === 'active') {
-        return reply.code(400).send({
-          success: false,
-          error: 'Bad Request',
-          message: 'Tenant is already active',
-        });
-      }
-
-      // Resume tenant
-      await pool.query(
-        'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
-        ['active', id]
-      );
-
-      logger.info(`Tenant resumed: ${tenant.name} (ID: ${id})`);
-
-      return reply.send({
-        success: true,
-        message: 'Tenant resumed successfully. Access has been restored.',
-        data: {
-          tenant_id: id,
-          status: 'active',
-        },
-      });
-    } catch (error) {
-      logger.error('TenantController.resumeTenant error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
-    }
-  }
-
-  /**
-   * Get tenant metrics
-   */
-  async getTenantMetrics(request, reply) {
-    try {
-      const { id } = request.params;
-      const { date_from, date_to } = request.query;
-
-      // Verify tenant exists
-      const [tenantRows] = await pool.query(
-        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
-        [id]
-      );
-
-      if (!tenantRows || tenantRows.length === 0) {
-        return reply.code(404).send({
-          success: false,
-          error: 'Not Found',
-          message: 'Tenant not found',
-        });
-      }
-
-      const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
-      const metrics = await tenantMetricsService.getTenantMetrics(id, date_from, date_to);
-
-      return reply.send({
-        success: true,
-        data: {
-          tenant: tenantRows[0],
-          metrics,
-        },
-      });
-    } catch (error) {
-      logger.error('TenantController.getTenantMetrics error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
-    }
-  }
 
   /**
    * Delete tenant (soft delete by setting status to suspended)
@@ -574,7 +449,7 @@ export class TenantController {
 
       // Check if tenant exists
       const [existingRows] = await pool.query(
-        'SELECT id, name FROM tenants WHERE id = ?',
+        'SELECT id, name, slug FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -589,6 +464,11 @@ export class TenantController {
       if (hardDelete === 'true' || hardDelete === true) {
         // Hard delete (cascade will handle related records)
         await pool.query('DELETE FROM tenants WHERE id = ?', [id]);
+
+        // Invalidate cache
+        if (existingRows[0].slug) {
+          await tenantResolutionService.invalidateTenantCache(existingRows[0].slug);
+        }
 
         logger.warn(`Tenant hard deleted: ${existingRows[0].name} (ID: ${id})`);
 
