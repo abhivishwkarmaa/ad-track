@@ -382,14 +382,11 @@ export class PostbackService {
         // }
       }
 
-      // Get payout (use assignment payout_override if available, otherwise offer affiliate_amount)
-      let payout = parseFloat(offer.affiliate_amount);
-      if (assignment?.payout_override) {
-        payout = parseFloat(assignment.payout_override);
-      }
+      let offerPayout = parseFloat(offer.advertiser_amount);
 
-      // Use provided amount or default to payout
-      const conversionAmount = amount ? parseFloat(amount) : payout;
+      let payout = parseFloat(offer.affiliate_amount);
+      if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
+      const conversionAmount = amount ? parseFloat(amount) : offerPayout;
 
       // Determine conversion status based on conversion_approval_percentage
       let finalStatus = status;
