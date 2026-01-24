@@ -16,7 +16,18 @@ const countries = [
     { code: 'AU', name: 'Australia' },
     { code: 'JP', name: 'Japan' },
     { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' }
+    { code: 'AE', name: 'United Arab Emirates' },
+    { code: 'CN', name: 'China' },
+    { code: 'RU', name: 'Russia' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'SE', name: 'Sweden' },
+    { code: 'CH', name: 'Switzerland' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'MX', name: 'Mexico' },
+    { code: 'ZA', name: 'South Africa' },
+    { code: 'CUSTOM', name: 'Custom' }
 ];
 
 const currencies = ['USD', 'EUR', 'GBP', 'INR', 'AUD', 'CAD', 'JPY', 'AED'];
@@ -207,6 +218,7 @@ function NewOffer() {
     const [tokenMappings, setTokenMappings] = useState([]);
 
     const [showCustomCategory, setShowCustomCategory] = useState(false);
+    const [showCustomCountry, setShowCustomCountry] = useState(false);
 
     // Get default dates on component initialization
     const defaultDates = getDefaultDates();
@@ -453,12 +465,7 @@ function NewOffer() {
                 setLoading(false);
                 return;
             }
-            const finalCategory = showCustomCategory ? formData.custom_category : formData.category;
-            if (!finalCategory) {
-                toast.error('Category is required');
-                setLoading(false);
-                return;
-            }
+
             if (!formData.advertiser_amount) {
                 toast.error('Advertiser amount is required');
                 setLoading(false);
@@ -600,16 +607,48 @@ function NewOffer() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Country</label>
-                                <select
-                                    className="form-control"
-                                    name="country"
-                                    value={formData.country}
-                                    onChange={handleChange}
-                                >
-                                    {countries.map(country => (
-                                        <option key={country.code} value={country.code}>{country.name}</option>
-                                    ))}
-                                </select>
+                                {!showCustomCountry ? (
+                                    <select
+                                        className="form-control"
+                                        name="country"
+                                        value={formData.country}
+                                        onChange={(e) => {
+                                            if (e.target.value === 'CUSTOM') {
+                                                setShowCustomCountry(true);
+                                                setFormData(prev => ({ ...prev, country: '' }));
+                                            } else {
+                                                setFormData(prev => ({ ...prev, country: e.target.value }));
+                                            }
+                                        }}
+                                    >
+                                        {countries.map(country => (
+                                            <option key={country.code} value={country.code}>{country.name}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            name="country"
+                                            value={formData.country}
+                                            onChange={handleChange}
+                                            placeholder="Enter country"
+                                            style={{ flex: 1 }}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={() => {
+                                                setShowCustomCountry(false);
+                                                setFormData(prev => ({ ...prev, country: 'US' }));
+                                            }}
+                                            style={{ whiteSpace: 'nowrap' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Time Zone</label>
@@ -648,7 +687,7 @@ function NewOffer() {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label required">Category</label>
+                                <label className="form-label">Category</label>
                                 {!showCustomCategory ? (
                                     <select
                                         className="form-control"
@@ -662,7 +701,6 @@ function NewOffer() {
                                                 setFormData(prev => ({ ...prev, category: e.target.value, custom_category: '' }));
                                             }
                                         }}
-                                        required
                                     >
                                         <option value="">Select Category</option>
                                         {categories.map(cat => (
@@ -679,7 +717,6 @@ function NewOffer() {
                                             value={formData.custom_category}
                                             onChange={handleChange}
                                             placeholder="Enter custom category"
-                                            required
                                             style={{ flex: 1 }}
                                         />
                                         <button
@@ -1444,8 +1481,8 @@ function NewOffer() {
                         </button>
                     </div>
                 </div>
-            </form>
-        </div>
+            </form >
+        </div >
     );
 }
 

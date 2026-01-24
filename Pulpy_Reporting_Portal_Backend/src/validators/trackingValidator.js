@@ -30,9 +30,17 @@ export const testConversionSchema = Joi.object({
 
 export const testAffiliatePostbackSchema = Joi.object({
   publisher_id: Joi.alternatives().try(Joi.number(), Joi.string()).required(),
-  affiliate_click_id: Joi.string().required(),
+  affiliate_click_id: Joi.string().optional(),
+  rcid: Joi.string().optional(), // Alias for affiliate_click_id
   status: Joi.string().valid('approved', 'rejected', 'pending').default('approved'),
   payout: Joi.number().optional(),
   amount: Joi.number().optional(),
+  txid: Joi.string().optional(),
+  method: Joi.string().valid('GET', 'POST').default('GET'),
+  dry_run: Joi.boolean().default(false),
+});
+
+export const testTrackingUrlLoopSchema = Joi.object({
+  tracking_url: Joi.string().required(),
 });
 

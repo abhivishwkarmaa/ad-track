@@ -10,7 +10,7 @@ import { createOfferSchema, updateOfferStatusSchema } from '../validators/offerV
 import { updateOfferSchema } from '../validators/offerValidator.js';
 import { createPublisherSchema, updatePublisherSchema } from '../validators/publisherValidator.js';
 import { createAssignmentSchema, updateAssignmentSchema } from '../validators/assignmentValidator.js';
-import { testConversionSchema, testAffiliatePostbackSchema } from '../validators/trackingValidator.js';
+import { testConversionSchema, testAffiliatePostbackSchema, testTrackingUrlLoopSchema } from '../validators/trackingValidator.js';
 
 export class AdminController {
   // Publisher endpoints
@@ -139,8 +139,8 @@ export class AdminController {
         });
       }
 
-      // Update status with tenant isolation
-      let query = `UPDATE publishers SET status = 'suspended', updated_at = UTC_TIMESTAMP() WHERE id = ?`;
+      // Hard Delete with tenant isolation
+      let query = `DELETE FROM publishers WHERE id = ?`;
       const params = [request.params.id];
       if (tenantId) {
         query += ' AND tenant_id = ?';
@@ -150,8 +150,7 @@ export class AdminController {
       const { default: pool } = await import('../db/connection.js');
       await pool.query(query, params);
 
-      const deleted = await publisherService.findById(request.params.id, tenantId);
-      return reply.send({ success: true, data: deleted });
+      return reply.send({ success: true, data: existing });
     } catch (error) {
       logger.error('AdminController.deletePublisher error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
@@ -529,6 +528,7 @@ export class AdminController {
 
   async updateAssignment(request, reply) {
     try {
+      logger.info(`Attempting to update assignment ${request.params.id} with data:`, request.body);
       const { error, value } = updateAssignmentSchema.validate(request.body, {
         abortEarly: false,
         stripUnknown: true,
@@ -578,6 +578,8 @@ export class AdminController {
 
   async deleteAssignment(request, reply) {
     try {
+      console.error('!!! DEBUG DELETE ASSIGNMENT !!!', request.params.id);
+      logger.info(`Attempting to delete assignment ${request.params.id}`);
       // ✅ CRITICAL: Get tenant_id from request for tenant isolation
       const tenantId = getTenantIdFromRequest(request);
       if (!tenantId) {
@@ -666,43 +668,43 @@ export class AdminController {
       // ✅ Build base URL from actual request Host header (not from env)
       // This ensures tracking URLs use the real domain (e.g., ravi.track-myads.com)
       // instead of localhost or env variables
-      
+
       // ✅ CRITICAL: Use X-Forwarded-Host for VPS/NGINX reverse proxy
-      const host = request.headers['x-forwarded-host'] || 
-                   request.headers.host || 
-                   request.hostname || 
-                   '';
-      
+      const host = request.headers['x-forwarded-host'] ||
+        request.headers.host ||
+        request.hostname ||
+        '';
+
       // Determine protocol from request
       // Check X-Forwarded-Proto first (set by NGINX/proxy), then request.protocol
-      const protocol = request.headers['x-forwarded-proto'] || 
-                      (request.protocol === 'https' ? 'https' : 'http') ||
-                      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
-      
+      const protocol = request.headers['x-forwarded-proto'] ||
+        (request.protocol === 'https' ? 'https' : 'http') ||
+        (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+
       // Extract domain and port from host header
       // host format: "ravi.track-myads.com" or "ravi.track-myads.com:5001"
       let domain = host;
       let port = '';
-      
+
       if (host.includes(':')) {
         const parts = host.split(':');
         domain = parts[0];
         port = parts[1];
-        
+
         // Remove port if it's standard (80 for http, 443 for https)
         // Also remove port in production (always use standard ports)
-        if ((protocol === 'http' && port === '80') || 
-            (protocol === 'https' && port === '443') ||
-            process.env.NODE_ENV === 'production') {
+        if ((protocol === 'http' && port === '80') ||
+          (protocol === 'https' && port === '443') ||
+          process.env.NODE_ENV === 'production') {
           port = '';
         }
       }
-      
+
       // Build baseURL: {protocol}://{domain}{port}
       // Example (production): https://ravi.track-myads.com
       // Example (dev): http://ravi.localhost:5001
       const baseURL = `${protocol}://${domain}${port ? `:${port}` : ''}`;
-      
+
       logger.debug('Tracking URL base generated from request Host', {
         host: host,
         protocol: protocol,
@@ -823,7 +825,8 @@ export class AdminController {
         });
       }
 
-      const { publisher_id, affiliate_click_id, status, payout, amount } = value;
+      const { publisher_id, affiliate_click_id, rcid, status, payout, amount, txid, method, dry_run } = value;
+      const clickIdToUse = affiliate_click_id || rcid;
 
       // ✅ CRITICAL: Get tenant_id from request for tenant isolation
       const tenantId = getTenantIdFromRequest(request);
@@ -854,24 +857,62 @@ export class AdminController {
 
       // Manual macro replacement for testing
       let finalUrl = publisher.global_postback_url;
+      const payoutVal = (payout || amount || 0).toString();
+      const statusVal = status || 'approved';
+      const txidVal = txid || '';
+
       finalUrl = finalUrl
-        .replace(/{click_id}/gi, affiliate_click_id) // Map click_id to affiliate_click_id
-        .replace(/{affiliate_click_id}/gi, affiliate_click_id)
-        .replace(/{status}/gi, status || 'approved')
-        .replace(/{payout}/gi, (payout || 0).toString())
-        .replace(/{amount}/gi, (amount || 0).toString());
+        .replace(/{click_id}/gi, clickIdToUse || '')
+        .replace(/{clickid}/gi, clickIdToUse || '')
+        .replace(/{affiliate_click_id}/gi, clickIdToUse || '')
+        .replace(/{rcid}/gi, clickIdToUse || '') // Support {rcid}
+        .replace(/{status}/gi, statusVal)
+        .replace(/{payout}/gi, payoutVal)
+        .replace(/{amount}/gi, payoutVal)
+        .replace(/{txid}/gi, txidVal)
+        .replace(/{transaction_id}/gi, txidVal);
 
-      // Fire Request
-      const urlObj = new URL(finalUrl);
-      const client = urlObj.protocol === 'https:' ? https : http; // Import https/http at top if needed, or use fetch
+      // Support for DRY RUN mode
+      if (dry_run) {
+        return reply.send({
+          success: true,
+          mode: 'DRY_RUN',
+          fired_url: finalUrl,
+          method: method || 'GET',
+          http_status: null,
+          response_body: '(Dry run - request not sent)',
+          execution_time_ms: Date.now() - startTime,
+        });
+      }
 
-      // Improving implementation to use fetch for simplicity and consistency with modern node
-      const postbackResponse = await fetch(finalUrl);
-      const responseText = await postbackResponse.text().catch(() => '');
+      // Fire Real Request
+      let postbackResponse;
+      let responseText = '';
+
+      try {
+        if (method === 'POST') {
+          // For POST, we assume the URL is the endpoint and params might need to be handling differently
+          // But usually postbacks embed params in URL even for POST. 
+          // If payload is needed, it's not specified in prompt, so we assume empty body or query params.
+          postbackResponse = await fetch(finalUrl, { method: 'POST' });
+        } else {
+          postbackResponse = await fetch(finalUrl);
+        }
+        responseText = await postbackResponse.text().catch(() => '');
+      } catch (reqError) {
+        return reply.send({
+          success: false,
+          fired_url: finalUrl,
+          method: method || 'GET',
+          error: reqError.message,
+          execution_time_ms: Date.now() - startTime,
+        });
+      }
 
       return reply.send({
         success: true,
         fired_url: finalUrl,
+        method: method || 'GET',
         http_status: postbackResponse.status,
         response_body: responseText.substring(0, 1000),
         execution_time_ms: Date.now() - startTime,
@@ -879,6 +920,170 @@ export class AdminController {
 
     } catch (error) {
       logger.error('AdminController.testAffiliatePostback error:', error);
+      return reply.code(500).send({
+        success: false,
+        error: 'Internal Server Error',
+        message: error.message,
+        execution_time_ms: Date.now() - startTime,
+      });
+    }
+  }
+
+  async testTrackingUrlLoop(request, reply) {
+    const startTime = Date.now();
+    try {
+      const { error, value } = testTrackingUrlLoopSchema.validate(request.body, {
+        abortEarly: false,
+        stripUnknown: true,
+      });
+
+      if (error) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Validation Error',
+          message: 'Request validation failed',
+          details: error.details.map((detail) => ({
+            field: detail.path.join('.'),
+            message: detail.message,
+          })),
+        });
+      }
+
+      const { tracking_url } = value;
+
+      // ✅ CRITICAL: Get tenant_id from request for tenant isolation
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      // 1. Parse Tracking URL
+      // We accept absolute URLs. If relative, we might need strict validation.
+      let urlObj;
+      try {
+        let urlToParse = tracking_url;
+        if (!urlToParse.match(/^https?:\/\//)) {
+          urlToParse = 'http://' + urlToParse;
+        }
+        urlObj = new URL(urlToParse);
+      } catch (e) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Invalid Tracking URL format',
+        });
+      }
+
+      const offerId = urlObj.searchParams.get('offer_id');
+      const pubId = urlObj.searchParams.get('pub_id');
+
+      if (!offerId || !pubId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tracking URL must contain offer_id and pub_id',
+        });
+      }
+
+      // 2. Simulate Click (Hit Tracking URL)
+      // We pass the parsed query params to trackingService
+      // We mock the request object to pass context.
+      // NOTE: trackClick uses request.headers['user-agent'], request.ip, etc.
+      // We reuse the current admin request for these, which is fine for testing.
+      const clickParams = Object.fromEntries(urlObj.searchParams);
+
+      let clickResult;
+      try {
+        clickResult = await trackingService.trackClick(clickParams, request);
+      } catch (e) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Tracking Error',
+          message: `Failed to track click: ${e.message}`,
+        });
+      }
+
+      const generatedClickId = clickResult.clickId;
+      if (!generatedClickId) {
+        return reply.code(500).send({
+          success: false,
+          error: 'Tracking Error',
+          message: 'No click_id returned from tracking service',
+        });
+      }
+
+      // 3. Fetch Publisher Postback URL
+      const publisher = await publisherService.findById(pubId, tenantId);
+      if (!publisher) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Publisher not found',
+          data: { click_id: generatedClickId }
+        });
+      }
+
+      if (!publisher.global_postback_url) {
+        return reply.send({
+          success: true,
+          message: 'Click generated, but Publisher has no global postback URL',
+          data: {
+            click_id: generatedClickId,
+            publisher_id: pubId,
+            postback_fired: false
+          }
+        });
+      }
+
+      // 4. Fire Postback
+      let finalUrl = publisher.global_postback_url;
+      // Replace standard macros
+      finalUrl = finalUrl
+        .replace(/{click_id}/gi, generatedClickId)
+        .replace(/{clickid}/gi, generatedClickId)
+        .replace(/{affiliate_click_id}/gi, generatedClickId) // Assuming mapping
+        .replace(/{status}/gi, 'approved')
+        .replace(/{payout}/gi, '0.00') // Placeholder
+        .replace(/{amount}/gi, '0.00'); // Placeholder
+
+      const postbackStartTime = Date.now();
+      let responseText = '';
+      let status = 0;
+      let postbackError = null;
+
+      try {
+        const postbackResponse = await fetch(finalUrl);
+        status = postbackResponse.status;
+        responseText = await postbackResponse.text().catch(() => '');
+      } catch (e) {
+        postbackError = e.message;
+        status = 0;
+      }
+
+      return reply.send({
+        success: true,
+        message: 'Click generated and Postback fired',
+        data: {
+          click_id: generatedClickId,
+          publisher_id: pubId,
+          offer_id: offerId,
+          postback: {
+            url: finalUrl,
+            status: status,
+            response: responseText.substring(0, 500),
+            error: postbackError,
+            latency_ms: Date.now() - postbackStartTime
+          }
+        },
+        execution_time_ms: Date.now() - startTime
+      });
+
+    } catch (error) {
+      logger.error('AdminController.testTrackingUrlLoop error:', error);
       return reply.code(500).send({
         success: false,
         error: 'Internal Server Error',

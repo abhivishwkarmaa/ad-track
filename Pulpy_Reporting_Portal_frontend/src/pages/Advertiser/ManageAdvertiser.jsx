@@ -45,6 +45,19 @@ const AlertIcon = () => (
     </svg>
 );
 
+const PauseIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="6" y="4" width="4" height="16" />
+        <rect x="14" y="4" width="4" height="16" />
+    </svg>
+);
+
+const PlayIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+);
+
 function ManageAdvertiser() {
     const { deleteAdvertiser } = useData();
     const toast = useToast();
@@ -100,6 +113,31 @@ function ManageAdvertiser() {
         const matchesStatus = statusFilter === 'all' || advertiser.status?.toLowerCase() === statusFilter.toLowerCase();
         return matchesSearch && matchesStatus;
     });
+
+    const [togglingStatus, setTogglingStatus] = useState({});
+
+    const handleToggleStatus = async (advertiser) => {
+        const newStatus = advertiser.status === 'active' ? 'inactive' : 'active';
+        try {
+            setTogglingStatus(prev => ({ ...prev, [advertiser.id]: true }));
+            const response = await advertisersAPI.updateAdvertiser(advertiser.id, { status: newStatus });
+
+            if (response.success) {
+                toast.success(`Advertiser ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
+                // Update local state
+                setAdvertisers(prev => prev.map(a =>
+                    a.id === advertiser.id ? { ...a, status: newStatus } : a
+                ));
+            } else {
+                toast.error(response.message || 'Failed to update status');
+            }
+        } catch (err) {
+            console.error('Update status error:', err);
+            toast.error('Failed to update status');
+        } finally {
+            setTogglingStatus(prev => ({ ...prev, [advertiser.id]: false }));
+        }
+    };
 
     const handleDelete = (advertiser) => {
         setDeleteModal({ open: true, advertiser });
@@ -239,6 +277,19 @@ function ManageAdvertiser() {
                                     </td>
                                     <td>
                                         <div className="advertiser-actions">
+                                            <button
+                                                className="advertiser-action-btn"
+                                                title={advertiser.status === 'active' ? 'Suspend' : 'Activate'}
+                                                onClick={() => handleToggleStatus(advertiser)}
+                                                style={{ color: advertiser.status === 'active' ? '#ff9800' : '#4CAF50' }}
+                                                disabled={togglingStatus[advertiser.id]}
+                                            >
+                                                {togglingStatus[advertiser.id] ? (
+                                                    <span style={{ fontSize: '10px' }}>...</span>
+                                                ) : (
+                                                    advertiser.status === 'active' ? <PauseIcon /> : <PlayIcon />
+                                                )}
+                                            </button>
                                             <button
                                                 className="advertiser-action-btn"
                                                 title="Edit"

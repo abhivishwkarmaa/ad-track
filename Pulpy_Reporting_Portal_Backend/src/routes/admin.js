@@ -28,6 +28,7 @@ async function adminRoutes(fastify) {
 
   // Test Affiliate Postback (Debug Tool)
   fastify.post('/test-affiliate-postback', adminController.testAffiliatePostback);
+  fastify.post('/test-tracking-loop', adminController.testTrackingUrlLoop);
   fastify.get('/affiliate-postback-logs', adminController.getAffiliatePostbackLogs);
 
   // Contact Submissions (Super Admin Only - Admin Subdomain Only)
@@ -36,22 +37,22 @@ async function adminRoutes(fastify) {
     preHandler: [requireAdminSubdomain, requireSuperAdmin],
     handler: contactController.getContactStats.bind(contactController),
   });
-  
+
   fastify.get('/contact-submissions', {
     preHandler: [requireAdminSubdomain, requireSuperAdmin],
     handler: contactController.getAllContactSubmissions.bind(contactController),
   });
-  
+
   fastify.get('/contact-submissions/:id', {
     preHandler: [requireAdminSubdomain, requireSuperAdmin],
     handler: contactController.getContactSubmission.bind(contactController),
   });
-  
+
   fastify.patch('/contact-submissions/:id/status', {
     preHandler: [requireAdminSubdomain, requireSuperAdmin],
     handler: contactController.updateContactStatus.bind(contactController),
   });
-  
+
   fastify.delete('/contact-submissions/:id', {
     preHandler: [requireAdminSubdomain, requireSuperAdmin],
     handler: contactController.deleteContactSubmission.bind(contactController),

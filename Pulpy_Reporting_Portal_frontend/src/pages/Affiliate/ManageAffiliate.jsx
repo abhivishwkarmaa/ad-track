@@ -45,6 +45,19 @@ const AlertIcon = () => (
     </svg>
 );
 
+const PauseIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="6" y="4" width="4" height="16" />
+        <rect x="14" y="4" width="4" height="16" />
+    </svg>
+);
+
+const PlayIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+);
+
 function ManageAffiliate() {
     const { deleteAffiliate } = useData();
     const toast = useToast();
@@ -100,6 +113,31 @@ function ManageAffiliate() {
         const matchesStatus = statusFilter === 'all' || affiliate.status?.toLowerCase() === statusFilter.toLowerCase();
         return matchesSearch && matchesStatus;
     });
+
+    const [togglingStatus, setTogglingStatus] = useState({});
+
+    const handleToggleStatus = async (affiliate) => {
+        const newStatus = affiliate.status === 'active' ? 'suspended' : 'active';
+        try {
+            setTogglingStatus(prev => ({ ...prev, [affiliate.id]: true }));
+            const response = await publishersAPI.updatePublisher(affiliate.id, { status: newStatus });
+
+            if (response.success) {
+                toast.success(`Publisher ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`);
+                // Update local state
+                setPublishers(prev => prev.map(p =>
+                    p.id === affiliate.id ? { ...p, status: newStatus } : p
+                ));
+            } else {
+                toast.error(response.message || 'Failed to update status');
+            }
+        } catch (err) {
+            console.error('Update status error:', err);
+            toast.error('Failed to update status');
+        } finally {
+            setTogglingStatus(prev => ({ ...prev, [affiliate.id]: false }));
+        }
+    };
 
     const handleDelete = (affiliate) => {
         setDeleteModal({ open: true, affiliate });
@@ -231,6 +269,19 @@ function ManageAffiliate() {
                                     </td>
                                     <td>
                                         <div className="affiliate-actions">
+                                            <button
+                                                className="affiliate-action-btn"
+                                                title={affiliate.status === 'active' ? 'Suspend' : 'Activate'}
+                                                onClick={() => handleToggleStatus(affiliate)}
+                                                style={{ color: affiliate.status === 'active' ? '#ff9800' : '#4CAF50' }}
+                                                disabled={togglingStatus[affiliate.id]}
+                                            >
+                                                {togglingStatus[affiliate.id] ? (
+                                                    <span style={{ fontSize: '10px' }}>...</span>
+                                                ) : (
+                                                    affiliate.status === 'active' ? <PauseIcon /> : <PlayIcon />
+                                                )}
+                                            </button>
                                             <button
                                                 className="affiliate-action-btn"
                                                 title="Edit"

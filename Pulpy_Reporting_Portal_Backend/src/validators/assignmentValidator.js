@@ -11,24 +11,24 @@ const validateUrlMacros = (value, helpers, urlType) => {
   if (!value || value === '') {
     return value;
   }
-  
+
   // Validate as URI
   try {
     new URL(value);
   } catch (e) {
     return helpers.error('string.uri');
   }
-  
+
   // Check for required macros: {click_id}, {CLICK_ID}, {rcid}, or {RCID}
   const hasClickIdMacro = /{click_id}/i.test(value);
   const hasRcidMacro = /{rcid}/i.test(value);
-  
+
   if (!hasClickIdMacro && !hasRcidMacro) {
     return helpers.error('any.custom', {
       message: `${urlType} must contain {click_id} or {rcid} macro`,
     });
   }
-  
+
   return value;
 };
 
@@ -85,6 +85,6 @@ export const updateAssignmentSchema = Joi.object({
     return validateUrlMacros(value, helpers, 'destination_url');
   }).optional(),
   notes: Joi.string().allow('', null).optional(),
-  status: Joi.string().valid('active', 'inactive', 'suspended').optional(),
+  status: Joi.string().valid('active', 'inactive', 'suspended', 'paused').optional(),
 });
 

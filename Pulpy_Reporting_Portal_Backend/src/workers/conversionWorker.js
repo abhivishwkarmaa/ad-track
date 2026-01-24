@@ -227,6 +227,8 @@ async function processConversionBatch(entries) {
     }
 }
 
+import postbackService from '../services/postbackService.js';
+
 /**
  * Bulk Insert Logic
  */
@@ -235,8 +237,11 @@ async function bulkInsertConversions(items) {
 
     const values = items.map(item => {
         const c = item.data; // conversion data
+        const conversionUuid = uuidv4();
+        c.conversion_uuid = conversionUuid; // Save for postback
+
         return [
-            uuidv4(),
+            conversionUuid,
             c.click_uuid, c.offer_id, c.publisher_id, c.publisher_offer_id, c.tenant_id,
             c.rcid || uuidv4(), c.status, c.amount, c.payout, c.ip,
             c.postback_payload, new Date(), new Date(), new Date()
@@ -249,6 +254,24 @@ async function bulkInsertConversions(items) {
     ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`;
 
     await pool.query(sql, [values]);
+
+    // Fetch IDs for logging
+    try {
+        const uuids = items.map(item => item.data.conversion_uuid);
+        if (uuids.length > 0) {
+            const [rows] = await pool.query('SELECT id, conversion_uuid FROM conversions WHERE conversion_uuid IN (?)', [uuids]);
+            const uuidMap = new Map();
+            rows.forEach(r => uuidMap.set(r.conversion_uuid, r.id));
+
+            items.forEach(item => {
+                if (uuidMap.has(item.data.conversion_uuid)) {
+                    item.data.id = uuidMap.get(item.data.conversion_uuid);
+                }
+            });
+        }
+    } catch (idErr) {
+        logger.error('❌ Failed to fetch conversion IDs:', idErr);
+    }
 
     // Update Stats
     const pipeline = redis.pipeline();
@@ -271,6 +294,45 @@ async function bulkInsertConversions(items) {
 
     await pipeline.exec();
     logger.info(`✅ Inserted ${items.length} conversions`);
+
+    // Fire Affiliate Postbacks
+    await fireAffiliatePostbacks(items);
+}
+
+/**
+ * Fire Affiliate Postbacks
+ */
+async function fireAffiliatePostbacks(items) {
+    const promises = items.map(async (item) => {
+        const c = item.data;
+        if (c.callback_url) {
+            try {
+                // Construct fake objects expected by sendPublisherPostback
+                const conversion = {
+                    conversion_uuid: c.conversion_uuid,
+                    id: c.id,
+                    tenant_id: c.tenant_id,
+                    publisher_id: c.publisher_id,
+                    rcid: c.rcid,
+                    payout: c.payout,
+                    amount: c.amount,
+                    status: c.status
+                };
+                const click = {
+                    tid: c.tid // Affiliate click ID
+                };
+
+                await postbackService.sendPublisherPostback(c.callback_url, conversion, click);
+                logger.info(`✅ Affiliate Postback Fired: ${c.callback_url}`);
+            } catch (err) {
+                logger.error(`❌ Failed to fire affiliate postback: ${err.message}`, { url: c.callback_url });
+            }
+        }
+    });
+
+    // Fire and forget (or await if we want to ensure completion before ACK, but speed is priority)
+    // We await allSettled to avoid crashing worker
+    await Promise.allSettled(promises);
 }
 
 

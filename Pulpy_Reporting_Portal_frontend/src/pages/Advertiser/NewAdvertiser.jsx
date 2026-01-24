@@ -15,7 +15,18 @@ const countries = [
     { code: 'AU', name: 'Australia' },
     { code: 'JP', name: 'Japan' },
     { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' }
+    { code: 'AE', name: 'United Arab Emirates' },
+    { code: 'CN', name: 'China' },
+    { code: 'RU', name: 'Russia' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'SE', name: 'Sweden' },
+    { code: 'CH', name: 'Switzerland' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'MX', name: 'Mexico' },
+    { code: 'ZA', name: 'South Africa' },
+    { code: 'CUSTOM', name: 'Custom' }
 ];
 
 function NewAdvertiser() {
@@ -23,6 +34,8 @@ function NewAdvertiser() {
     const { addAdvertiser } = useData();
     const toast = useToast();
     const [loading, setLoading] = useState(false);
+
+    const [showCustomCountry, setShowCustomCountry] = useState(false);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -145,16 +158,48 @@ function NewAdvertiser() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Country</label>
-                                <select
-                                    className="form-control"
-                                    name="country"
-                                    value={formData.country}
-                                    onChange={handleChange}
-                                >
-                                    {countries.map(country => (
-                                        <option key={country.code} value={country.code}>{country.name}</option>
-                                    ))}
-                                </select>
+                                {!showCustomCountry ? (
+                                    <select
+                                        className="form-control"
+                                        name="country"
+                                        value={formData.country}
+                                        onChange={(e) => {
+                                            if (e.target.value === 'CUSTOM') {
+                                                setShowCustomCountry(true);
+                                                setFormData(prev => ({ ...prev, country: '' }));
+                                            } else {
+                                                setFormData(prev => ({ ...prev, country: e.target.value }));
+                                            }
+                                        }}
+                                    >
+                                        {countries.map(country => (
+                                            <option key={country.code} value={country.code}>{country.name}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            name="country"
+                                            value={formData.country}
+                                            onChange={handleChange}
+                                            placeholder="Enter country"
+                                            style={{ flex: 1 }}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={() => {
+                                                setShowCustomCountry(false);
+                                                setFormData(prev => ({ ...prev, country: '' }));
+                                            }}
+                                            style={{ whiteSpace: 'nowrap' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

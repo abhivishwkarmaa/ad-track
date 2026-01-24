@@ -17,7 +17,18 @@ const countries = [
     { code: 'AU', name: 'Australia' },
     { code: 'JP', name: 'Japan' },
     { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' }
+    { code: 'AE', name: 'United Arab Emirates' },
+    { code: 'CN', name: 'China' },
+    { code: 'RU', name: 'Russia' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'SE', name: 'Sweden' },
+    { code: 'CH', name: 'Switzerland' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'MX', name: 'Mexico' },
+    { code: 'ZA', name: 'South Africa' },
+    { code: 'CUSTOM', name: 'Custom' }
 ];
 
 const currencies = ['USD', 'EUR', 'GBP', 'INR', 'AUD', 'CAD', 'JPY', 'AED'];
@@ -259,6 +270,7 @@ function EditOffer() {
     const [loadingAssignments, setLoadingAssignments] = useState(false);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
     const [showCustomCategory, setShowCustomCategory] = useState(false);
+    const [showCustomCountry, setShowCustomCountry] = useState(false);
     const [showTokenTable, setShowTokenTable] = useState(false);
     const [showMacrosInfo, setShowMacrosInfo] = useState(false);
     const [tokenMappings, setTokenMappings] = useState([]);
@@ -521,6 +533,12 @@ function EditOffer() {
                         postbackMethod: offer.system_postback_method || 'GET',
                         postbackEvents: ['conversion']
                     }));
+
+                    // Check if country is custom
+                    const isStandardCountry = countries.some(c => c.code === (offer.country || 'US'));
+                    if (!isStandardCountry && offer.country) {
+                        setShowCustomCountry(true);
+                    }
                 } else {
                     toast.error('Offer not found');
                     navigate('/offer/list');
@@ -873,16 +891,48 @@ function EditOffer() {
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Country</label>
-                                <select
-                                    className="form-control"
-                                    name="country"
-                                    value={formData.country}
-                                    onChange={handleChange}
-                                >
-                                    {countries.map(country => (
-                                        <option key={country.code} value={country.code}>{country.name}</option>
-                                    ))}
-                                </select>
+                                {!showCustomCountry ? (
+                                    <select
+                                        className="form-control"
+                                        name="country"
+                                        value={formData.country}
+                                        onChange={(e) => {
+                                            if (e.target.value === 'CUSTOM') {
+                                                setShowCustomCountry(true);
+                                                setFormData(prev => ({ ...prev, country: '' }));
+                                            } else {
+                                                setFormData(prev => ({ ...prev, country: e.target.value }));
+                                            }
+                                        }}
+                                    >
+                                        {countries.map(country => (
+                                            <option key={country.code} value={country.code}>{country.name}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                        <input
+                                            type="text"
+                                            className="form-control"
+                                            name="country"
+                                            value={formData.country}
+                                            onChange={handleChange}
+                                            placeholder="Enter country"
+                                            style={{ flex: 1 }}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={() => {
+                                                setShowCustomCountry(false);
+                                                setFormData(prev => ({ ...prev, country: 'US' }));
+                                            }}
+                                            style={{ whiteSpace: 'nowrap' }}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div className="form-group">
                                 <label className="form-label">Time Zone</label>
@@ -921,7 +971,7 @@ function EditOffer() {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label required">Category</label>
+                                <label className="form-label">Category</label>
                                 {!showCustomCategory ? (
                                     <select
                                         className="form-control"
@@ -935,7 +985,6 @@ function EditOffer() {
                                                 setFormData(prev => ({ ...prev, category: e.target.value, custom_category: '' }));
                                             }
                                         }}
-                                        required
                                     >
                                         <option value="">Select Category</option>
                                         {categories.map(cat => (
@@ -952,7 +1001,6 @@ function EditOffer() {
                                             value={formData.custom_category}
                                             onChange={handleChange}
                                             placeholder="Enter custom category"
-                                            required
                                             style={{ flex: 1 }}
                                         />
                                         <button
@@ -1747,77 +1795,7 @@ function EditOffer() {
                         )}
                     </div>
 
-                    {/* Postback */}
-                    <div className="offer-form-section" id="postBackSection">
-                        <h3 className="offer-form-section-title">Postback</h3>
-                        <div className="form-group">
-                            <label className="form-label">Global Postback URL</label>
-                            <div className="input-with-action">
-                                <input
-                                    type="text"
-                                    className="form-control"
-                                    name="globalPostbackUrl"
-                                    value={formData.globalPostbackUrl}
-                                    onChange={handleChange}
-                                    placeholder="https://{tenant}.domain.com/postback"
-                                />
-                                <button type="button" className="btn btn-icon" onClick={() => copyToClipboard(formData.globalPostbackUrl)}>
-                                    <CopyIcon />
-                                </button>
-                            </div>
-                            <div className="form-helper">
-                                Macros: {'{clickid}'}, {'{payout}'}, {'{offer_id}'}, {'{affiliate_id}'}, {'{goal}'}, {'{source}'}, {'{sub1-5}'}
-                            </div>
-                        </div>
 
-                        <div className="offer-form-row two-col">
-                            <div className="form-group">
-                                <label className="form-label">Method</label>
-                                <select className="form-control" name="postbackMethod" value={formData.postbackMethod} onChange={handleChange}>
-                                    <option value="GET">GET</option>
-                                    <option value="POST">POST</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Fire Postback On</label>
-                                <div className="checkbox-group">
-                                    <label className="checkbox-item">
-                                        <input type="checkbox" checked={(formData.postbackEvents || []).includes('conversion')} onChange={() => handleArrayToggle('postbackEvents', 'conversion')} />
-                                        <span>Conversion</span>
-                                    </label>
-                                    <label className="checkbox-item">
-                                        <input type="checkbox" checked={(formData.postbackEvents || []).includes('pending')} onChange={() => handleArrayToggle('postbackEvents', 'pending')} />
-                                        <span>Pending</span>
-                                    </label>
-                                    <label className="checkbox-item">
-                                        <input type="checkbox" checked={(formData.postbackEvents || []).includes('rejected')} onChange={() => handleArrayToggle('postbackEvents', 'rejected')} />
-                                        <span>Rejected</span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Add Custom Postback */}
-                        <div className="form-group" style={{ marginTop: '16px' }}>
-                            <button type="button" className="btn btn-outline">
-                                <PlusIcon /> Add Custom Postback
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="offer-form-actions">
-                        <button type="submit" className="btn btn-success" disabled={loading}>
-                            {loading ? 'Updating...' : 'Update Offer'}
-                        </button>
-                        <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => navigate('/offer/list')}
-                        >
-                            Cancel
-                        </button>
-                    </div>
                 </div>
             </form>
         </div>

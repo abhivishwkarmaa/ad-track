@@ -272,6 +272,12 @@ export const publishersAPI = {
             method: 'DELETE',
         });
     },
+    testAffiliatePostback: async (data) => {
+        return apiRequest('/api/admin/test-affiliate-postback', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
 };
 
 // Advertisers API
@@ -314,6 +320,12 @@ export const assignmentsAPI = {
     createOrUpdateAssignments: async (data) => {
         return apiRequest('/api/admin/assignments', {
             method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+    updateAssignment: async (id, data) => {
+        return apiRequest(`/api/admin/assignments/${id}`, {
+            method: 'PATCH',
             body: JSON.stringify(data),
         });
     },

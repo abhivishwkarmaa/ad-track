@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI } from '../../services/api';
 import './Tenant.css';
 
@@ -15,6 +16,7 @@ function TenantDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
+    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(true);
     const [tenant, setTenant] = useState(null);
     const [metrics, setMetrics] = useState(null);
@@ -23,7 +25,7 @@ function TenantDetail() {
     useEffect(() => {
         fetchTenant();
         fetchMetrics();
-    }, [id]);
+    }, [id, refreshKey]);
 
     const fetchTenant = async () => {
         try {

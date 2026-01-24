@@ -135,12 +135,11 @@ export class PostbackService {
           let assignment = null;
           if (clickData.publisher_offer_id) {
             assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId);
-
-            // ✅ CRITICAL: Verify assignment belongs to tenant
-            // if (assignment && assignment.tenant_id !== tenantId) {
-            //   throw new Error('Assignment does not belong to this tenant');
-            // }
           }
+
+          // Fetch Publisher to get Global Postback URL
+          const publisher = await publisherService.findById(clickData.publisher_id, tenantId);
+
           let offerPayout = parseFloat(offer.advertiser_amount);
 
           let payout = parseFloat(offer.affiliate_amount);
@@ -154,6 +153,9 @@ export class PostbackService {
             const randomValue = Math.random() * 100;
             finalStatus = (randomValue <= parseFloat(assignment.conversion_approval_percentage)) ? 'approved' : 'pending';
           }
+
+          // Resolve Callback URL
+          const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
           // 5. Store Conversion in Redis - UTC ENFORCEMENT: Store UTC timestamp only
           // ✅ CRITICAL: Include tenant_id in conversion data
@@ -169,7 +171,9 @@ export class PostbackService {
             payout: payout,
             ip: extractIP(request),
             timestamp: new Date().toISOString(),
-            postback_payload: JSON.stringify({ query, headers: request.headers })
+            postback_payload: JSON.stringify({ query, headers: request.headers }),
+            callback_url: callbackUrl, // Pass to worker
+            tid: redisClick.tid || ''  // Pass affiliate click ID
           };
 
           // Save to Redis (Worker will pick this up)
@@ -809,13 +813,14 @@ export class PostbackService {
 
             // Log success
             await this.logPostbackAttempt({
-              publisher_id: click?.publisher_id,
+              publisher_id: conversion.publisher_id || click?.publisher_id,
               conversion_id: conversion.id,
               affiliate_click_id: affiliateClickId,
               fired_url: finalUrl,
               http_status: httpStatus,
               response_body: responseBody,
-              execution_time_ms: Date.now() - startTime
+              execution_time_ms: Date.now() - startTime,
+              tenant_id: conversion.tenant_id
             });
 
             resolve({
@@ -834,14 +839,15 @@ export class PostbackService {
 
           // Log error
           await this.logPostbackAttempt({
-            publisher_id: click?.publisher_id,
+            publisher_id: conversion.publisher_id || click?.publisher_id,
             conversion_id: conversion.id,
             affiliate_click_id: affiliateClickId,
             fired_url: finalUrl,
             http_status: 0,
             response_body: null,
             error_message: errorMessage,
-            execution_time_ms: Date.now() - startTime
+            execution_time_ms: Date.now() - startTime,
+            tenant_id: conversion.tenant_id
           });
 
           resolve({
@@ -875,14 +881,15 @@ export class PostbackService {
         // Use an IIFE to handle async logging in catch block
         (async () => {
           await this.logPostbackAttempt({
-            publisher_id: click?.publisher_id,
+            publisher_id: conversion.publisher_id || click?.publisher_id,
             conversion_id: conversion.id,
-            affiliate_click_id: click?.source_id,
+            affiliate_click_id: affiliateClickId,
             fired_url: finalUrl,
             http_status: 0,
             response_body: null,
             error_message: errorMessage,
-            execution_time_ms: Date.now() - startTime
+            execution_time_ms: Date.now() - startTime,
+            tenant_id: conversion.tenant_id
           });
         })();
 
@@ -901,8 +908,8 @@ export class PostbackService {
       await pool.query(
         `INSERT INTO affiliate_postback_logs (
           publisher_id, conversion_id, affiliate_click_id, fired_url, 
-          http_status, response_body, error_message, execution_time_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          http_status, response_body, error_message, execution_time_ms, tenant_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           data.publisher_id || 0,
           data.conversion_id || null,
@@ -911,7 +918,8 @@ export class PostbackService {
           data.http_status || 0,
           data.response_body || null,
           data.error_message || null,
-          data.execution_time_ms || 0
+          data.execution_time_ms || 0,
+          data.tenant_id || 0
         ]
       );
     } catch (err) {

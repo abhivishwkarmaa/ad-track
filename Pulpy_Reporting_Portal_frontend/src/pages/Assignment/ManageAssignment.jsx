@@ -56,6 +56,19 @@ const TrashIcon = () => (
     </svg>
 );
 
+const PauseIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="6" y="4" width="4" height="16" />
+        <rect x="14" y="4" width="4" height="16" />
+    </svg>
+);
+
+const PlayIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+);
+
 function ManageAssignment() {
     const toast = useToast();
     const navigate = useNavigate();
@@ -211,6 +224,31 @@ function ManageAssignment() {
         }
     };
 
+    const [togglingStatus, setTogglingStatus] = useState({});
+
+    const handleToggleStatus = async (assignment) => {
+        const newStatus = assignment.status === 'active' ? 'inactive' : 'active';
+        try {
+            setTogglingStatus(prev => ({ ...prev, [assignment.id]: true }));
+            const response = await assignmentsAPI.updateAssignment(assignment.id, { status: newStatus });
+
+            if (response.success) {
+                toast.success(`Assignment ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
+                // Update local state
+                setAssignments(prev => prev.map(a =>
+                    a.id === assignment.id ? { ...a, status: newStatus } : a
+                ));
+            } else {
+                toast.error(response.message || 'Failed to update status');
+            }
+        } catch (err) {
+            console.error('Update status error:', err);
+            toast.error('Failed to update status');
+        } finally {
+            setTogglingStatus(prev => ({ ...prev, [assignment.id]: false }));
+        }
+    };
+
     if (loading) {
         return (
             <div className="assignment-page">
@@ -341,6 +379,19 @@ function ManageAssignment() {
                                     </td>
                                     <td>
                                         <div className="assignment-actions">
+                                            <button
+                                                className="assignment-action-btn"
+                                                title={assignment.status === 'active' ? 'Pause' : 'Activate'}
+                                                onClick={() => handleToggleStatus(assignment)}
+                                                style={{ color: assignment.status === 'active' ? '#ff9800' : '#4CAF50' }}
+                                                disabled={togglingStatus[assignment.id]}
+                                            >
+                                                {togglingStatus[assignment.id] ? (
+                                                    <span style={{ fontSize: '10px' }}>...</span>
+                                                ) : (
+                                                    assignment.status === 'active' ? <PauseIcon /> : <PlayIcon />
+                                                )}
+                                            </button>
                                             <button
                                                 className="assignment-action-btn"
                                                 title="View Details"

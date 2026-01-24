@@ -11,7 +11,7 @@ class AdvertiserService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // ✅ CRITICAL: Check for duplicate email within tenant (prevents false 409 conflicts)
       const existing = await this.getAdvertiserById(null, tenantId); // We'll check by email
       // Better: Check by email with tenant_id
@@ -25,7 +25,7 @@ class AdvertiserService {
         err.code = 'ER_DUP_ENTRY';
         throw err;
       }
-      
+
       // ✅ CRITICAL: Include tenant_id in INSERT
       const sql = `
         INSERT INTO advertisers (
@@ -53,7 +53,7 @@ class AdvertiserService {
 
       const [result] = await pool.query(sql, params);
       const insertId = result.insertId ?? result?.[0]?.insertId;
-      
+
       // ✅ CRITICAL: Fetch with tenant_id filtering
       return this.getAdvertiserById(insertId, tenantId);
     } catch (error) {
@@ -71,13 +71,13 @@ class AdvertiserService {
         err.statusCode = 404;
         throw err;
       }
-      
+
       if (tenantId && existing.tenant_id !== tenantId) {
         const err = new Error('Advertiser does not belong to this tenant');
         err.statusCode = 403;
         throw err;
       }
-      
+
       const fields = [];
       const params = [];
 
@@ -111,7 +111,7 @@ class AdvertiserService {
         sql += ' AND tenant_id = ?';
         params.push(tenantId);
       }
-      
+
       const [result] = await pool.query(sql, params);
       if (!result.affectedRows) {
         return null;
@@ -128,22 +128,22 @@ class AdvertiserService {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     let query = 'SELECT * FROM advertisers WHERE id = ?';
     const params = [id];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     query += ' LIMIT 1';
-    
+
     const [rows] = await pool.query(query, params);
     const advertiser = Array.isArray(rows) ? rows[0] : rows;
-    
+
     // Verify advertiser belongs to tenant
     if (tenantId && advertiser && advertiser.tenant_id !== tenantId) {
       return null;
     }
-    
+
     return advertiser;
   }
 
@@ -216,26 +216,23 @@ class AdvertiserService {
       if (!existing) {
         return null;
       }
-      
+
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-      let sql = `
-        UPDATE advertisers
-        SET status = 'inactive', updated_at = UTC_TIMESTAMP()
-        WHERE id = ?`;
+      let sql = `DELETE FROM advertisers WHERE id = ?`;
       const params = [id];
-      
+
       if (tenantId) {
         sql += ' AND tenant_id = ?';
         params.push(tenantId);
       }
-      
+
       const [result] = await pool.query(sql, params);
 
       if (!result.affectedRows) {
         return null;
       }
 
-      return this.getAdvertiserById(id);
+      return existing;
     } catch (error) {
       logger.error('AdvertiserService.deleteAdvertiser error:', error);
       throw error;

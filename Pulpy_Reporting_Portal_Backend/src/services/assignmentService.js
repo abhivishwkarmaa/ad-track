@@ -14,7 +14,7 @@ export class AssignmentService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // Support both new multi-publisher format and legacy single-publisher format
       const isMultiPublisher = Array.isArray(data.publishers);
 
@@ -255,20 +255,20 @@ export class AssignmentService {
        JOIN offers o ON po.offer_id = o.id
        WHERE po.id = ?`;
     const params = [id];
-    
+
     if (tenantId) {
       query += ' AND po.tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [rows] = await pool.query(query, params);
     const assignment = Array.isArray(rows) ? rows[0] : rows;
-    
+
     // Verify assignment belongs to tenant
     if (tenantId && assignment && assignment.tenant_id !== tenantId) {
       return null;
     }
-    
+
     return this.formatAssignment(assignment);
   }
 
@@ -279,7 +279,7 @@ export class AssignmentService {
       err.statusCode = 400;
       throw err;
     }
-    
+
     let query = `
       SELECT po.*, 
              p.email as publisher_email, p.company_name as publisher_company,
@@ -367,13 +367,13 @@ export class AssignmentService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // First check if assignment exists and belongs to tenant
       const existing = await this.findById(id, tenantId);
       if (!existing) {
         return null;
       }
-      
+
       // ✅ CRITICAL: Verify ownership
       if (existing.tenant_id !== tenantId) {
         const err = new Error('Assignment does not belong to this tenant');
@@ -433,7 +433,7 @@ export class AssignmentService {
 
       // Add id and tenant_id to updateValues for WHERE clause
       updateValues.push(id);
-      
+
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let updateQuery = `UPDATE publisher_offers SET ${updateFields.join(', ')} WHERE id = ?`;
       if (tenantId) {
@@ -443,6 +443,8 @@ export class AssignmentService {
 
       // Execute update
       await pool.query(updateQuery, updateValues);
+
+      logger.info(`Updated assignment ${id} status to ${data.status}`);
 
       // Return updated assignment (with tenant_id filtering)
       return await this.findById(id, tenantId);
@@ -458,29 +460,29 @@ export class AssignmentService {
     if (!existing) {
       return null;
     }
-    
+
     // ✅ CRITICAL: Verify ownership if tenant_id is set
     if (tenantId && existing.tenant_id && existing.tenant_id !== tenantId) {
       const err = new Error('Assignment does not belong to this tenant');
       err.statusCode = 403;
       throw err;
     }
-    
-    // Soft delete: set status to 'inactive' instead of deleting from database
+
+    // Hard delete: remove from database
     // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-    let query = `UPDATE publisher_offers SET status = 'inactive' WHERE id = ?`;
+    let query = `DELETE FROM publisher_offers WHERE id = ?`;
     const params = [id];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [result] = await pool.query(query, params);
     if (result.affectedRows === 0) {
       return null;
     }
-    return this.findById(id, tenantId);
+    return existing;
   }
 }
 
