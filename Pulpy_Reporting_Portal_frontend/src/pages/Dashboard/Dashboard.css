@@ -107,6 +107,8 @@
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     transition: var(--transition-fast);
+    min-height: 110px;
+    /* ✅ Added spacing */
 }
 
 .stat-card::before {
@@ -117,6 +119,7 @@
     width: 4px;
     height: 100%;
 }
+
 
 .stat-card.blue::before {
     background: #00d9ff;
@@ -233,8 +236,9 @@
 
 .stat-trend {
     position: absolute;
-    top: 42px;
-    /* Moved down to avoid overlap with badge */
+    top: auto;
+    bottom: 12px;
+    /* ✅ Moved to bottom right */
     right: 12px;
     display: flex;
     align-items: center;
