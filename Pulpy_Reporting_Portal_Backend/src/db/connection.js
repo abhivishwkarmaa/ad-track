@@ -135,11 +135,28 @@ pool.on('connection', (connection) => {
   connection.query("SET time_zone = '+00:00'");
 });
 
-// Export a wrapper or helper to check status
 export const dbHealth = {
   isAvailable: () => dbState.isAvailable,
   getLastError: () => dbState.lastError,
   checkNow: checkConnection
+};
+
+// ✅ QUERY TIMEOUT WRAPPER: Prevent queries from hanging under high load
+export const queryWithTimeout = async (query, params = [], timeoutMs = 10000) => {
+  return new Promise(async (resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error(`Query timeout after ${timeoutMs}ms: ${query.substring(0, 100)}...`));
+    }, timeoutMs);
+
+    try {
+      const result = await pool.query(query, params);
+      clearTimeout(timeoutId);
+      resolve(result);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      reject(error);
+    }
+  });
 };
 
 // Original connection test with side effect of setting initial state

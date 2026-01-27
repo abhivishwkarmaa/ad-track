@@ -131,59 +131,29 @@ if (!click) {
 
 ### ✅ **Successful Conversion**
 
-```json
-{
-  "success": true,
-  "message": "Conversion recorded successfully",
-  "duplicate": false,
-  "affiliate_postback": {
-    "success": true,
-    "url": "https://affiliate.com/postback?...",
-    "status": 200
-  },
-  "data": {
-    "conversion_uuid": "abc-123",
-    "click_id": "xyz-789",
-    "amount": 10.00,
-    "payout": 5.00,
-    "status": "approved"
-  },
-  "timestamp": "2026-01-27T05:28:30.000Z"
-}
+```text
+true
 ```
 
 ### ❌ **Failed Conversion (Click Not Found)**
 
-```json
-{
-  "success": false,
-  "message": "Click not found. The click may have expired or is invalid.",
-  "error_type": "processing_error",
-  "timestamp": "2026-01-27T05:28:30.000Z"
-}
+```text
+false
 ```
 
-### ⏱️ **Timeout**
+### ⏱️ **Timeout (30s)**
 
-```json
-{
-  "success": false,
-  "message": "Postback processing timeout",
-  "error_type": "timeout",
-  "timestamp": "2026-01-27T05:28:30.000Z"
-}
+```text
+false
 ```
+*(Controller catches timeout, logs error, and returns false)*
 
 ### 🚫 **Rate Limit**
 
-```json
-{
-  "success": false,
-  "message": "Rate limit exceeded",
-  "error_type": "rate_limit",
-  "timestamp": "2026-01-27T05:28:30.000Z"
-}
+```text
+false
 ```
+*(Returns 429 status code for rate limits, but body is 'false' or empty)*
 
 ---
 
@@ -257,11 +227,10 @@ curl "https://ravi.track-myads.com/postback?click_id=<CLICK_UUID>&amount=10"
 
 ## Benefits
 
-✅ **No More 504 Timeouts** - Responses always return within 30 seconds  
+✅ **No More 504 Timeouts** - Responses always return within 45 seconds  
 ✅ **Faster Responses** - Reduced retry time from 1000ms to 400ms  
-✅ **Clear Success/Failure** - Always returns `success: true` or `success: false`  
-✅ **Better Logging** - Detailed logs for debugging  
-✅ **Postback Convention** - Returns HTTP 200 even for errors  
+✅ **Simple Response** - Returns just "true" or "false" string (Postback Convention)  
+✅ **Better Logging** - Detailed logs for debugging server-side  
 ✅ **Conversion Still Recorded** - Even if response is slow, conversion is saved  
 
 ---

@@ -1,4 +1,4 @@
-import pool from '../db/connection.js';
+import pool, { queryWithTimeout } from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
@@ -35,11 +35,13 @@ export class PostbackService {
         const tenantId = getTenantIdFromRequest(request);
 
         // Strategy 1: If we have tenant_id, try to get click from DB first to get offer_id/publisher_id
+        // ✅ FAST PATH: Use 2-second timeout for initial lookup to prevent blocking
         if (tenantId) {
           try {
-            const [dbRows] = await pool.query(
+            const [dbRows] = await queryWithTimeout(
               'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-              [click_id, tenantId]
+              [click_id, tenantId],
+              2000  // ✅ 2-second timeout for fast response
             );
             if (dbRows && dbRows.length > 0) {
               const dbClick = dbRows[0];
@@ -227,20 +229,35 @@ export class PostbackService {
           const query = 'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ?';
           const params = [click_id, tenantId];
 
-          const [clickRows] = await pool.query(query, params);
-          click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+          try {
+            // ✅ QUERY TIMEOUT: 3 seconds max to prevent long waits (reduced from 5s)
+            const [clickRows] = await queryWithTimeout(query, params, 3000);
+            click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
 
-          if (click) {
-            // ✅ Validate click belongs to resolved tenant
-            if (click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
-              logger.error('❌ HARD FAILURE: Click tenant mismatch', {
-                click_id: click_id,
-                click_tenant_id: click.tenant_id,
-                resolved_tenant_id: tenantId
-              });
-              throw new Error(`Security violation: Click ${click_id} belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+            if (click) {
+              // ✅ Validate click belongs to resolved tenant
+              if (click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
+                logger.error('❌ HARD FAILURE: Click tenant mismatch', {
+                  click_id: click_id,
+                  click_tenant_id: click.tenant_id,
+                  resolved_tenant_id: tenantId
+                });
+                throw new Error(`Security violation: Click ${click_id} belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+              }
+              break; // Found it!
             }
-            break; // Found it!
+          } catch (queryError) {
+            // If query timeout or DB error, log and continue to retry
+            if (queryError.message.includes('timeout')) {
+              logger.warn('Click lookup query timeout', {
+                click_id,
+                attempt: attempts + 1,
+                error: queryError.message
+              });
+            } else {
+              // Re-throw non-timeout errors (security violations, etc.)
+              throw queryError;
+            }
           }
 
           // Wait before retry
@@ -251,6 +268,7 @@ export class PostbackService {
           }
         }
 
+        console.log(click)
         if (!click) {
           // ✅ Click not found after retries - log and throw clear error
           logger.warn('Click not found in database', {
@@ -622,9 +640,10 @@ export class PostbackService {
       }
 
       // 3. ✅ CRITICAL: DB CONNECTION / AVAILABILITY ERRORS -> BUFFER IN REDIS
-      // If DB is down, we must NOT lose the postback.
+      // If DB is down or too busy, we must NOT lose the postback.
       const isDbError = error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' ||
         error.code === 'PROTOCOL_CONNECTION_LOST' || error.message?.includes('connect') ||
+        error.message?.includes('Query timeout') || // ✅ NEW: Handle query timeouts from high load
         (error.code && error.code.toString().startsWith('5')); // 5xx DB errors
 
       if (isDbError) {
@@ -634,21 +653,28 @@ export class PostbackService {
             query,
             headers: request?.headers || {},
             timestamp: new Date().toISOString(),
-            error: error.message
+            error: error.message,
+            reason: error.message?.includes('Query timeout') ? 'high_load' : 'connection_error'
           };
           // Use a redis list for Raw Postback Retry
           await redis.lpush('queue:postbacks:retry', JSON.stringify(payload));
-          logger.warn('⚠️ DB Unavailable - Postback Buffered in Redis for Retry', {
+
+          const logMessage = error.message?.includes('Query timeout')
+            ? '⚠️ DB Overloaded - Postback Buffered in Redis for Retry'
+            : '⚠️ DB Unavailable - Postback Buffered in Redis for Retry';
+
+          logger.warn(logMessage, {
             error: error.message,
             click_id: query.click_id,
-            rcid: query.rcid
+            rcid: query.rcid,
+            buffered_at: new Date().toISOString()
           });
 
           return {
             success: true,
-            message: 'Conversion buffered (DB Unavailable)',
+            message: 'Conversion buffered (DB temporarily unavailable)',
             duplicate: false,
-            note: 'Buffered for retry'
+            note: 'Buffered for retry - will be processed when DB is available'
           };
         } catch (redisErr) {
           logger.error('❌ CRITICAL: Failed to buffer postback to Redis during DB failure!', redisErr);

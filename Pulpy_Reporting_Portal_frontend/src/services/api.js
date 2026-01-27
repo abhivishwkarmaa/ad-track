@@ -72,6 +72,26 @@ const apiRequest = async (endpoint, options = {}) => {
             }
         }
 
+        // ✅ AUTO-LOGOUT: Check for 401 Unauthorized or token-related errors
+        if (response.status === 401) {
+            const errorMessage = data?.message || data?.error || '';
+            const isTokenError = errorMessage.toLowerCase().includes('token') ||
+                errorMessage.toLowerCase().includes('unauthorized') ||
+                errorMessage.toLowerCase().includes('expired') ||
+                errorMessage.toLowerCase().includes('invalid');
+
+            if (isTokenError) {
+                // ✅ Silent logout - no error messages shown to user
+                localStorage.removeItem('track-myads_user');
+
+                // Redirect to login page
+                window.location.href = '/login';
+
+                // Throw error to stop further execution
+                throw new Error('SESSION_EXPIRED');
+            }
+        }
+
         if (!response.ok) {
             const errorMessage = data?.message || data?.error || `API request failed (${response.status})`;
             throw new Error(errorMessage);
@@ -79,6 +99,11 @@ const apiRequest = async (endpoint, options = {}) => {
 
         return data;
     } catch (error) {
+        // ✅ Don't show error messages for session expiry
+        if (error.message === 'SESSION_EXPIRED') {
+            throw error;
+        }
+
         // Re-throw with better error message if it's not already an Error
         if (error instanceof Error) {
             throw error;
