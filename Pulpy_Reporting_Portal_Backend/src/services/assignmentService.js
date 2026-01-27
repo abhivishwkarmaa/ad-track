@@ -318,14 +318,35 @@ export class AssignmentService {
       return null;
     }
 
+    // 🔥 CRITICAL: Fetch offer to get public_offer_id for tracking URL
+    const offer = await offerService.getOfferById(assignment.offer_id, assignment.tenant_id || null);
+    if (!offer) {
+      logger.error('Offer not found for assignment', {
+        assignment_id: assignmentId,
+        offer_id: assignment.offer_id,
+        tenant_id: assignment.tenant_id
+      });
+      return null;
+    }
+
+    // 🔥 CRITICAL: Use public_offer_id in tracking URLs (not internal database ID)
+    const publicOfferId = offer.public_offer_id;
+    if (!publicOfferId) {
+      logger.error('Offer missing public_offer_id', {
+        offer_id: offer.id,
+        offer_name: offer.name,
+        tenant_id: offer.tenant_id
+      });
+      // Fallback to internal ID if public_offer_id is missing (shouldn't happen)
+      return null;
+    }
+
     if (format === 'alternative') {
-      // Get advertiser ID from offer
-      const offer = await offerService.getOfferById(assignment.offer_id, assignment.tenant_id || null);
-      const advertiserId = offer ? offer.advertiser_id : null;
+      const advertiserId = offer.advertiser_id;
 
       return generateAlternativeTrackingURL(
         baseURL,
-        assignment.offer_id,
+        publicOfferId,  // 🔥 Use public_offer_id
         assignment.publisher_id,
         advertiserId,
         { rcid: '{replace_it}' } // Use the format they specified
@@ -338,7 +359,7 @@ export class AssignmentService {
 
     return generateTrackingURL(
       baseURL,
-      assignment.offer_id,
+      publicOfferId,  // 🔥 Use public_offer_id
       assignment.publisher_id,
       { click_id: '{click_id}' }
     );

@@ -1,0 +1,165 @@
+/**
+ * =====================================================
+ * Offer Parameters Service
+ * =====================================================
+ * Manages dynamic parameters for offer tracking URLs
+ * Supports placeholders like {click_id}, {source}, etc.
+ * =====================================================
+ */
+
+import pool from '../db/connection.js';
+import logger from '../utils/logger.js';
+
+class OfferParamsService {
+    /**
+     * Create or update parameters for an offer
+     * @param {number} offerId - Offer ID
+     * @param {number} tenantId - Tenant ID
+     * @param {Array} params - Array of parameter objects
+     * @returns {Promise<void>}
+     */
+    async setOfferParams(offerId, tenantId, params = []) {
+        const connection = await pool.getConnection();
+
+        try {
+            await connection.beginTransaction();
+
+            // Delete existing params for this offer
+            await connection.query(
+                'DELETE FROM offer_params WHERE offer_id = ? AND tenant_id = ?',
+                [offerId, tenantId]
+            );
+
+            // Insert new params
+            if (params && params.length > 0) {
+                const values = params.map(p => [
+                    offerId,
+                    tenantId,
+                    p.param_key,
+                    p.is_required || false,
+                    p.default_value || null
+                ]);
+
+                await connection.query(
+                    `INSERT INTO offer_params (offer_id, tenant_id, param_key, is_required, default_value) 
+           VALUES ?`,
+                    [values]
+                );
+            }
+
+            await connection.commit();
+            logger.info(`Set ${params.length} parameters for offer ${offerId}`);
+        } catch (error) {
+            await connection.rollback();
+            logger.error('Error setting offer params:', error);
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    /**
+     * Get parameters for an offer
+     * @param {number} offerId - Offer ID
+     * @param {number} tenantId - Tenant ID
+     * @returns {Promise<Array>} - Array of parameter objects
+     */
+    async getOfferParams(offerId, tenantId) {
+        try {
+            const [rows] = await pool.query(
+                `SELECT param_key, is_required, default_value 
+         FROM offer_params 
+         WHERE offer_id = ? AND tenant_id = ?
+         ORDER BY param_key`,
+                [offerId, tenantId]
+            );
+
+            return rows;
+        } catch (error) {
+            logger.error('Error fetching offer params:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Apply placeholders to a URL template
+     * @param {string} urlTemplate - URL with placeholders like {click_id}
+     * @param {Object} params - Key-value pairs for replacement
+     * @returns {string} - URL with placeholders replaced
+     */
+    applyPlaceholders(urlTemplate, params = {}) {
+        if (!urlTemplate) return '';
+
+        return urlTemplate.replace(/{(\w+)}/g, (match, key) => {
+            return params[key] || '';
+        });
+    }
+
+    /**
+     * Validate required parameters
+     * @param {Array} offerParams - Offer parameter definitions
+     * @param {Object} providedParams - Parameters provided in request
+     * @returns {Object} - { valid: boolean, missing: Array }
+     */
+    validateRequiredParams(offerParams, providedParams = {}) {
+        const missing = [];
+
+        offerParams.forEach(param => {
+            if (param.is_required && !providedParams[param.param_key]) {
+                missing.push(param.param_key);
+            }
+        });
+
+        return {
+            valid: missing.length === 0,
+            missing
+        };
+    }
+
+    /**
+     * Extract dynamic parameters from query string
+     * Filters out standard tracking parameters
+     * @param {Object} query - Query string object
+     * @returns {Object} - Extra parameters
+     */
+    extractExtraParams(query) {
+        const standardParams = [
+            'offer_id',
+            'pub_id',
+            'publisher_id',
+            'click_id',
+            'rcid',
+            'tid'
+        ];
+
+        const extraParams = {};
+
+        Object.keys(query).forEach(key => {
+            if (!standardParams.includes(key)) {
+                extraParams[key] = query[key];
+            }
+        });
+
+        return extraParams;
+    }
+
+    /**
+     * Merge offer params with defaults
+     * @param {Array} offerParams - Offer parameter definitions
+     * @param {Object} providedParams - Parameters provided in request
+     * @returns {Object} - Merged parameters with defaults applied
+     */
+    mergeWithDefaults(offerParams, providedParams = {}) {
+        const merged = { ...providedParams };
+
+        offerParams.forEach(param => {
+            if (!merged[param.param_key] && param.default_value) {
+                merged[param.param_key] = param.default_value;
+            }
+        });
+
+        return merged;
+    }
+}
+
+export default new OfferParamsService();

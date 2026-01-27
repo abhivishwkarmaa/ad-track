@@ -106,9 +106,9 @@ function OfferList() {
     const confirmDelete = async () => {
         if (deleteModal.offer) {
             try {
-                // Call the API to delete the offer
+                // Call the API to archive the offer (backend will set status to 'archived')
                 await offersAPI.deleteOffer(deleteModal.offer.id);
-                toast.success('Offer deleted successfully');
+                toast.success('Offer archived successfully');
                 setDeleteModal({ open: false, offer: null });
 
                 // Refresh offers data after deletion
@@ -209,9 +209,10 @@ function OfferList() {
                     onChange={(e) => setStatusFilter(e.target.value)}
                 >
                     <option value="all">All Status</option>
+                    <option value="draft">Draft</option>
                     <option value="live">Live</option>
                     <option value="paused">Paused</option>
-                    <option value="draft">Draft</option>
+                    <option value="archived">Archived</option>
                 </select>
             </div>
 
@@ -254,18 +255,22 @@ function OfferList() {
                                     <td>{offer.end_date ? new Date(offer.end_date).toLocaleDateString() : '-'}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <select
-                                                className={`offer-status-select ${offer.status.toLowerCase()}`}
-                                                value={['live', 'paused', 'suspend'].includes(offer.status.toLowerCase())
-                                                    ? offer.status.toLowerCase()
-                                                    : 'live'}
-                                                onChange={(e) => handleStatusChange(offer.id, e.target.value)}
-                                                disabled={updatingStatus[offer.id]}
-                                            >
-                                                <option value="live">Live</option>
-                                                <option value="paused">Paused</option>
-                                                <option value="suspend">Suspend</option>
-                                            </select>
+                                            {offer.status.toLowerCase() === 'archived' ? (
+                                                <span className="offer-status-badge archived">
+                                                    Archived
+                                                </span>
+                                            ) : (
+                                                <select
+                                                    className={`offer-status-select ${offer.status.toLowerCase()}`}
+                                                    value={offer.status.toLowerCase()}
+                                                    onChange={(e) => handleStatusChange(offer.id, e.target.value)}
+                                                    disabled={updatingStatus[offer.id]}
+                                                >
+                                                    <option value="draft">Draft</option>
+                                                    <option value="live">Live</option>
+                                                    <option value="paused">Paused</option>
+                                                </select>
+                                            )}
                                             {updatingStatus[offer.id] && (
                                                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                                                     Updating...
@@ -294,8 +299,10 @@ function OfferList() {
                                             </button>
                                             <button
                                                 className="offer-action-btn delete"
-                                                title="Delete"
+                                                title="Archive"
                                                 onClick={() => handleDelete(offer)}
+                                                disabled={offer.status.toLowerCase() === 'archived'}
+                                                style={{ opacity: offer.status.toLowerCase() === 'archived' ? 0.5 : 1 }}
                                             >
                                                 <TrashIcon />
                                             </button>
@@ -350,8 +357,8 @@ function OfferList() {
                                 <div className="delete-modal-icon">
                                     <AlertIcon />
                                 </div>
-                                <h3>Delete Offer?</h3>
-                                <p>Are you sure you want to delete "{deleteModal.offer?.name}"? This action cannot be undone.</p>
+                                <h3>Archive Offer?</h3>
+                                <p>Are you sure you want to archive "{deleteModal.offer?.name}"? The offer will be hidden but tracking URLs will remain valid. You can view archived offers using the status filter.</p>
                                 <div className="delete-modal-actions">
                                     <button
                                         className="btn btn-secondary"
@@ -360,7 +367,7 @@ function OfferList() {
                                         Cancel
                                     </button>
                                     <button className="btn btn-danger" onClick={confirmDelete}>
-                                        Delete
+                                        Archive
                                     </button>
                                 </div>
                             </div>

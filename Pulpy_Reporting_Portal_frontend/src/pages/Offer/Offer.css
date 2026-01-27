@@ -160,6 +160,7 @@
     background: rgba(244, 67, 54, 0.15);
     color: #F44336;
 }
+
 .offer-status.approved {
     background: rgba(76, 175, 80, 0.15);
     color: #4CAF50;
@@ -216,6 +217,29 @@
     color: #607D8B;
     border-color: rgba(96, 125, 139, 0.3);
 }
+
+.offer-status-select.archived {
+    background: rgba(158, 158, 158, 0.15);
+    color: #9E9E9E;
+    border-color: rgba(158, 158, 158, 0.3);
+}
+
+/* Archived status badge (non-editable) */
+.offer-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 20px;
+    text-transform: capitalize;
+}
+
+.offer-status-badge.archived {
+    background: rgba(158, 158, 158, 0.15);
+    color: #9E9E9E;
+}
+
 
 .offer-actions {
     display: flex;
@@ -820,8 +844,13 @@
 
 /* Loading Spinner Animation */
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* Small loading spinner */

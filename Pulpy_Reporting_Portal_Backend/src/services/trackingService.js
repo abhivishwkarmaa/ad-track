@@ -23,7 +23,8 @@ export class TrackingService {
     // if (isOverloaded()) ... (Redis handles this better, skip for now or keep)
 
     try {
-      const offerId = parseInt(query.offer_id || query.oid);
+      // 🔥 CHANGED: offer_id in URL is now public_offer_id
+      const publicOfferId = parseInt(query.offer_id || query.oid);
       const publisherId = parseInt(query.pub_id || query.a);
 
       // ============================================
@@ -41,7 +42,7 @@ export class TrackingService {
         logger.error('❌ CRITICAL: No tenant resolved from subdomain - REJECTED', {
           host: request.headers.host,
           url: request.url,
-          offer_id: offerId,
+          public_offer_id: publicOfferId,
           pub_id: publisherId
         });
         // ✅ Use secure error class - error handler will create minimal response
@@ -53,7 +54,7 @@ export class TrackingService {
       // This is a performance optimization - does NOT block clicks
       const userAgent = request.headers['user-agent'] || '';
       const ip = extractIP(request);
-      const redirectCacheKey = `redirect:${tenantId}:${ip}:${offerId}:${userAgent.substring(0, 50)}`;
+      const redirectCacheKey = `redirect:${tenantId}:${ip}:${publicOfferId}:${userAgent.substring(0, 50)}`;
 
       // ============================================
       // 2. STRICT MULTI-TENANT: TENANT RESOLUTION
@@ -66,7 +67,7 @@ export class TrackingService {
       if (cachedRedirect) {
         logger.info('[CLICK] Duplicate click detected - returning cached redirect', {
           tenant_id: tenantId,
-          offer_id: offerId,
+          public_offer_id: publicOfferId,
           ip,
           cache_key: redirectCacheKey
         });
@@ -83,24 +84,23 @@ export class TrackingService {
       logger.info('[CLICK] Tenant resolved from subdomain', {
         host: request.headers.host,
         tenant_id: tenantId,
-        offer_id: offerId,
+        public_offer_id: publicOfferId,
         pub_id: publisherId
       });
 
-      // ✅ STEP 2: Fetch offer and publisher WITH tenant filtering
-      // Business data is validated AFTER tenant resolution
-      const [offer, publisher] = await Promise.all([
-        cacheService.getOffer(offerId, tenantId), // ✅ Filter by resolved tenant_id
-        cacheService.getPublisher(publisherId, tenantId) // ✅ Filter by resolved tenant_id
-      ]);
+      // ✅ STEP 2: Fetch offer by public_offer_id and publisher WITH tenant filtering
+      // 🔥 CHANGED: Use public_offer_id instead of internal ID
+      const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
+      const offer = await offerPublicIdService.getOfferByPublicId(publicOfferId, tenantId, null);
+      const publisher = await cacheService.getPublisher(publisherId, tenantId);
 
       // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
       if (!offer) {
         logger.error('❌ Offer not found or does not belong to tenant', {
-          offer_id: offerId,
+          public_offer_id: publicOfferId,
           tenant_id: tenantId
         });
-        throw new Error(`Offer ${offerId} not found or does not belong to tenant ${tenantId}`);
+        throw new Error(`Offer with public ID ${publicOfferId} not found or does not belong to tenant ${tenantId}`);
       }
 
       if (!publisher) {
@@ -172,14 +172,15 @@ export class TrackingService {
       }
 
       // ✅ CRITICAL: Get assignment WITH tenant filtering (tenant already resolved)
-      let assignment = await cacheService.getAssignment(publisherId, offerId, tenantId);
+      // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
+      let assignment = await cacheService.getAssignment(publisherId, offer.id, tenantId);
 
       // If assignment not found in cache, try direct DB query with tenant_id
       if (!assignment) {
         try {
           const [assignmentRows] = await pool.query(
             'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ? AND tenant_id = ? LIMIT 1',
-            [publisherId, offerId, 'active', tenantId]
+            [publisherId, offer.id, 'active', tenantId]
           );
           assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
 
@@ -200,10 +201,11 @@ export class TrackingService {
       if (!assignment) {
         logger.error('❌ Assignment not found', {
           publisher_id: publisherId,
-          offer_id: offerId,
+          offer_id: offer.id,
+          public_offer_id: publicOfferId,
           tenant_id: tenantId
         });
-        throw new Error(`Assignment not found for publisher ${publisherId} and offer ${offerId} in tenant ${tenantId}`);
+        throw new Error(`Assignment not found for publisher ${publisherId} and offer ${offer.id} (public ID: ${publicOfferId}) in tenant ${tenantId}`);
       }
 
       // ✅ CRITICAL: HARD VALIDATION - Assignment must belong to resolved tenant
@@ -241,14 +243,16 @@ export class TrackingService {
 
       // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
       // This ensures unique click identity across publishers and tenants
-      const clickUuid = generateClickId(tenantId, offerId, publisherId, 36);
+      // 🔥 CHANGED: Use offer.id (internal DB ID) for click UUID generation
+      const clickUuid = generateClickId(tenantId, offer.id, publisherId, 36);
 
       // Check Global Offer Caps (Daily/Total Conversions)
       // We READ the current counter from Redis. We do NOT increment here (only on conversion).
 
       // ✅ CRITICAL: Check caps with tenant_id filtering
-      const isDailyCapHit = offer.daily_cap > 0 && !(await cacheService.checkAndIncrementCap(offerId, 'daily', offer.daily_cap, false, tenantId));
-      const isTotalCapHit = offer.total_cap > 0 && !(await cacheService.checkAndIncrementCap(offerId, 'total', offer.total_cap, false, tenantId));
+      // 🔥 CHANGED: Use offer.id (internal DB ID) for cap checks
+      const isDailyCapHit = offer.daily_cap > 0 && !(await cacheService.checkAndIncrementCap(offer.id, 'daily', offer.daily_cap, false, tenantId));
+      const isTotalCapHit = offer.total_cap > 0 && !(await cacheService.checkAndIncrementCap(offer.id, 'total', offer.total_cap, false, tenantId));
 
       if (isDailyCapHit || isTotalCapHit) {
         const capAction = await this.applyCapAction(offer, fallbackRedirect);
@@ -297,7 +301,8 @@ export class TrackingService {
       // ✅ CRITICAL: Log final tenant_id for debugging
       logger.info('[CLICK] Final tenant_id', {
         click_uuid: clickUuid,
-        offer_id: offerId,
+        offer_id: offer.id,
+        public_offer_id: publicOfferId,
         tenant_id: finalTenantId,
         from_request: !!tenantId,
         from_offer: !!offer.tenant_id,
@@ -307,9 +312,11 @@ export class TrackingService {
       // Persist to Redis (include tenant_id for database insertion later)
       // ✅ CRITICAL: Store all values as strings (Redis hash values are strings)
       // ✅ CRITICAL: Add flushed flag to track if click has been inserted into DB
+      // 🔥 NEW: Store public_offer_id for tracking URL stability
       const clickData = {
         click_uuid: clickUuid,
-        offer_id: String(offerId),
+        offer_id: String(offer.id),
+        public_offer_id: String(publicOfferId),
         publisher_id: String(publisherId),
         publisher_offer_id: assignment.id ? String(assignment.id) : '',
         tenant_id: finalTenantId ? String(finalTenantId) : '', // ✅ CRITICAL: Store as string (should never be empty in strict multi-tenant)
@@ -349,12 +356,14 @@ export class TrackingService {
       try {
         // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
         // This ensures clicks from different publishers on same offer are isolated
-        const redisKey = `click:${finalTenantId}:${offerId}:${publisherId}:${clickUuid}`;
+        // 🔥 CHANGED: Use offer.id (internal DB ID) for Redis key
+        const redisKey = `click:${finalTenantId}:${offer.id}:${publisherId}:${clickUuid}`;
 
         // ✅ CRITICAL: Log click received
         logger.info('[CLICK] Click received', {
           tenant_id: finalTenantId,
-          offer_id: offerId,
+          offer_id: offer.id,
+          public_offer_id: publicOfferId,
           publisher_id: publisherId,
           click_id: clickUuid,
           redis_key: redisKey
@@ -371,16 +380,18 @@ export class TrackingService {
         if (!tenantIdStr) {
           logger.error('❌ CRITICAL: Attempting to add click to stream without tenant_id!', {
             click_uuid: clickUuid,
-            offer_id: offerId,
+            offer_id: offer.id,
+            public_offer_id: publicOfferId,
             publisher_id: publisherId
           });
           throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
         }
 
         // ✅ CRITICAL: Add to stream - if XADD fails, DO NOT drop the click (log but continue)
+        // 🔥 CHANGED: Use offer.id (internal DB ID) for stream
         pipeline.xadd('stream:clicks', '*',
           'tenant_id', tenantIdStr,
-          'offer_id', String(offerId),
+          'offer_id', String(offer.id),
           'publisher_id', String(publisherId),
           'click_id', clickUuid
         );
@@ -429,7 +440,8 @@ export class TrackingService {
             redis_key: redisKey,
             click_id: clickUuid,
             tenant_id: finalTenantId,
-            offer_id: offerId,
+            offer_id: offer.id,
+            public_offer_id: publicOfferId,
             publisher_id: publisherId
           });
         }
@@ -440,7 +452,8 @@ export class TrackingService {
             stream: 'stream:clicks',
             click_id: clickUuid,
             tenant_id: finalTenantId,
-            offer_id: offerId,
+            offer_id: offer.id,
+            public_offer_id: publicOfferId,
             publisher_id: publisherId
           });
         } else if (streamWriteError) {

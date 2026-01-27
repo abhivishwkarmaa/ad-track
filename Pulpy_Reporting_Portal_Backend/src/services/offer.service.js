@@ -1,6 +1,8 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
+import offerPublicIdService from './offerPublicIdService.js';
+import offerParamsService from './offerParamsService.js';
 
 const jsonFields = [
   'macros_json',
@@ -166,10 +168,15 @@ class OfferService {
         throw err;
       }
 
+      // 🔥 NEW: Generate stable public_offer_id
+      const publicOfferId = await offerPublicIdService.generatePublicOfferId(tenantId);
+      logger.info(`Generated public_offer_id ${publicOfferId} for new offer in tenant ${tenantId}`);
+
       const sql = `
         INSERT INTO offers (
           advertiser_id,
           tenant_id,
+          public_offer_id,
           name, description, category, status, offer_visibility,
           offer_currency, country,
           advertiser_model, advertiser_amount,
@@ -188,7 +195,7 @@ class OfferService {
           advertiser_postback_url, advertiser_postback_method, advertiser_postback_macros_json,
           system_postback_url, system_postback_method, system_postback_macros_json
         ) VALUES (
-          ?, ?,
+          ?, ?, ?,
           ?, ?, ?, ?, ?,
           ?, ?,
           ?, ?, ?, ?,
@@ -210,7 +217,8 @@ class OfferService {
 
       const params = [
         data.advertiser_id,
-        tenantId, // Add tenant_id
+        tenantId,
+        publicOfferId, // 🔥 NEW: Add public_offer_id
         data.name,
         data.description || null,
         data.category || null,
@@ -266,6 +274,12 @@ class OfferService {
 
       const [result] = await pool.query(sql, params);
       const insertId = result.insertId ?? result?.[0]?.insertId;
+
+      // 🔥 NEW: Save offer parameters if provided
+      if (data.offer_params && Array.isArray(data.offer_params) && data.offer_params.length > 0) {
+        await offerParamsService.setOfferParams(insertId, tenantId, data.offer_params);
+        logger.info(`Saved ${data.offer_params.length} parameters for offer ${insertId}`);
+      }
 
       // ✅ CRITICAL: Fetch with tenant_id filtering
       return this.getOfferById(insertId, tenantId);
@@ -832,19 +846,23 @@ class OfferService {
 
   async deleteOffer(id, tenantId = null) {
     try {
-      // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-      let query = 'DELETE FROM offers WHERE id = ?';
-      const params = [id];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
+      // 🔥 CHANGED: Archive instead of delete to preserve tracking URLs
+      // Offers are NEVER deleted, only archived
+      logger.warn(`Archiving offer ${id} instead of deleting (preserves tracking URL integrity)`);
 
       // First verify offer exists and belongs to tenant
       const offer = await this.getOfferById(id, tenantId);
       if (!offer) {
         return null;
+      }
+
+      // Archive the offer
+      let query = 'UPDATE offers SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?';
+      const params = ['archived', id];
+
+      if (tenantId) {
+        query += ' AND tenant_id = ?';
+        params.push(tenantId);
       }
 
       const [result] = await pool.query(query, params);
