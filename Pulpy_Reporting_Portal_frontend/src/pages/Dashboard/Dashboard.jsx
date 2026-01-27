@@ -116,7 +116,7 @@ function Dashboard() {
     const [offerStatsData, setOfferStatsData] = useState(null);
     const [offerStatsLoading, setOfferStatsLoading] = useState(false);
     const [offerStatsError, setOfferStatsError] = useState(null);
-    const [dateFilter, setDateFilter] = useState('this_month');
+    const [dateFilter, setDateFilter] = useState('today');
 
     // Get date range based on filter
     // Helper to format date as YYYY-MM-DD in local time
