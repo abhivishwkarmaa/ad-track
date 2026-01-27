@@ -233,7 +233,8 @@
 
 .stat-trend {
     position: absolute;
-    top: 12px;
+    top: 42px;
+    /* Moved down to avoid overlap with badge */
     right: 12px;
     display: flex;
     align-items: center;
@@ -1308,85 +1309,44 @@
 }
 
 /* Responsive for offer stats table */
+/* Top Countries - Restrict Height */
+.top-countries-card {
+    grid-column: span 1;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
 @media (min-width: 1025px) {
-    .offer-statistics-card {
+
+    .offer-statistics-card,
+    .top-countries-card {
         height: 500px;
     }
 }
 
 @media (min-width: 769px) and (max-width: 1024px) {
-    .offer-statistics-card {
+
+    .offer-statistics-card,
+    .top-countries-card {
         height: 450px;
         grid-column: 1 / -1;
-    }
-
-    .stats-table-header,
-    .stats-table-row {
-        grid-template-columns: 1.5fr 80px 100px 70px 110px 110px 100px;
-        gap: 12px;
-        padding: 10px 12px;
-        font-size: 10px;
-    }
-
-    .offer-name-text {
-        font-size: 12px;
-    }
-
-    .stats-value {
-        font-size: 12px;
     }
 }
 
 @media (max-width: 768px) {
-    .offer-statistics-card {
+
+    .offer-statistics-card,
+    .top-countries-card {
         height: 400px;
         grid-column: 1 / -1;
-    }
-
-    .stats-table-header,
-    .stats-table-row {
-        grid-template-columns: 1fr;
-        gap: 4px;
-        padding: 10px 12px;
-    }
-
-    .stats-table-header span {
-        display: none;
-    }
-
-    .stats-table-row {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        border: 1px solid var(--border-light);
-        margin-bottom: 8px;
-        border-radius: var(--radius-sm);
-    }
-
-    .stats-value {
-        display: flex;
-        justify-content: space-between;
-        text-align: left;
-    }
-
-    .stats-value::before {
-        content: attr(data-label);
-        font-size: 10px;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-    }
-
-    .offer-stats-name {
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--border-light);
     }
 }
 
 @media (max-width: 480px) {
-    .offer-statistics-card {
+
+    .offer-statistics-card,
+    .top-countries-card {
         height: 350px;
     }
 }

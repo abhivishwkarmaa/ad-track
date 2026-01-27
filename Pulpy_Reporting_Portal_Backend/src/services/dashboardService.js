@@ -80,8 +80,8 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(payout), 0) as payout
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.currentFrom, dates.currentTo, tenantId]
@@ -90,8 +90,8 @@ export class DashboardService {
       const [conversionsPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -103,8 +103,8 @@ export class DashboardService {
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
         FROM clicks
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.currentFrom, dates.currentTo, tenantId]
@@ -113,8 +113,8 @@ export class DashboardService {
       const [clicksPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM clicks
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -124,8 +124,8 @@ export class DashboardService {
       const [impressionsCurrent] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.currentFrom, dates.currentTo, tenantId]
@@ -137,8 +137,8 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(payout), 0) as payout
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.currentFrom, dates.currentTo, tenantId]
@@ -147,8 +147,8 @@ export class DashboardService {
       const [revenuePrevious] = await pool.query(
         `SELECT COALESCE(SUM(amount), 0) as revenue
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -249,7 +249,8 @@ export class DashboardService {
       const params = [];
 
       if (dateFrom && dateTo) {
-        dateCondition = 'AND DATE(CONVERT_TZ(conv.created_at, \'+00:00\', \'+05:30\')) >= ? AND DATE(CONVERT_TZ(conv.created_at, \'+00:00\', \'+05:30\')) <= ?';
+        // ✅ FIX: Use DATE_ADD instead of CONVERT_TZ
+        dateCondition = 'AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ? AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?';
         params.push(dateFrom, dateTo);
       }
 
@@ -295,17 +296,23 @@ export class DashboardService {
       const groupBy = filters.group_by || 'day';
 
       let dateGroup, dateSelect;
-      const tz = '+05:30';
+      const tzOffset = 330; // 5.5 hours in minutes
+
+      // ✅ FIX: Use DATE_ADD instead of CONVERT_TZ for robustness
+      // ✅ FIX: Use DATE_FORMAT for 'day' as well to ensure String output (not Date object) for Map keys
       if (groupBy === 'week') {
-        dateGroup = `DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '${tz}'), '%Y-%u')`;
-        dateSelect = `DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '${tz}'), '%Y-%u')`;
+        dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%u')`;
+        dateSelect = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%u')`;
       } else if (groupBy === 'month') {
-        dateGroup = `DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '${tz}'), '%Y-%m')`;
-        dateSelect = `DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '${tz}'), '%Y-%m')`;
+        dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m')`;
+        dateSelect = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m')`;
       } else {
-        dateGroup = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}'))`;
-        dateSelect = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}'))`;
+        // Force YYYY-MM-DD string format to prevent JS Map key issues
+        dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m-%d')`;
+        dateSelect = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m-%d')`;
       }
+
+      logger.info(`[PerformanceChart] Fetching for Tenant: ${tenantId}, Range: ${dateFrom} to ${dateTo}, GroupBy: ${groupBy}`);
 
       // Get clicks by date
       const [clicksRows] = await pool.query(
@@ -313,8 +320,8 @@ export class DashboardService {
           ${dateSelect} as date_group,
           COUNT(*) as clicks
         FROM clicks
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ?
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) >= ?
+          AND DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) <= ?
           AND tenant_id = ?
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
@@ -328,14 +335,16 @@ export class DashboardService {
           ${dateSelect} as date_group,
           COUNT(*) as conversions
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ?
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) >= ?
+          AND DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) <= ?
           AND tenant_id = ?
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
         `,
         [dateFrom, dateTo, tenantId]
       );
+
+      logger.info(`[PerformanceChart] Found ${clicksRows.length} click rows and ${conversionsRows.length} conversion rows.`);
 
       // Combine data
       const clicksMap = new Map(clicksRows.map(r => [r.date_group, parseInt(r.clicks || 0)]));
@@ -371,8 +380,8 @@ export class DashboardService {
           COUNT(DISTINCT conv.id) as conversions
         FROM publishers p
         LEFT JOIN conversions conv ON conv.publisher_id = p.id
-          AND DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) >= ?
-          AND DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) <= ?
+          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?
+          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         GROUP BY p.id, p.company_name, p.first_name, p.email
         HAVING conversions > 0
@@ -386,8 +395,8 @@ export class DashboardService {
       const [totalRows] = await pool.query(
         `SELECT COUNT(DISTINCT conv.id) as total_conversions
         FROM conversions conv
-        WHERE DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) >= ?
-          AND DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?
+          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?
           AND conv.tenant_id = ?
         `,
         [dateFrom, dateTo, tenantId]
@@ -555,8 +564,8 @@ export class DashboardService {
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
         FROM clicks
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `, [dates.currentFrom, dates.currentTo, tenantId]
       );
@@ -565,8 +574,8 @@ export class DashboardService {
       const [clicksPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM clicks
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -580,8 +589,8 @@ export class DashboardService {
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
           SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `, [dates.currentFrom, dates.currentTo, tenantId]
       );
@@ -590,8 +599,8 @@ export class DashboardService {
       const [conversionsPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -610,8 +619,8 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as total_revenue,
           COALESCE(SUM(payout), 0) as total_payout
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND status = 'approved' AND tenant_id = ?
         `, [dates.currentFrom, dates.currentTo, tenantId]
       );
@@ -620,8 +629,8 @@ export class DashboardService {
       const [revenuePreviousRows] = await pool.query(
         `SELECT COALESCE(SUM(amount), 0) as revenue
         FROM conversions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND status = 'approved' AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
@@ -645,8 +654,8 @@ export class DashboardService {
       const [impressionsRows] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.currentFrom, dates.currentTo, tenantId]
@@ -656,8 +665,8 @@ export class DashboardService {
       const [impressionsPreviousRows] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?
+        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
+          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
           AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]

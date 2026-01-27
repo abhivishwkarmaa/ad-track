@@ -63,6 +63,24 @@ class OfferPublicIdService {
             const [rows] = await pool.query(query, params);
             return rows[0] || null;
         } catch (error) {
+            // ✅ BACKWARD COMPATIBILITY: If public_offer_id column is missing, fallback to internal ID
+            if (error.code === 'ER_BAD_FIELD_ERROR') {
+                logger.warn('⚠️ public_offer_id column request failed - falling back to internal ID lookup');
+
+                let fallbackQuery = `SELECT * FROM offers WHERE tenant_id = ? AND id = ?`;
+                const fallbackParams = [tenantId, publicOfferId]; // Assume publicOfferId matches internal ID for now
+
+                if (status) {
+                    fallbackQuery += ' AND status = ?';
+                    fallbackParams.push(status);
+                }
+
+                fallbackQuery += ' LIMIT 1';
+
+                const [rows] = await pool.query(fallbackQuery, fallbackParams);
+                return rows[0] || null;
+            }
+
             logger.error('Error fetching offer by public_offer_id:', error);
             throw error;
         }
