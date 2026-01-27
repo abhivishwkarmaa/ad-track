@@ -451,7 +451,7 @@ function Dashboard() {
             case 'last_month':
                 return 'Last Month';
             default:
-                return 'This Month';
+                return 'Today';
         }
     };
 

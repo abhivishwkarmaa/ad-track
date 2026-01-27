@@ -216,9 +216,13 @@ export class PostbackService {
       let click = null;
       if (click_id) {
         // RETRY LOGIC: Handle async queue lag (race condition)
-        // If postback arrives before click insert commit, retry a few times.
+        // ✅ REDUCED: Only 2 attempts (400ms total) to prevent timeout
+        // If click expired in Redis (4 hours), it should be in DB by now
         let attempts = 0;
-        while (attempts < 5) {
+        const maxAttempts = 2; // Reduced from 5 to 2
+        const retryDelay = 200; // 200ms between retries
+
+        while (attempts < maxAttempts) {
           // ✅ STRICT: Always filter by tenant_id (from subdomain)
           const query = 'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ?';
           const params = [click_id, tenantId];
@@ -239,18 +243,23 @@ export class PostbackService {
             break; // Found it!
           }
 
-          // Wait 200ms before retry
+          // Wait before retry
           attempts++;
-          if (attempts < 5) {
-            await new Promise(resolve => setTimeout(resolve, 200));
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            logger.debug(`Retrying click lookup (${attempts}/${maxAttempts})`, { click_id });
           }
         }
 
         if (!click) {
-          // Check if queue has backend pressure, but since we use Redis now, 
-          // a missing click means it's truly missing (or Redis evicted it and DB write failed?)
-          // We will stick to standard logic: if not in Redis and not in DB, it's invalid.
-          throw new Error('Click not found');
+          // ✅ Click not found after retries - log and throw clear error
+          logger.warn('Click not found in database', {
+            click_id,
+            tenant_id: tenantId,
+            attempts: maxAttempts,
+            note: 'Click may have expired in Redis (4h TTL) and not yet flushed to DB, or click_id is invalid'
+          });
+          throw new Error('Click not found. The click may have expired or is invalid.');
         }
       }
 
