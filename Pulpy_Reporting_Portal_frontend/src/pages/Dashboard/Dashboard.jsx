@@ -225,7 +225,12 @@ function Dashboard() {
         const fetchPerformance = async () => {
             try {
                 setPerformanceLoading(true);
-                const response = await dashboardAPI.getPerformance(dateRange);
+                const params = { ...dateRange };
+                // Use hourly grouping for single-day views
+                if (dateFilter === 'today' || dateFilter === 'yesterday') {
+                    params.group_by = 'hour';
+                }
+                const response = await dashboardAPI.getPerformance(params);
                 if (response.success) {
                     setPerformanceData(response.data || []);
                 }
@@ -931,6 +936,9 @@ function Dashboard() {
                                         tickFormatter={(str) => {
                                             if (!str) return '';
                                             const date = new Date(str);
+                                            if (dateFilter === 'today' || dateFilter === 'yesterday') {
+                                                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                                            }
                                             return date.getDate() + '/' + (date.getMonth() + 1);
                                         }}
                                     />

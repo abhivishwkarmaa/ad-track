@@ -306,6 +306,10 @@ export class DashboardService {
       } else if (groupBy === 'month') {
         dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m')`;
         dateSelect = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m')`;
+      } else if (groupBy === 'hour') {
+        // Group by YYYY-MM-DD HH:00
+        dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m-%d %H:00')`;
+        dateSelect = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m-%d %H:00')`;
       } else {
         // Force YYYY-MM-DD string format to prevent JS Map key issues
         dateGroup = `DATE_FORMAT(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE), '%Y-%m-%d')`;

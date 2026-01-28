@@ -373,7 +373,7 @@ export class TrackingService {
         // Use pipeline for atomicity - ensure hash is written before stream entry
         const pipeline = redis.pipeline();
         pipeline.hset(redisKey, clickData);
-        pipeline.expire(redisKey, 86400); // 24 hours TTL
+        pipeline.expire(redisKey, 14400); // 4 hours TTL
 
         // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
         const tenantIdStr = finalTenantId ? String(finalTenantId) : '';

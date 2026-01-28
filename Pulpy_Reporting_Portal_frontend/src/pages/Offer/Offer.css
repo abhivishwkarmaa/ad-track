@@ -803,6 +803,288 @@
     }
 }
 
+.offer-action-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Publisher List Redesign - Compact Row Layout */
+.publisher-list-container {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    background: var(--bg-primary);
+    overflow: hidden;
+    margin-top: 20px;
+}
+
+.publisher-list-header {
+    display: grid;
+    grid-template-columns: 280px 1fr auto;
+    gap: 24px;
+    padding: 12px 24px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.publisher-row {
+    display: grid;
+    grid-template-columns: 280px 1fr auto;
+    gap: 24px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border-light);
+    background: #fff;
+    align-items: center;
+    transition: background-color 0.2s ease;
+}
+
+.publisher-row:hover {
+    background-color: #fafafa;
+}
+
+.publisher-row:last-child {
+    border-bottom: none;
+}
+
+/* 1. Publisher Info Column */
+.publisher-info-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.publisher-main-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.publisher-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.publisher-company {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.publisher-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+}
+
+.meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.meta-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-indicator.active {
+    background-color: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+}
+
+.status-indicator.inactive {
+    background-color: #9E9E9E;
+}
+
+/* 2. Tracking URL Column (Primary Visual) */
+.tracking-col {
+    position: relative;
+    width: 100%;
+}
+
+.tracking-url-wrapper {
+    display: flex;
+    align-items: center;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px;
+    transition: all 0.2s ease;
+    height: 44px;
+}
+
+.tracking-url-wrapper:hover {
+    border-color: var(--primary-color);
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.tracking-url-wrapper.has-url {
+    background: #fff;
+    /* White background for better contrast when URL exists */
+    border-color: #e0e0e0;
+}
+
+.tracking-url-display {
+    flex: 1;
+    font-family: 'SF Mono', 'Roboto Mono', monospace;
+    font-size: 13px;
+    color: var(--text-primary);
+    padding: 0 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: all;
+    /* Easier native selection */
+    cursor: text;
+}
+
+.tracking-url-placeholder {
+    flex: 1;
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 13px;
+    padding: 0 12px;
+}
+
+.copy-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 16px;
+    height: 34px;
+    border: none;
+    border-radius: 4px;
+    background: var(--primary-color);
+    color: white;
+    font-weight: 500;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.copy-btn:hover {
+    background: var(--primary-dark);
+}
+
+.copy-btn.copied {
+    background: #4CAF50;
+}
+
+.copy-btn.generate {
+    background: var(--bg-secondary);
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+}
+
+.copy-btn.generate:hover {
+    background: rgba(27, 182, 184, 0.05);
+}
+
+/* 3. Actions Column */
+.actions-col {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.icon-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.icon-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.icon-btn.delete:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--danger-color);
+}
+
+/* Skeleton Loading for URL */
+.url-skeleton {
+    flex: 1;
+    height: 16px;
+    background: linear-gradient(90deg, #f0f0f0 25%, #f8f8f8 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+    border-radius: 4px;
+    margin: 0 12px;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}
+
+/* Toast Animation */
+@keyframes slideUpFade {
+    0% {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Edit Mode Styling */
+.publisher-row.editing {
+    background: #fdfdfd;
+    border-left: 3px solid var(--primary-color);
+    grid-template-columns: 1fr;
+    /* Full width for form */
+    padding: 24px;
+}
+
+.edit-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    width: 100%;
+}
+
+
+
 @media (max-width: 480px) {
     .offer-page {
         padding: 12px;

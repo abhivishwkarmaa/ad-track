@@ -55,6 +55,12 @@ const CopyIcon = () => (
     </svg>
 );
 
+const CheckIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+
 function OfferDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -76,6 +82,7 @@ function OfferDetail() {
     const [stats, setStats] = useState(null);
     const [dailyStats, setDailyStats] = useState([]);
     const [loadingStats, setLoadingStats] = useState(false);
+    const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -505,109 +512,24 @@ function OfferDetail() {
 
                 {/* Publisher Assignments List */}
                 {loadingAssignments ? (
-                    <p>Loading assignments...</p>
+                    <div className="loading-spinner-small" style={{ display: 'block', margin: '20px auto' }}></div>
                 ) : publisherAssignments.length > 0 ? (
-                    <div style={{ marginTop: '20px' }}>
+                    <div className="publisher-list-container">
+                        <div className="publisher-list-header">
+                            <div>Publisher Details</div>
+                            <div>Tracking Link</div>
+                            <div style={{ textAlign: 'right' }}>Actions</div>
+                        </div>
+
                         {publisherAssignments.map((assignment, index) => {
                             const publisher = publishers.find(p => p.id === assignment.publisher_id);
                             const isEditing = editingAssignmentIndex === index;
+                            const assignmentId = assignment.assignment_id || `temp-${index}`;
 
-                            return (
-                                <div key={index} style={{
-                                    border: '1px solid #ddd',
-                                    borderRadius: '8px',
-                                    padding: '20px',
-                                    marginBottom: '15px',
-                                    background: isEditing ? '#f9f9f9' : '#fff'
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                                        <div>
-                                            <h5 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>
-                                                {publisher ? `${publisher.first_name} (${publisher.email})` : `Publisher: ${assignment.publisher_email}`}
-                                            </h5>
-                                            {publisher && (
-                                                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>
-                                                    {publisher.company_name}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                            {!isEditing ? (
-                                                <>
-                                                    {/* Get Tracking URL button - shown if assignment exists but URL not loaded */}
-                                                    {assignment.assignment_id && !assignment.tracking_url && (
-                                                        <button
-                                                            type="button"
-                                                            className="btn btn-success btn-sm"
-                                                            onClick={async () => {
-                                                                try {
-                                                                    setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: true }));
-                                                                    const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id);
-                                                                    if (trackingResponse.success && trackingResponse.data) {
-                                                                        const updated = [...publisherAssignments];
-                                                                        updated[index].tracking_url = trackingResponse.data.tracking_url;
-                                                                        setPublisherAssignments(updated);
-                                                                        toast.success('Tracking URL loaded!');
-                                                                    } else {
-                                                                        toast.error('Failed to load tracking URL');
-                                                                    }
-                                                                } catch (error) {
-                                                                    console.error('Error fetching tracking URL:', error);
-                                                                    toast.error(error.message || 'Failed to load tracking URL');
-                                                                } finally {
-                                                                    setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: false }));
-                                                                }
-                                                            }}
-                                                            disabled={loadingTrackingUrls[assignment.assignment_id]}
-                                                            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                                        >
-                                                            {loadingTrackingUrls[assignment.assignment_id] ? (
-                                                                <>
-                                                                    <div style={{ width: '14px', height: '14px', border: '2px solid white', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                                                                    Loading...
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <LinkIcon />
-                                                                    Get Tracking URL
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-primary btn-sm"
-                                                        onClick={() => setEditingAssignmentIndex(index)}
-                                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                                    >
-                                                        <EditIcon />
-                                                        Edit
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-danger btn-sm"
-                                                        onClick={() => {
-                                                            setPublisherAssignments(prev => prev.filter((_, i) => i !== index));
-                                                            setEditingAssignmentIndex(null);
-                                                        }}
-                                                    >
-                                                        <XIcon />
-                                                    </button>
-                                                </>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="btn btn-secondary btn-sm"
-                                                    onClick={() => setEditingAssignmentIndex(null)}
-                                                >
-                                                    Cancel
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {isEditing ? (
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
+                            if (isEditing) {
+                                return (
+                                    <div key={index} className="publisher-row editing">
+                                        <div className="edit-form-grid">
                                             <div className="form-group">
                                                 <label className="form-label">Payout Override</label>
                                                 <input
@@ -620,11 +542,11 @@ function OfferDetail() {
                                                         updated[index].payout_override = e.target.value;
                                                         setPublisherAssignments(updated);
                                                     }}
-                                                    placeholder="Leave empty for default"
+                                                    placeholder="Default"
                                                 />
                                             </div>
                                             <div className="form-group">
-                                                <label className="form-label">Conversion Approval %</label>
+                                                <label className="form-label">Conv. Approval %</label>
                                                 <input
                                                     type="number"
                                                     step="0.01"
@@ -635,81 +557,68 @@ function OfferDetail() {
                                                         updated[index].conversion_approval_percentage = e.target.value;
                                                         setPublisherAssignments(updated);
                                                     }}
-                                                    placeholder="Leave empty for default"
+                                                    placeholder="Default"
                                                 />
                                             </div>
                                             <div className="form-group">
-                                                <label className="form-label">Budget Cap Duration</label>
-                                                <select
-                                                    className="form-control"
-                                                    value={assignment.capping_budget?.duration || 'day'}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].capping_budget = {
-                                                            ...updated[index].capping_budget,
-                                                            duration: e.target.value
-                                                        };
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                >
-                                                    <option value="day">Day</option>
-                                                    <option value="week">Week</option>
-                                                    <option value="month">Month</option>
-                                                </select>
+                                                <label className="form-label">Budget Cap</label>
+                                                <div className="input-with-action">
+                                                    <input
+                                                        type="number"
+                                                        className="form-control"
+                                                        value={assignment.capping_budget?.amount || ''}
+                                                        onChange={(e) => {
+                                                            const updated = [...publisherAssignments];
+                                                            updated[index].capping_budget = { ...updated[index].capping_budget, amount: e.target.value };
+                                                            setPublisherAssignments(updated);
+                                                        }}
+                                                        placeholder="Amount"
+                                                    />
+                                                    <select
+                                                        className="form-control"
+                                                        style={{ width: '100px' }}
+                                                        value={assignment.capping_budget?.duration || 'day'}
+                                                        onChange={(e) => {
+                                                            const updated = [...publisherAssignments];
+                                                            updated[index].capping_budget = { ...updated[index].capping_budget, duration: e.target.value };
+                                                            setPublisherAssignments(updated);
+                                                        }}
+                                                    >
+                                                        <option value="day">Day</option>
+                                                        <option value="week">Week</option>
+                                                        <option value="month">Month</option>
+                                                    </select>
+                                                </div>
                                             </div>
                                             <div className="form-group">
-                                                <label className="form-label">Budget Cap Amount</label>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    className="form-control"
-                                                    value={assignment.capping_budget?.amount || ''}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].capping_budget = {
-                                                            ...updated[index].capping_budget,
-                                                            amount: e.target.value
-                                                        };
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                    placeholder="Leave empty for unlimited"
-                                                />
-                                            </div>
-                                            <div className="form-group">
-                                                <label className="form-label">Conversion Cap Duration</label>
-                                                <select
-                                                    className="form-control"
-                                                    value={assignment.capping_conversions?.duration || 'day'}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].capping_conversions = {
-                                                            ...updated[index].capping_conversions,
-                                                            duration: e.target.value
-                                                        };
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                >
-                                                    <option value="day">Day</option>
-                                                    <option value="week">Week</option>
-                                                    <option value="month">Month</option>
-                                                </select>
-                                            </div>
-                                            <div className="form-group">
-                                                <label className="form-label">Conversion Cap Amount</label>
-                                                <input
-                                                    type="number"
-                                                    className="form-control"
-                                                    value={assignment.capping_conversions?.amount || ''}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].capping_conversions = {
-                                                            ...updated[index].capping_conversions,
-                                                            amount: e.target.value
-                                                        };
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                    placeholder="Leave empty for unlimited"
-                                                />
+                                                <label className="form-label">Conv. Cap</label>
+                                                <div className="input-with-action">
+                                                    <input
+                                                        type="number"
+                                                        className="form-control"
+                                                        value={assignment.capping_conversions?.amount || ''}
+                                                        onChange={(e) => {
+                                                            const updated = [...publisherAssignments];
+                                                            updated[index].capping_conversions = { ...updated[index].capping_conversions, amount: e.target.value };
+                                                            setPublisherAssignments(updated);
+                                                        }}
+                                                        placeholder="Amount"
+                                                    />
+                                                    <select
+                                                        className="form-control"
+                                                        style={{ width: '100px' }}
+                                                        value={assignment.capping_conversions?.duration || 'day'}
+                                                        onChange={(e) => {
+                                                            const updated = [...publisherAssignments];
+                                                            updated[index].capping_conversions = { ...updated[index].capping_conversions, duration: e.target.value };
+                                                            setPublisherAssignments(updated);
+                                                        }}
+                                                    >
+                                                        <option value="day">Day</option>
+                                                        <option value="week">Week</option>
+                                                        <option value="month">Month</option>
+                                                    </select>
+                                                </div>
                                             </div>
                                             <div className="form-group">
                                                 <label className="form-label">Callback URL</label>
@@ -722,35 +631,7 @@ function OfferDetail() {
                                                         updated[index].callback_url = e.target.value;
                                                         setPublisherAssignments(updated);
                                                     }}
-                                                    placeholder="Optional"
-                                                />
-                                            </div>
-                                            <div className="form-group">
-                                                <label className="form-label">Offer URL</label>
-                                                <input
-                                                    type="url"
-                                                    className="form-control"
-                                                    value={assignment.offer_url}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].offer_url = e.target.value;
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                    placeholder="Optional"
-                                                />
-                                            </div>
-                                            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                                                <label className="form-label">Notes</label>
-                                                <textarea
-                                                    className="form-control"
-                                                    value={assignment.notes}
-                                                    onChange={(e) => {
-                                                        const updated = [...publisherAssignments];
-                                                        updated[index].notes = e.target.value;
-                                                        setPublisherAssignments(updated);
-                                                    }}
-                                                    rows="2"
-                                                    placeholder="Optional notes"
+                                                    placeholder="https://..."
                                                 />
                                             </div>
                                             <div className="form-group">
@@ -768,126 +649,142 @@ function OfferDetail() {
                                                     <option value="inactive">Inactive</option>
                                                 </select>
                                             </div>
+                                            <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                                                <button className="btn btn-primary btn-sm" onClick={() => setEditingAssignmentIndex(null)}>
+                                                    Done Editing
+                                                </button>
+                                            </div>
                                         </div>
-                                    ) : (
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-                                            <div>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>Payout Override:</span>
-                                                <p style={{ margin: '4px 0 0 0', fontWeight: '500' }}>
-                                                    {assignment.payout_override ? `${offer.offer_currency} ${assignment.payout_override}` : 'Default'}
-                                                </p>
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div key={index} className="publisher-row">
+                                    {/* Column 1: Info (Secondary Hierarchy) */}
+                                    <div className="publisher-info-col">
+                                        <div className="publisher-main-info">
+                                            <span className={`status-indicator ${assignment.status === 'active' ? 'active' : 'inactive'}`}></span>
+                                            <div className="publisher-name">
+                                                {publisher ? `${publisher.first_name} ${publisher.last_name || ''}` : assignment.publisher_email}
                                             </div>
-                                            <div>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>Conversion Approval:</span>
-                                                <p style={{ margin: '4px 0 0 0', fontWeight: '500' }}>
-                                                    {assignment.conversion_approval_percentage ? `${assignment.conversion_approval_percentage}%` : 'Default'}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>Budget Cap:</span>
-                                                <p style={{ margin: '4px 0 0 0', fontWeight: '500' }}>
-                                                    {assignment.capping_budget?.amount
-                                                        ? `${offer.offer_currency} ${assignment.capping_budget.amount} / ${assignment.capping_budget.duration}`
-                                                        : 'Unlimited'}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>Conversion Cap:</span>
-                                                <p style={{ margin: '4px 0 0 0', fontWeight: '500' }}>
-                                                    {assignment.capping_conversions?.amount
-                                                        ? `${assignment.capping_conversions.amount} / ${assignment.capping_conversions.duration}`
-                                                        : 'Unlimited'}
-                                                </p>
-                                            </div>
-                                            <div>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>Status:</span>
-                                                <p style={{ margin: '4px 0 0 0' }}>
-                                                    <span className={`offer-status ${assignment.status?.toLowerCase()}`}>
-                                                        {assignment.status}
+                                        </div>
+                                        {publisher && <div className="publisher-company">{publisher.company_name}</div>}
+
+                                        <div className="publisher-meta-row">
+                                            <span className="meta-item">
+                                                {assignment.payout_override ? (
+                                                    <span className="meta-badge" style={{ color: '#2196F3', background: 'rgba(33, 150, 243, 0.1)' }}>
+                                                        Payout: {offer.offer_currency} {assignment.payout_override}
                                                     </span>
-                                                </p>
-                                            </div>
-                                            {/* Tracking URL Section - Always visible for existing assignments */}
-                                            {assignment.assignment_id && (
-                                                <div style={{ gridColumn: '1 / -1', marginTop: '10px', padding: '15px', background: '#f0f7ff', borderRadius: '6px', border: '1px solid #2196F3' }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                                        <span style={{ fontSize: '13px', fontWeight: '600', color: '#2196F3' }}>Tracking URL:</span>
-                                                        {!assignment.tracking_url && !loadingTrackingUrls[assignment.assignment_id] && (
-                                                            <button
-                                                                type="button"
-                                                                className="btn btn-primary btn-sm"
-                                                                onClick={async () => {
-                                                                    try {
-                                                                        setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: true }));
-                                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id);
-                                                                        if (trackingResponse.success && trackingResponse.data) {
-                                                                            const updated = [...publisherAssignments];
-                                                                            updated[index].tracking_url = trackingResponse.data.tracking_url;
-                                                                            setPublisherAssignments(updated);
-                                                                            toast.success('Tracking URL loaded!');
-                                                                        } else {
-                                                                            toast.error('Failed to load tracking URL');
-                                                                        }
-                                                                    } catch (error) {
-                                                                        console.error('Error fetching tracking URL:', error);
-                                                                        toast.error(error.message || 'Failed to load tracking URL');
-                                                                    } finally {
-                                                                        setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: false }));
-                                                                    }
-                                                                }}
-                                                                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                                            >
-                                                                <LinkIcon />
-                                                                Get Tracking URL
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    {loadingTrackingUrls[assignment.assignment_id] ? (
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#666' }}>
-                                                            <div style={{ width: '16px', height: '16px', border: '2px solid #2196F3', borderTop: '2px solid transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                                                            <span style={{ fontSize: '12px' }}>Loading tracking URL...</span>
-                                                        </div>
-                                                    ) : assignment.tracking_url ? (
-                                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                                            <input
-                                                                type="text"
-                                                                className="form-control"
-                                                                value={assignment.tracking_url}
-                                                                readOnly
-                                                                style={{ fontSize: '12px', padding: '8px 12px', fontFamily: 'monospace' }}
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                className="btn btn-success btn-sm"
-                                                                onClick={async () => {
-                                                                    const result = await safeCopyToClipboard(assignment.tracking_url);
-                                                                    if (result.success) {
-                                                                        toast.success('Copied to clipboard!');
-                                                                    } else {
-                                                                        toast.error(result.error || 'Failed to copy to clipboard');
-                                                                    }
-                                                                }}
-                                                                style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
-                                                            >
-                                                                <CopyIcon />
-                                                                Copy
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <p style={{ fontSize: '12px', color: '#666', margin: 0, fontStyle: 'italic' }}>
-                                                            Click "Get Tracking URL" to fetch the tracking URL for this publisher
-                                                        </p>
-                                                    )}
-                                                </div>
+                                                ) : (
+                                                    <span className="meta-badge">Default Payout</span>
+                                                )}
+                                            </span>
+                                            {(assignment.capping_budget?.amount || assignment.capping_conversions?.amount) && (
+                                                <span className="meta-badge" style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)' }}>
+                                                    Has Caps
+                                                </span>
                                             )}
                                         </div>
-                                    )}
+                                    </div>
+
+                                    {/* Column 2: Tracking URL (Primary Visual) */}
+                                    <div className="tracking-col">
+                                        {assignment.assignment_id ? (
+                                            loadingTrackingUrls[assignment.assignment_id] ? (
+                                                <div className="url-skeleton"></div>
+                                            ) : assignment.tracking_url ? (
+                                                <div className={`tracking-url-wrapper has-url`}>
+                                                    <div className="tracking-url-display">
+                                                        {assignment.tracking_url}
+                                                    </div>
+                                                    <button
+                                                        className={`copy-btn ${copiedId === assignmentId ? 'copied' : ''}`}
+                                                        onClick={async () => {
+                                                            const result = await safeCopyToClipboard(assignment.tracking_url);
+                                                            if (result.success) {
+                                                                setCopiedId(assignmentId);
+                                                                setTimeout(() => setCopiedId(null), 2000);
+                                                            } else {
+                                                                toast.error('Failed to copy');
+                                                            }
+                                                        }}
+                                                        title="Copy Tracking Link"
+                                                    >
+                                                        {copiedId === assignmentId ? (
+                                                            <>
+                                                                <CheckIcon />
+                                                                <span>Copied</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <CopyIcon />
+                                                                <span>Copy</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    className="copy-btn generate"
+                                                    onClick={async () => {
+                                                        try {
+                                                            setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: true }));
+                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id);
+                                                            if (trackingResponse.success && trackingResponse.data) {
+                                                                const updated = [...publisherAssignments];
+                                                                updated[index].tracking_url = trackingResponse.data.tracking_url;
+                                                                setPublisherAssignments(updated);
+                                                            }
+                                                        } catch (error) {
+                                                            console.error(error);
+                                                            toast.error('Failed to generate link');
+                                                        } finally {
+                                                            setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: false }));
+                                                        }
+                                                    }}
+                                                >
+                                                    <LinkIcon />
+                                                    <span>Generate Link</span>
+                                                </button>
+                                            )
+                                        ) : (
+                                            <div className="tracking-url-placeholder">
+                                                Save changes to generate link
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Column 3: Actions */}
+                                    <div className="actions-col">
+                                        <button
+                                            className="icon-btn"
+                                            onClick={() => setEditingAssignmentIndex(index)}
+                                            title="Edit Assignment"
+                                        >
+                                            <EditIcon />
+                                        </button>
+                                        <button
+                                            className="icon-btn delete"
+                                            onClick={() => {
+                                                setPublisherAssignments(prev => prev.filter((_, i) => i !== index));
+                                                setEditingAssignmentIndex(null);
+                                            }}
+                                            title="Remove Publisher"
+                                        >
+                                            <XIcon />
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })}
                     </div>
                 ) : (
-                    <p style={{ textAlign: 'center', color: '#666', padding: '20px' }}>No publishers assigned yet. Add a publisher above.</p>
+                    <div style={{ textAlign: 'center', color: '#666', padding: '40px', border: '1px dashed #ddd', borderRadius: '8px', marginTop: '20px' }}>
+                        <p style={{ margin: 0 }}>No publishers assigned yet.</p>
+                        <p style={{ fontSize: '13px', color: '#999', marginTop: '4px' }}>Use the dropdown above to add publishers.</p>
+                    </div>
                 )}
 
                 {/* Save Assignments Button */}

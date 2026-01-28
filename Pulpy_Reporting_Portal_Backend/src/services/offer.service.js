@@ -716,31 +716,51 @@ class OfferService {
     try {
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
-      const clicksParams = tenantId ? [timezone, id, tenantId, timezone] : [timezone, id, timezone];
-      const conversionsParams = tenantId ? [timezone, id, tenantId, timezone] : [timezone, id, timezone];
+
+      // Robust timezone handling - use DATE_ADD/SUB for offsets to avoid CONVERT_TZ dependency on system tables
+      let dateExpression;
+      const isOffset = /^[+-]\d{2}:\d{2}$/.test(timezone);
+
+      if (isOffset) {
+        const sign = timezone.startsWith('+') ? '+' : '-';
+        const time = timezone.substring(1);
+        // Safe to inject as it's validated by regex
+        dateExpression = `DATE_${sign === '+' ? 'ADD' : 'SUB'}(created_at, INTERVAL '${time}' HOUR_MINUTE)`;
+      } else {
+        // Fallback for named timezones (requires populated timezone tables)
+        // Validate strictly to prevent injection
+        if (!/^[a-zA-Z0-9_\/\+\-]+$/.test(timezone)) {
+          timezone = '+00:00';
+        }
+        dateExpression = `CONVERT_TZ(created_at, '+00:00', '${timezone}')`;
+      }
+
+      // Params only for WHERE clause now
+      const params = [id];
+      if (tenantId) params.push(tenantId);
 
       const [dailyClicksRows] = await pool.query(
         `SELECT 
-           CAST(DATE(CONVERT_TZ(created_at, '+00:00', ?)) AS CHAR) as date, 
+           CAST(DATE(${dateExpression}) AS CHAR) as date, 
            COUNT(*) as count
          FROM clicks 
          WHERE offer_id = ?${tenantFilter}
            AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY)
-         GROUP BY DATE(CONVERT_TZ(created_at, '+00:00', ?))
+         GROUP BY date
          ORDER BY date DESC`,
-        clicksParams
+        params
       );
 
       const [dailyConversionsRows] = await pool.query(
         `SELECT 
-           CAST(DATE(CONVERT_TZ(created_at, '+00:00', ?)) AS CHAR) as date, 
+           CAST(DATE(${dateExpression}) AS CHAR) as date, 
            COUNT(*) as count
          FROM conversions 
          WHERE offer_id = ?${tenantFilter}
            AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY)
-         GROUP BY DATE(CONVERT_TZ(created_at, '+00:00', ?))
+         GROUP BY date
          ORDER BY date DESC`,
-        conversionsParams
+        params
       );
 
       // Merge daily stats
@@ -761,7 +781,7 @@ class OfferService {
         }
         dailyStatsMap.get(dateStr).conversions = row.count;
       });
-
+      console.log('DAILY STATS MAP:', dailyStatsMap);
       return Array.from(dailyStatsMap.values())
         .sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
