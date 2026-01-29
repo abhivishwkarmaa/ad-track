@@ -1178,14 +1178,7 @@ function EditOffer() {
                                     required
                                 />
                             </div>
-                            <button
-                                type="button"
-                                className="btn btn-primary"
-                                onClick={handleTestOfferLink}
-                                style={{ marginBottom: '0', height: 'fit-content', whiteSpace: 'nowrap' }}
-                            >
-                                🔗 Test Offer Link
-                            </button>
+
                         </div>
                         {/* Offer URL Autocomplete */}
                         <div className="offer-form-row">
@@ -1795,7 +1788,19 @@ function EditOffer() {
                         )}
                     </div>
 
-
+                    {/* Actions */}
+                    <div className="offer-form-actions">
+                        <button type="submit" className="btn btn-success" disabled={loading}>
+                            {loading ? 'Saving...' : 'Save Offer'}
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => navigate('/offer/list')}
+                        >
+                            Cancel
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>

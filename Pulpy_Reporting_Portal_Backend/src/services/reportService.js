@@ -60,7 +60,7 @@ export class ReportService {
 
       // Dimension Mapping
       const dimMap = {
-        'offer_id': 'o.id as offer_id, o.name as offer_name',
+        'offer_id': 'o.public_offer_id as offer_id, o.name as offer_name',
         'publisher_id': 'p.id as publisher_id, p.company_name as publisher_name, p.email as publisher_email',
         'advertiser_id': 'o.advertiser_id',
         'ip': 'c.ip',
@@ -99,7 +99,7 @@ export class ReportService {
             // Group By Clause
             if (dim === 'date') groups.push(dimMap['date']);
             else if (dim === 'hour') groups.push(dimMap['hour']);
-            else if (dim === 'offer_id') { groups.push('o.id'); groups.push('o.name'); }
+            else if (dim === 'offer_id') { groups.push('o.public_offer_id'); groups.push('o.name'); }
             else if (dim === 'publisher_id') { groups.push('p.id'); groups.push('p.company_name'); groups.push('p.email'); }
             else if (dim === 'advertiser_id') groups.push('o.advertiser_id');
             else if (dim === 'isp' || dim === 'city' || dim === 'region') { } // Cannot group by NULL literals easily or pointless
@@ -116,6 +116,8 @@ export class ReportService {
         selects.push('COALESCE(SUM(conv.amount), 0) as revenue'); // Offer Price * Conversions roughly
         selects.push('COALESCE(SUM(conv.payout), 0) as payout');
         selects.push('COALESCE(SUM(conv.amount - conv.payout), 0) as profit');
+        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
+        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
 
         let query = `SELECT ${selects.join(', ')} 
                      FROM clicks c
@@ -161,9 +163,9 @@ export class ReportService {
         let selectClause = `
           c.id as click_id,
           c.click_uuid,
-          c.offer_id,
+          c.offer_id as internal_offer_id,
           o.name as offer_name,
-          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
+          o.public_offer_id as offer_id,
           c.publisher_id,
           p.email as publisher_email,
           p.company_name as publisher_company,
@@ -444,6 +446,7 @@ export class ReportService {
           p.company_name as publisher_company,
           p.country as publisher_country,
           o.id as offer_id,
+          o.public_offer_id,
           o.name as offer_name,
           o.category as offer_category,
           COALESCE(click_stats.total_clicks, 0) as total_clicks,
@@ -511,6 +514,7 @@ export class ReportService {
           },
           offer: {
             id: row.offer_id,
+            public_id: row.public_offer_id,
             name: row.offer_name,
             category: row.offer_category,
           },
@@ -565,9 +569,9 @@ export class ReportService {
           conv.id,
           conv.conversion_uuid,
           conv.click_uuid,
-          conv.offer_id,
+          conv.offer_id as internal_offer_id,
           o.name as offer_name,
-          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
+          o.public_offer_id as offer_id,
           conv.publisher_id,
           p.company_name as publisher_name,
           conv.amount,

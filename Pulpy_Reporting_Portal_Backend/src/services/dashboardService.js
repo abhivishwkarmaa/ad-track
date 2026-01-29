@@ -256,8 +256,8 @@ export class DashboardService {
 
       const [rows] = await pool.query(
         `SELECT 
-          o.id as offer_id,
-          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
+          o.public_offer_id as offer_id,
+          o.public_offer_id as display_id,
           o.name as offer_name,
           COUNT(DISTINCT conv.id) as conversions
         FROM offers o
@@ -753,7 +753,7 @@ export class DashboardService {
     try {
       const [rows] = await pool.query(
         `SELECT 
-          id,
+          public_offer_id as id,
           name,
           category,
           thumbnail_url,
@@ -833,8 +833,8 @@ export class DashboardService {
       // Fixed query using subqueries to avoid Cartesian Product issue
       const [rows] = await pool.query(
         `SELECT 
-          o.id as offer_id,
-          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
+          o.public_offer_id as offer_id,
+          o.public_offer_id as display_id,
           o.name as offer_name,
           COALESCE(c.total_clicks, 0) as clicks,
           COALESCE(conv.total_conversions, 0) as conversions,

@@ -37,6 +37,12 @@ const LiveLogsIcon = () => (
     </svg>
 );
 
+const MinimizeIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="18 15 12 9 6 15" />
+    </svg>
+);
+
 const AVAILABLE_DIMENSIONS = [
     { id: 'offer_id', label: 'Offer' },
     { id: 'publisher_id', label: 'Affiliate' },
@@ -64,8 +70,10 @@ const AVAILABLE_METRICS = [
     { id: 'unique_clicks', label: 'Unique Clicks' },
     { id: 'impressions', label: 'Impressions' },
     { id: 'conversions', label: 'Conversions' },
-    { id: 'revenue', label: 'Offer Price' },
-    { id: 'payout', label: 'Payout' },
+    { id: 'revenue', label: 'Advertiser Payout' },
+    { id: 'payout', label: 'Affiliate Total Payout' },
+    { id: 'pending_payout', label: 'Affiliate Pending Payout' },
+    { id: 'approved_payout', label: 'Affiliate Approved Payout' },
     { id: 'profit', label: 'Profit' }
 ];
 
@@ -97,14 +105,19 @@ function DetailedReports() {
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
 
     // Checkbox selections
-    const initialDims = searchParams.get('groupBy') ? searchParams.get('groupBy').split(',') : [];
-    const initialMetrics = searchParams.get('metrics') ? searchParams.get('metrics').split(',') : ['clicks', 'conversions', 'revenue'];
+    // Checkbox selections
+    const initialDims = searchParams.get('groupBy') ? searchParams.get('groupBy').split(',') : ['offer_id'];
+    const initialMetrics = searchParams.get('metrics') ? searchParams.get('metrics').split(',') : ['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout'];
 
     // If URL has no group params, default to Detailed View (empty group)
     const [selectedDims, setSelectedDims] = useState(initialDims);
     const [selectedMetrics, setSelectedMetrics] = useState(initialMetrics);
 
-    const [showFilters, setShowFilters] = useState(true);
+    // Pending selections (for UI logic before applying)
+    const [pendingDims, setPendingDims] = useState(initialDims);
+    const [pendingMetrics, setPendingMetrics] = useState(initialMetrics);
+
+    const [showFilters, setShowFilters] = useState(false);
 
     // Fetch filter options
     useEffect(() => {
@@ -123,7 +136,7 @@ function DetailedReports() {
         fetchData();
     }, []);
 
-    const fetchReports = async () => {
+    const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics) => {
         try {
             setLoading(true);
             setError(null);
@@ -141,8 +154,8 @@ function DetailedReports() {
             if (searchTerm) params.search = searchTerm;
 
             // Grouping Logic
-            if (selectedDims.length > 0) {
-                params.groupBy = selectedDims.join(',');
+            if (activeDims.length > 0) {
+                params.groupBy = activeDims.join(',');
                 // If specific metrics selected, backend needs to support limiting metrics or we filter on frontend?
                 // For now, backend returns ALL metrics if aggregated. We can filter display on frontend.
             }
@@ -158,8 +171,8 @@ function DetailedReports() {
             if (publisherFilter !== 'all') urlParams.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') urlParams.set('status', statusFilter);
             if (searchTerm) urlParams.set('search', searchTerm);
-            if (selectedDims.length > 0) urlParams.set('groupBy', selectedDims.join(','));
-            if (selectedMetrics.length > 0) urlParams.set('metrics', selectedMetrics.join(','));
+            if (activeDims.length > 0) urlParams.set('groupBy', activeDims.join(','));
+            if (activeMetrics.length > 0) urlParams.set('metrics', activeMetrics.join(','));
             setSearchParams(urlParams);
 
             const response = await dashboardAPI.getDetailed(params);
@@ -187,18 +200,21 @@ function DetailedReports() {
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
-        fetchReports();
+        // Apply pending changes
+        setSelectedDims(pendingDims);
+        setSelectedMetrics(pendingMetrics);
+        fetchReports(pendingDims, pendingMetrics);
     };
 
     const handleDimChange = (id) => {
-        setSelectedDims(prev => {
+        setPendingDims(prev => {
             if (prev.includes(id)) return prev.filter(item => item !== id);
             return [...prev, id];
         });
     };
 
     const handleMetricChange = (id) => {
-        setSelectedMetrics(prev => {
+        setPendingMetrics(prev => {
             if (prev.includes(id)) return prev.filter(item => item !== id);
             return [...prev, id];
         });
@@ -297,7 +313,7 @@ function DetailedReports() {
             // Detailed View Columns
             return [
                 { id: 'click_uuid', label: 'Click UUID' },
-                { id: 'offer_name', label: 'Offer' },
+                { id: 'offer_id', label: 'Offer' },
                 { id: 'publisher_company', label: 'Affiliate' },
                 { id: 'ip', label: 'IP' },
                 { id: 'country', label: 'Country' },
@@ -332,6 +348,27 @@ function DetailedReports() {
 
             {showFilters && (
                 <div className="reports-options-panel">
+                    <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '10px', borderBottom: '1px solid var(--border-light)' }}>
+                        <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>Report Configuration</h3>
+                        <button
+                            className="btn-icon"
+                            onClick={() => setShowFilters(false)}
+                            title="Minimize Filter Panel"
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid var(--border-color)',
+                                cursor: 'pointer',
+                                padding: '6px',
+                                borderRadius: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'var(--text-secondary)'
+                            }}
+                        >
+                            <MinimizeIcon />
+                        </button>
+                    </div>
                     <div className="filters-row">
                         <div className="filter-group">
                             <label>Date Range</label>
@@ -378,7 +415,7 @@ function DetailedReports() {
                                     <label key={dim.id} className="checkbox-label">
                                         <input
                                             type="checkbox"
-                                            checked={selectedDims.includes(dim.id)}
+                                            checked={pendingDims.includes(dim.id)}
                                             onChange={() => handleDimChange(dim.id)}
                                         />
                                         {dim.label}
@@ -393,7 +430,7 @@ function DetailedReports() {
                                     <label key={metric.id} className="checkbox-label">
                                         <input
                                             type="checkbox"
-                                            checked={selectedMetrics.includes(metric.id)}
+                                            checked={pendingMetrics.includes(metric.id)}
                                             onChange={() => handleMetricChange(metric.id)}
                                         />
                                         {metric.label}
@@ -404,7 +441,12 @@ function DetailedReports() {
                     </div>
 
                     <div className="filter-actions">
-                        <button className="btn btn-secondary" onClick={() => { setSelectedDims([]); setSelectedMetrics(['clicks', 'conversions', 'revenue']); }}>Reset</button>
+                        <button className="btn btn-secondary" onClick={() => {
+                            setPendingDims(['offer_id']);
+                            setPendingMetrics(['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout']);
+                            setSelectedDims(['offer_id']);
+                            setSelectedMetrics(['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout']);
+                        }}>Reset</button>
                         <button className="btn btn-primary" onClick={handleApply} style={{ minWidth: '150px' }}>Apply Report</button>
                     </div>
                 </div>
@@ -412,7 +454,7 @@ function DetailedReports() {
 
             <div className="reports-table-container">
                 {loading ? (
-                    <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
+                    <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '50px', width: '100%', minHeight: '300px' }}>
                         <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
                         <p>Loading...</p>
                     </div>
@@ -435,7 +477,9 @@ function DetailedReports() {
                                     <tr key={idx}>
                                         {tableColumns.map(col => {
                                             const val = row[col.id];
-                                            if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
+                                            if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
+                                            if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
+                                            if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
                                             if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
                                             if (col.id === 'click_created_at') return <td key={col.id}>{formatDate(val)}</td>;
                                             if (col.id === 'date_group' || col.id === 'hour_group') {
