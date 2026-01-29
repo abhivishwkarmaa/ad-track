@@ -11,10 +11,12 @@ import OfferDetail from './pages/Offer/OfferDetail';
 import ManageAffiliate from './pages/Affiliate/ManageAffiliate';
 import NewAffiliate from './pages/Affiliate/NewAffiliate';
 import EditAffiliate from './pages/Affiliate/EditAffiliate';
+import AffiliateDetail from './pages/Affiliate/AffiliateDetail';
 import PostbackTest from './pages/Affiliate/PostbackTest';
 import ManageAdvertiser from './pages/Advertiser/ManageAdvertiser';
 import NewAdvertiser from './pages/Advertiser/NewAdvertiser';
 import EditAdvertiser from './pages/Advertiser/EditAdvertiser';
+import AdvertiserDetail from './pages/Advertiser/AdvertiserDetail';
 import ManageAssignment from './pages/Assignment/ManageAssignment';
 import NewAssignment from './pages/Assignment/NewAssignment';
 import EditAssignment from './pages/Assignment/EditAssignment';
@@ -27,6 +29,7 @@ import NewTenant from './pages/Tenant/NewTenant';
 import EditTenant from './pages/Tenant/EditTenant';
 import TenantDetail from './pages/Tenant/TenantDetail';
 import ManageContactSubmissions from './pages/ContactSubmissions/ManageContactSubmissions';
+import Maintenance from './pages/Maintenance/Maintenance';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -75,6 +78,7 @@ function AppRoutes() {
             <Route path="manage" element={<ManageAffiliate />} />
             <Route path="new" element={<NewAffiliate />} />
             <Route path="edit/:id" element={<EditAffiliate />} />
+            <Route path="detail/:id" element={<AffiliateDetail />} />
             <Route path="postback-test" element={<PostbackTest />} />
           </Route>
           <Route path="advertiser">
@@ -82,6 +86,7 @@ function AppRoutes() {
             <Route path="manage" element={<ManageAdvertiser />} />
             <Route path="new" element={<NewAdvertiser />} />
             <Route path="edit/:id" element={<EditAdvertiser />} />
+            <Route path="detail/:id" element={<AdvertiserDetail />} />
           </Route>
           <Route path="assignment">
             <Route index element={<ManageAssignment />} />
@@ -94,7 +99,7 @@ function AppRoutes() {
             <Route path="detailed" element={<DetailedReports />} />
           </Route>
           <Route path="live-logs" element={<LiveLogs />} />
-          <Route path="import" element={<ImportData />} />
+          {/* <Route path="import" element={<ImportData />} /> */}
         </Route>
 
         {/* Admin Only Routes - Redirect to Dashboard (which redirects to login or 404?) if accessed by Tenant */}
@@ -120,7 +125,27 @@ function AppRoutes() {
   );
 }
 
+
+
 function App() {
+  const [isMaintenance, setIsMaintenance] = useState(false);
+
+  useEffect(() => {
+    const handleMaintenance = () => {
+      setIsMaintenance(true);
+    };
+
+    window.addEventListener('server-maintenance', handleMaintenance);
+
+    return () => {
+      window.removeEventListener('server-maintenance', handleMaintenance);
+    };
+  }, []);
+
+  if (isMaintenance) {
+    return <Maintenance />;
+  }
+
   return (
     <Router>
       <ThemeProvider>

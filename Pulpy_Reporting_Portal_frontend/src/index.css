@@ -392,6 +392,13 @@ select.form-control {
   min-width: fit-content;
 }
 
+.btn svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
 .btn:hover {
   transform: translateY(-1px);
 }

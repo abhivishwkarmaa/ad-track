@@ -199,8 +199,13 @@ function ManageAssignment() {
 
             if (response.success) {
                 toast.success('Assignment deleted successfully');
+
+                // Update local state immediately
+                setAssignments(prev => prev.filter(a => a.id !== deleteModal.assignment.id));
+
                 setDeleteModal({ open: false, assignment: null });
-                // Refresh assignments list
+
+                // Refresh assignments list to ensure consistency
                 const params = {
                     page: 1,
                     limit: 100
@@ -209,10 +214,13 @@ function ManageAssignment() {
                 if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
                 if (statusFilter !== 'all') params.status = statusFilter;
 
-                const refreshResponse = await assignmentsAPI.getAssignments(params);
-                if (refreshResponse.success) {
-                    setAssignments(refreshResponse.data);
-                }
+                // We can fetch in background without blocking
+                assignmentsAPI.getAssignments(params).then(refreshResponse => {
+                    if (refreshResponse.success) {
+                        setAssignments(refreshResponse.data);
+                    }
+                }).catch(err => console.error('Background refresh failed:', err));
+
             } else {
                 toast.error(response.message || 'Failed to delete assignment');
             }
@@ -252,8 +260,8 @@ function ManageAssignment() {
     if (loading) {
         return (
             <div className="assignment-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
+                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
                     <p>Loading assignments...</p>
                 </div>
             </div>

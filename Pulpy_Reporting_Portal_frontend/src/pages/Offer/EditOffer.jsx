@@ -822,8 +822,8 @@ function EditOffer() {
     if (loadingOffer) {
         return (
             <div className="offer-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
+                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
                     <p>Loading offer...</p>
                 </div>
             </div>
@@ -1731,62 +1731,7 @@ function EditOffer() {
                         </div>
                     </div>
 
-                    {/* Advertiser Postback */}
-                    <div className="offer-form-section">
-                        <h3 className="offer-form-section-title">Advertiser Postback</h3>
-                        <div className="form-group">
-                            <label className="switch-label">
-                                <input type="checkbox" name="advertiserPostbackEnabled" checked={formData.advertiserPostbackEnabled || false} onChange={handleChange} />
-                                <span>Enable Advertiser Postback</span>
-                            </label>
-                        </div>
 
-                        {formData.advertiserPostbackEnabled && (
-                            <>
-                                <div className="form-group">
-                                    <label className="form-label">Postback URL</label>
-                                    <input
-                                        type="url"
-                                        className="form-control"
-                                        name="advertiserPostbackUrl"
-                                        value={formData.advertiserPostbackUrl}
-                                        onChange={handleChange}
-                                        placeholder="https://advertiser.com/postback?clickid={clickid}"
-                                    />
-                                    <div className="form-helper">
-                                        Macros: {'{clickid}'}, {'{payout}'}, {'{offer_id}'}, {'{affiliate_id}'}, {'{goal}'}, {'{status}'}
-                                    </div>
-                                </div>
-
-                                <div className="offer-form-row two-col">
-                                    <div className="form-group">
-                                        <label className="form-label">Method</label>
-                                        <select className="form-control" name="advertiserPostbackMethod" value={formData.advertiserPostbackMethod} onChange={handleChange}>
-                                            <option value="GET">GET</option>
-                                            <option value="POST">POST</option>
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label className="form-label">Events</label>
-                                        <div className="checkbox-group">
-                                            <label className="checkbox-item">
-                                                <input type="checkbox" checked={(formData.advertiserPostbackEvents || []).includes('conversion')} onChange={() => handleArrayToggle('advertiserPostbackEvents', 'conversion')} />
-                                                <span>Conversion</span>
-                                            </label>
-                                            <label className="checkbox-item">
-                                                <input type="checkbox" checked={(formData.advertiserPostbackEvents || []).includes('click')} onChange={() => handleArrayToggle('advertiserPostbackEvents', 'click')} />
-                                                <span>Click</span>
-                                            </label>
-                                            <label className="checkbox-item">
-                                                <input type="checkbox" checked={(formData.advertiserPostbackEvents || []).includes('reject')} onChange={() => handleArrayToggle('advertiserPostbackEvents', 'reject')} />
-                                                <span>Reject</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
 
                     {/* Actions */}
                     <div className="offer-form-actions">

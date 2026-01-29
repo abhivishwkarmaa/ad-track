@@ -59,12 +59,12 @@ function EditAffiliate() {
                 console.error('Fetch publisher error:', error);
                 toast.error('Failed to load publisher data');
                 navigate('/affiliate/manage');
+
             } finally {
                 setFetchLoading(false);
             }
         };
 
-        fetchPublisher();
         fetchPublisher();
     }, [id, navigate, toast, refreshKey]);
 
@@ -98,8 +98,8 @@ function EditAffiliate() {
     if (fetchLoading) {
         return (
             <div className="affiliate-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
+                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
                     <p>Loading publisher...</p>
                 </div>
             </div>
@@ -218,6 +218,8 @@ function EditAffiliate() {
                             </div>
                         </div>
                     </div>
+
+
 
                     {/* Actions */}
                     <div className="affiliate-form-actions">

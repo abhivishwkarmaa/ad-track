@@ -92,6 +92,12 @@ const apiRequest = async (endpoint, options = {}) => {
             }
         }
 
+        if (response.status === 502) {
+            // Dispatch event for App.jsx to handle
+            window.dispatchEvent(new CustomEvent('server-maintenance'));
+            throw new Error('SERVER_MAINTENANCE');
+        }
+
         if (!response.ok) {
             const errorMessage = data?.message || data?.error || `API request failed (${response.status})`;
             throw new Error(errorMessage);

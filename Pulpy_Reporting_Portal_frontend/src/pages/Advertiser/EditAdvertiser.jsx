@@ -85,7 +85,6 @@ function EditAdvertiser() {
         };
 
         fetchAdvertiser();
-        fetchAdvertiser();
     }, [id, navigate, toast, refreshKey]);
 
     const handleChange = (e) => {
@@ -118,8 +117,8 @@ function EditAdvertiser() {
     if (fetchLoading) {
         return (
             <div className="advertiser-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
+                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
                     <p>Loading advertiser...</p>
                 </div>
             </div>
@@ -280,6 +279,8 @@ function EditAdvertiser() {
                             </div>
                         </div>
                     </div>
+
+
 
                     {/* Actions */}
                     <div className="advertiser-form-actions">

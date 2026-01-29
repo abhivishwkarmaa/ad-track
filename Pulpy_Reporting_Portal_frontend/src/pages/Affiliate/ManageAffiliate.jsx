@@ -14,6 +14,13 @@ const SearchIcon = () => (
     </svg>
 );
 
+const EyeIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px' }}>
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+    </svg>
+);
+
 const PlusIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
         <line x1="12" y1="5" x2="12" y2="19" />
@@ -175,8 +182,8 @@ function ManageAffiliate() {
     if (loading) {
         return (
             <div className="affiliate-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
+                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
                     <p>Loading publishers...</p>
                 </div>
             </div>
@@ -281,6 +288,13 @@ function ManageAffiliate() {
                                                 ) : (
                                                     affiliate.status === 'active' ? <PauseIcon /> : <PlayIcon />
                                                 )}
+                                            </button>
+                                            <button
+                                                className="affiliate-action-btn"
+                                                title="View Details"
+                                                onClick={() => navigate(`/affiliate/detail/${affiliate.id}`)}
+                                            >
+                                                <EyeIcon />
                                             </button>
                                             <button
                                                 className="affiliate-action-btn"

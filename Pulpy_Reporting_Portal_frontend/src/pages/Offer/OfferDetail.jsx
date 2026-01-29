@@ -418,7 +418,7 @@ function OfferDetail() {
                                 </a>
                             </span>
                         </div>
-                        <div className="detail-item">
+                        {/* <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview URL:</span>
                             <span className="detail-value">
                                 {offer.preview_url ? (
@@ -427,7 +427,7 @@ function OfferDetail() {
                                     </a>
                                 ) : '-'}
                             </span>
-                        </div>
+                        </div> */}
                     </div>
                 </div>
             </div>
@@ -765,16 +765,7 @@ function OfferDetail() {
                                         >
                                             <EditIcon />
                                         </button>
-                                        <button
-                                            className="icon-btn delete"
-                                            onClick={() => {
-                                                setPublisherAssignments(prev => prev.filter((_, i) => i !== index));
-                                                setEditingAssignmentIndex(null);
-                                            }}
-                                            title="Remove Publisher"
-                                        >
-                                            <XIcon />
-                                        </button>
+
                                     </div>
                                 </div>
                             );

@@ -184,12 +184,12 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                 icon: <AssignmentIcon />,
                 text: 'Assignment'
             },
-            {
-                type: 'link',
-                path: '/import',
-                icon: <ImportIcon />,
-                text: 'Import'
-            }
+            // {
+            //     type: 'link',
+            //     path: '/import',
+            //     icon: <ImportIcon />,
+            //     text: 'Import'
+            // }
         ] : []),
 
         // Admin Specific Items (Show ONLY on Admin Domain)
@@ -252,7 +252,7 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                                     `nav-item ${item.exact ? (location.pathname === item.path ? 'active' : '') : (active ? 'active' : '')}`
                                 }
                                 data-tooltip={item.text}
-                                onClick={onCloseMobile}
+                                onClick={() => onCloseMobile()}
                                 end={item.exact}
                             >
                                 <span className="nav-item-icon">{item.icon}</span>

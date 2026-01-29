@@ -1,0 +1,56 @@
+.maintenance-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background-color: #f8f9fa;
+    color: #343a40;
+    text-align: center;
+    padding: 20px;
+}
+
+.maintenance-content {
+    background: white;
+    padding: 40px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    max-width: 500px;
+    width: 100%;
+}
+
+.maintenance-icon {
+    width: 80px;
+    height: 80px;
+    color: #ff9800; /* Orange for maintenance/warning */
+    margin-bottom: 20px;
+}
+
+.maintenance-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 15px;
+    color: #212529;
+}
+
+.maintenance-text {
+    font-size: 16px;
+    color: #6c757d;
+    margin-bottom: 30px;
+    line-height: 1.5;
+}
+
+.retry-button {
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.retry-button:hover {
+    background-color: #1976D2;
+}
