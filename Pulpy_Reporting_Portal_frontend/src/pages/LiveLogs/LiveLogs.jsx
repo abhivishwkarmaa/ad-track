@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
+import { useToast } from '../../context/ToastContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import './LiveLogs.css';
 
@@ -17,10 +18,12 @@ const ReportsIcon = () => (
 
 const LiveLogs = () => {
     const navigate = useNavigate();
+    const toast = useToast();
     const { refreshKey } = useRefresh();
     const [activeTab, setActiveTab] = useState('clicks');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [testingPostback, setTestingPostback] = useState({});
     const [limit, setLimit] = useState(100);
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -32,6 +35,7 @@ const LiveLogs = () => {
 
     // Auto-refresh timer reference
     const [autoRefresh, setAutoRefresh] = useState(false);
+
 
     // Fetch Filter Options
     useEffect(() => {
@@ -110,6 +114,32 @@ const LiveLogs = () => {
         return new Date(dateString).toLocaleString();
     };
 
+    const fireTestPostback = async (clickRow) => {
+        const clickId = clickRow.click_uuid;
+        setTestingPostback(prev => ({ ...prev, [clickId]: true }));
+
+        try {
+            // Build tracking URL from click data
+            const baseUrl = window.location.origin;
+            const trackingUrl = `${baseUrl}/track?offer_id=${clickRow.offer_id}&pub_id=${clickRow.publisher_id}&tid=${clickRow.click_uuid}`;
+
+            const response = await publishersAPI.createTestConversion(trackingUrl);
+
+            if (response.success) {
+                toast.success('Test conversion created and postback fired!');
+                // Refresh logs to show the conversion
+                fetchLogs();
+            } else {
+                toast.error(response.message || 'Failed to create test conversion');
+            }
+        } catch (error) {
+            toast.error('Error: ' + (error.message || 'Failed to fire test postback'));
+        } finally {
+            setTestingPostback(prev => ({ ...prev, [clickId]: false }));
+        }
+    };
+
+
     return (
         <div className="logs-page">
             <div className="logs-header">
@@ -135,7 +165,7 @@ const LiveLogs = () => {
 
                     <div className="control-group">
                         <select value={selectedPublisher} onChange={(e) => setSelectedPublisher(e.target.value)}>
-                            <option value="">All Affiliates</option>
+                            <option value="">All Publishers</option>
                             {publishers.map(p => (
                                 <option key={p.id} value={p.id}>{p.company_name || p.email} ({p.id})</option>
                             ))}
@@ -192,12 +222,13 @@ const LiveLogs = () => {
                                 <th>Time</th>
                                 <th>Click UUID</th>
                                 <th>Offer</th>
-                                <th>Affiliate</th>
+                                <th>Publisher</th>
                                 <th>IP</th>
                                 <th>Location</th>
                                 <th>Device</th>
                                 <th>ISP</th>
                                 <th>Status</th>
+                                <th>Actions</th>
                             </tr>
                         ) : (
                             <tr>
@@ -205,7 +236,7 @@ const LiveLogs = () => {
                                 <th>Conversion UUID</th>
                                 <th>Click UUID</th>
                                 <th>Offer</th>
-                                <th>Affiliate</th>
+                                <th>Publisher</th>
                                 <th>Amount</th>
                                 <th>Status</th>
                                 <th>IP</th>
@@ -215,7 +246,7 @@ const LiveLogs = () => {
                     <tbody>
                         {data.length === 0 ? (
                             <tr>
-                                <td colSpan={activeTab === 'clicks' ? 9 : 8} style={{ textAlign: 'center', padding: '20px' }}>
+                                <td colSpan={activeTab === 'clicks' ? 10 : 8} style={{ textAlign: 'center', padding: '20px' }}>
                                     No logs found
                                 </td>
                             </tr>
@@ -232,6 +263,22 @@ const LiveLogs = () => {
                                         <td>{row.device_type} / {row.os}</td>
                                         <td>{row.isp || '-'}</td>
                                         <td>{row.conversion_id ? <span className="badge success">Converted</span> : <span className="badge neutral">Click</span>}</td>
+                                        <td>
+                                            <button
+                                                className="btn btn-sm btn-primary"
+                                                onClick={() => fireTestPostback(row)}
+                                                disabled={testingPostback[row.click_uuid] || row.conversion_id}
+                                                title={row.conversion_id ? 'Already converted' : 'Fire test postback for this click'}
+                                                style={{
+                                                    fontSize: '12px',
+                                                    padding: '4px 8px',
+                                                    opacity: row.conversion_id ? 0.5 : 1,
+                                                    cursor: row.conversion_id ? 'not-allowed' : 'pointer'
+                                                }}
+                                            >
+                                                {testingPostback[row.click_uuid] ? 'Testing...' : '🔥 Test'}
+                                            </button>
+                                        </td>
                                     </>
                                 ) : (
                                     <>
@@ -241,7 +288,13 @@ const LiveLogs = () => {
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_name} - ({row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
-                                        <td><span className={`badge ${row.status}`}>{row.status}</span></td>
+                                        <td>
+                                            <span className={`badge ${row.status}`}>{row.status}</span>
+                                            {/* Show TEST badge if is_test flag is set OR if amount/payout are 0 */}
+                                            {(row.is_test === 1 || (parseFloat(row.amount || 0) === 0 && parseFloat(row.payout || 0) === 0)) && (
+                                                <span className="badge test" style={{ marginLeft: '4px', background: '#fef3c7', color: '#92400e', fontSize: '10px', fontWeight: '700' }}>TEST</span>
+                                            )}
+                                        </td>
                                         <td>{row.ip}</td>
                                     </>
                                 )}

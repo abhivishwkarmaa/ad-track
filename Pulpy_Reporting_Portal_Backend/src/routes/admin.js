@@ -29,7 +29,9 @@ async function adminRoutes(fastify) {
   // Test Affiliate Postback (Debug Tool)
   fastify.post('/test-affiliate-postback', adminController.testAffiliatePostback);
   fastify.post('/test-tracking-loop', adminController.testTrackingUrlLoop);
+  fastify.post('/create-test-conversion', adminController.createTestConversion);
   fastify.get('/affiliate-postback-logs', adminController.getAffiliatePostbackLogs);
+
 
   // Contact Submissions (Super Admin Only - Admin Subdomain Only)
   // These routes require both admin authentication AND admin subdomain access

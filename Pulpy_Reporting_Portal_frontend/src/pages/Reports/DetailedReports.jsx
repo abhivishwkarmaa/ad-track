@@ -45,7 +45,7 @@ const MinimizeIcon = () => (
 
 const AVAILABLE_DIMENSIONS = [
     { id: 'offer_id', label: 'Offer' },
-    { id: 'publisher_id', label: 'Affiliate' },
+    { id: 'publisher_id', label: 'Publisher' },
     { id: 'advertiser_id', label: 'Advertiser' },
     { id: 'date', label: 'Date' },
     { id: 'hour', label: 'Hour' },
@@ -71,9 +71,9 @@ const AVAILABLE_METRICS = [
     { id: 'impressions', label: 'Impressions' },
     { id: 'conversions', label: 'Conversions' },
     { id: 'revenue', label: 'Advertiser Payout' },
-    { id: 'payout', label: 'Affiliate Total Payout' },
-    { id: 'pending_payout', label: 'Affiliate Pending Payout' },
-    { id: 'approved_payout', label: 'Affiliate Approved Payout' },
+    { id: 'payout', label: 'Publisher Total Payout' },
+    { id: 'pending_payout', label: 'Publisher Pending Payout' },
+    { id: 'approved_payout', label: 'Publisher Approved Payout' },
     { id: 'profit', label: 'Profit' }
 ];
 
@@ -314,7 +314,7 @@ function DetailedReports() {
             return [
                 { id: 'click_uuid', label: 'Click UUID' },
                 { id: 'offer_id', label: 'Offer' },
-                { id: 'publisher_company', label: 'Affiliate' },
+                { id: 'publisher_company', label: 'Publisher' },
                 { id: 'ip', label: 'IP' },
                 { id: 'country', label: 'Country' },
                 { id: 'device_type', label: 'Device' },
@@ -386,9 +386,9 @@ function DetailedReports() {
                             </select>
                         </div>
                         <div className="filter-group">
-                            <label>Affiliate</label>
+                            <label>Publisher</label>
                             <select className="form-control" value={publisherFilter} onChange={e => setPublisherFilter(e.target.value)}>
-                                <option value="all">All Affiliates</option>
+                                <option value="all">All Publishers</option>
                                 {publishers.map(p => <option key={p.id} value={p.id}>{p.company_name} ({p.email})</option>)}
                             </select>
                         </div>

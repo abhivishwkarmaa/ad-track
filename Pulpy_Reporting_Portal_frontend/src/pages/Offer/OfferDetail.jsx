@@ -61,6 +61,14 @@ const CheckIcon = () => (
     </svg>
 );
 
+const ExternalLinkIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+        <polyline points="15 3 21 3 21 9" />
+        <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+);
+
 function OfferDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -403,11 +411,11 @@ function OfferDetail() {
                             <span className="detail-value" style={{ fontWeight: '600', color: '#2196F3' }}>{offer.offer_currency} {offer.advertiser_amount}</span>
                         </div>
                         <div className="detail-item">
-                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Affiliate Model:</span>
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Publisher Model:</span>
                             <span className="detail-value">{offer.affiliate_model}</span>
                         </div>
                         <div className="detail-item">
-                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Affiliate Amount:</span>
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Publisher Amount:</span>
                             <span className="detail-value" style={{ fontWeight: '600', color: '#4CAF50' }}>{offer.offer_currency} {offer.affiliate_amount}</span>
                         </div>
                         <div className="detail-item">
@@ -723,6 +731,15 @@ function OfferDetail() {
                                                                 <span>Copy</span>
                                                             </>
                                                         )}
+                                                    </button>
+                                                    <button
+                                                        className="copy-btn generate"
+                                                        onClick={() => window.open(assignment.tracking_url, '_blank')}
+                                                        title="Open Tracking Link"
+                                                        style={{ marginLeft: '8px' }}
+                                                    >
+                                                        <ExternalLinkIcon />
+                                                        <span>Open</span>
                                                     </button>
                                                 </div>
                                             ) : (

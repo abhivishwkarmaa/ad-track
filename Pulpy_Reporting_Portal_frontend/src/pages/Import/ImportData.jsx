@@ -125,7 +125,7 @@ function ImportData() {
         <div className="import-page">
             <div className="import-header">
                 <h1>Import Data</h1>
-                <p>Import offers, affiliates, or advertisers from CSV/Excel files</p>
+                <p>Import offers, publishers, or advertisers from CSV/Excel files</p>
             </div>
 
             <div className="import-container">
@@ -160,8 +160,8 @@ function ImportData() {
                                 onChange={(e) => setImportType(e.target.value)}
                             />
                             <div className="import-option-label">
-                                <strong>Affiliates</strong>
-                                <span>Import affiliate partners</span>
+                                <strong>Publishers</strong>
+                                <span>Import publisher partners</span>
                             </div>
                         </label>
                         <label className="import-option">

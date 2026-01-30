@@ -620,7 +620,7 @@ function Dashboard() {
                             <div className="action-icon green">
                                 <AffiliateIcon />
                             </div>
-                            <span>Add Affiliate</span>
+                            <span>Add Publisher</span>
                         </Link>
                         <Link to="/advertiser/new" className="action-btn">
                             <div className="action-icon orange">
@@ -675,11 +675,11 @@ function Dashboard() {
                 {/* Top Affiliates */}
                 <div className="dashboard-card affiliates-card">
                     <div className="card-header">
-                        <h3>Top Affiliates</h3>
+                        <h3>Top Publishers</h3>
                         <Link to="/affiliate/manage" className="view-all">View All</Link>
                     </div>
                     {(topAffiliatesLoading || affiliatesLoading) ? (
-                        <div className="loading-spinner">Loading affiliates...</div>
+                        <div className="loading-spinner">Loading publishers...</div>
                     ) : (topAffiliates && topAffiliates.length > 0) ? (
                         <div className="affiliates-list">
                             {topAffiliates.map((aff, idx) => (
@@ -708,7 +708,7 @@ function Dashboard() {
                                     </div>
                                     <div className="affiliate-info">
                                         <span className="affiliate-name">{aff.company_name || aff.first_name || 'N/A'}</span>
-                                        <span className="affiliate-email">{aff.email || 'New Affiliate'}</span>
+                                        <span className="affiliate-email">{aff.email || 'New Publisher'}</span>
                                     </div>
                                     <div className="affiliate-status pending">
                                         New
@@ -717,7 +717,7 @@ function Dashboard() {
                             ))}
                         </div>
                     ) : (
-                        <div className="no-data">No affiliates available</div>
+                        <div className="no-data">No publishers available</div>
                     )}
                 </div>
 
@@ -737,7 +737,7 @@ function Dashboard() {
                     ) : summaryData ? (
                         <div className="summary-grid">
                             <div className="summary-item">
-                                <span className="summary-label">Affiliates</span>
+                                <span className="summary-label">Publishers</span>
                                 <span className="summary-value">{summaryData.affiliates || 0}</span>
                             </div>
                             <div className="summary-item">

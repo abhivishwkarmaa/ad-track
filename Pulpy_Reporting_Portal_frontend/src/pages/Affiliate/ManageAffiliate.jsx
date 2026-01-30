@@ -246,7 +246,7 @@ function ManageAffiliate() {
                 <table className="affiliate-table">
                     <thead>
                         <tr>
-                            <th>Affiliate</th>
+                            <th>Publisher</th>
                             <th>Company</th>
                             <th>Country</th>
                             <th>Status</th>
@@ -257,7 +257,7 @@ function ManageAffiliate() {
                         {filteredAffiliates.length === 0 ? (
                             <tr>
                                 <td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>
-                                    No affiliates found
+                                    No publishers found
                                 </td>
                             </tr>
                         ) : (

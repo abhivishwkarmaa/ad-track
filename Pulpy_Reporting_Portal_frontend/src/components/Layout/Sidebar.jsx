@@ -164,14 +164,14 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                 type: 'link',
                 path: '/affiliate/manage',
                 icon: <AffiliateIcon />,
-                text: 'Affiliates'
+                text: 'Publishers'
             },
-            {
-                type: 'link',
-                path: '/affiliate/postback-test',
-                icon: <PostbackIcon />,
-                text: 'Test Postback'
-            },
+            // {
+            //     type: 'link',
+            //     path: '/affiliate/postback-test',
+            //     icon: <PostbackIcon />,
+            //     text: 'Test Postback'
+            // },
             {
                 type: 'link',
                 path: '/advertiser/manage',

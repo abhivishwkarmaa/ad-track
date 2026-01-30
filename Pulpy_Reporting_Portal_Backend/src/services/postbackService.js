@@ -226,8 +226,9 @@ export class PostbackService {
 
         while (attempts < maxAttempts) {
           // ✅ STRICT: Always filter by tenant_id (from subdomain)
-          const query = 'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ?';
-          const params = [click_id, tenantId];
+          // 🔥 UPDATED: Look up by click_uuid OR tid (affiliate click ID)
+          const query = 'SELECT * FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ?';
+          const params = [click_id, click_id, tenantId];
 
           try {
             // ✅ QUERY TIMEOUT: 3 seconds max to prevent long waits (reduced from 5s)

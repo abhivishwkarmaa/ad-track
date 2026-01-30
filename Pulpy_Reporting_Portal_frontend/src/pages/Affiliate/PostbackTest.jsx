@@ -24,18 +24,14 @@ function PostbackTest() {
     const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
-    const [selectedAffiliate, setSelectedAffiliate] = useState(null);
     const [affiliates, setAffiliates] = useState([]);
     const [loadingAffiliates, setLoadingAffiliates] = useState(true);
+    const [selectedAffiliate, setSelectedAffiliate] = useState(null);
 
     const [formData, setFormData] = useState({
-        affiliateId: '',
-        rcid: '', // affiliate_click_id
-        payout: '',
-        status: 'approved',
-        txid: '',
-        method: 'GET',
-        dryRun: false
+        trackingUrl: '',
+        affiliateId: '', // Optional - for postback URL preview
+        rcid: '', // Optional - for custom tracking ID
     });
 
     useEffect(() => {
@@ -45,7 +41,7 @@ function PostbackTest() {
                 if (response.success) {
                     setAffiliates(response.data);
                 } else {
-                    toast.error('Failed to load affiliates');
+                    toast.error('Failed to load publishers');
                 }
             } catch (error) {
                 console.error('Error fetching affiliates:', error);
@@ -57,6 +53,8 @@ function PostbackTest() {
 
         fetchAffiliates();
     }, [refreshKey]);
+
+
 
     const handleAffiliateChange = (e) => {
         const id = e.target.value;
@@ -70,11 +68,13 @@ function PostbackTest() {
         }
     };
 
+
+
     const handleChange = (e) => {
-        const { name, value, type, checked } = e.target;
+        const { name, value } = e.target;
         setFormData(prev => ({
             ...prev,
-            [name]: type === 'checkbox' ? checked : value
+            [name]: value
         }));
     };
 
@@ -86,13 +86,20 @@ function PostbackTest() {
     const handleTest = async (e) => {
         e.preventDefault();
 
-        if (!formData.affiliateId) {
-            toast.error('Please select an affiliate');
+        if (!formData.trackingUrl) {
+            toast.error('Please enter a tracking URL');
             return;
         }
 
-        if (!selectedAffiliate?.global_postback_url && !selectedAffiliate?.postbackUrl) {
-            toast.error('Selected affiliate does not have a global postback URL configured');
+        // Validate URL format
+        try {
+            const url = new URL(formData.trackingUrl);
+            if (!url.protocol.startsWith('http')) {
+                toast.error('Invalid URL protocol. Must be http or https');
+                return;
+            }
+        } catch (err) {
+            toast.error('Invalid tracking URL format');
             return;
         }
 
@@ -100,55 +107,82 @@ function PostbackTest() {
         setResult(null);
 
         try {
-            const payload = {
-                publisher_id: formData.affiliateId,
-                rcid: formData.rcid, // mapped to affiliate_click_id/click_id in backend
-                payout: formData.payout ? parseFloat(formData.payout) : 0,
-                status: formData.status,
-                txid: formData.txid,
-                method: formData.method,
-                dry_run: formData.dryRun
-            };
+            let trackingUrl = formData.trackingUrl;
 
-            const response = await publishersAPI.testAffiliatePostback(payload);
+            // Append rcid if provided
+            if (formData.rcid) {
+                const separator = trackingUrl.includes('?') ? '&' : '?';
+                trackingUrl += `${separator}tid=${encodeURIComponent(formData.rcid)}`;
+            }
 
-            if (response.success) {
-                setResult({
-                    success: true,
-                    mode: response.mode, // DRY_RUN or null
-                    url: response.fired_url,
-                    method: response.method,
-                    status: response.http_status,
-                    body: response.response_body,
-                    duration: response.execution_time_ms,
-                    error: response.error,
-                    timestamp: new Date().toISOString()
-                });
+            // Open tracking URL in new tab (real browser click)
+            const newWindow = window.open(trackingUrl, '_blank');
 
-                if (response.mode === 'DRY_RUN') {
-                    toast.info('Dry run complete. URL generated but not fired.');
+            if (!newWindow) {
+                toast.error('Please allow popups for this site to test postbacks');
+                setLoading(false);
+                return;
+            }
+
+            // Show initial status
+            setResult({
+                success: true,
+                mode: 'BROWSER_CLICK',
+                url: trackingUrl,
+                timestamp: new Date().toISOString(),
+                message: 'Tracking URL opened! Creating test conversion...',
+                status: 'processing'
+            });
+
+            toast.success('Tracking URL opened! Creating test conversion...');
+
+            // Wait a moment for the click to be registered
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Create test conversion
+            try {
+                const conversionResponse = await publishersAPI.createTestConversion(trackingUrl);
+
+                if (conversionResponse.success) {
+                    setResult({
+                        success: true,
+                        mode: 'BROWSER_CLICK',
+                        url: trackingUrl,
+                        timestamp: new Date().toISOString(),
+                        message: 'Test conversion created and postback fired successfully!',
+                        status: 'completed',
+                        conversion: conversionResponse.data
+                    });
+                    toast.success('Test conversion created and postback fired!');
                 } else {
-                    toast.success('Test postback fired successfully');
+                    throw new Error(conversionResponse.message || 'Failed to create test conversion');
                 }
-            } else {
+            } catch (conversionError) {
                 setResult({
                     success: false,
-                    error: response.message || response.error || 'Unknown error',
-                    timestamp: new Date().toISOString()
+                    mode: 'BROWSER_CLICK',
+                    url: trackingUrl,
+                    timestamp: new Date().toISOString(),
+                    error: conversionError.message || 'Failed to create test conversion',
+                    message: 'Tracking URL opened but failed to create test conversion. The click may not have been registered yet.',
+                    status: 'error'
                 });
-                toast.error(response.message || 'Test failed');
+                toast.error('Failed to create test conversion: ' + conversionError.message);
             }
+
         } catch (error) {
             setResult({
                 success: false,
-                error: error.message || 'Connection failed',
-                timestamp: new Date().toISOString()
+                error: error.message || 'Failed to open tracking URL',
+                timestamp: new Date().toISOString(),
+                status: 'error'
             });
-            toast.error('Postback test failed');
+            toast.error('Test failed: ' + (error.message || 'Unknown error'));
         } finally {
             setLoading(false);
         }
     };
+
 
     const copyToClipboard = (text) => {
         if (!text) return;
@@ -163,7 +197,7 @@ function PostbackTest() {
             <div className="affiliate-header">
                 <div className="affiliate-header-left">
                     <h1>Postback Testing</h1>
-                    <p className="subtitle">Test Postback (Does Not Affect Real Data)</p>
+                    <p className="subtitle">Test Postback Using Real Browser Click</p>
                 </div>
             </div>
 
@@ -174,22 +208,37 @@ function PostbackTest() {
                         <div className="postback-test-container">
                             <div className="postback-test-header">
                                 <h2>Configuration</h2>
-                                <p>Simulate a conversion postback</p>
+                                <p>Select a publisher and offer to test the complete tracking flow</p>
                             </div>
 
                             <div className="affiliate-form-section">
                                 <div className="form-group">
-                                    <label className="form-label required">Affiliate</label>
+                                    <label className="form-label required">Tracking URL</label>
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        name="trackingUrl"
+                                        value={formData.trackingUrl}
+                                        onChange={handleChange}
+                                        placeholder="https://affiliate.com/track?offer_id=...&pub_id=..."
+                                        required
+                                    />
+                                    <small className="form-hint">
+                                        Enter the complete tracking URL you want to test
+                                    </small>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label">Publisher (Optional - for postback preview)</label>
                                     <select
                                         className="form-control"
                                         name="affiliateId"
                                         value={formData.affiliateId}
                                         onChange={handleAffiliateChange}
-                                        required
                                         disabled={loadingAffiliates}
                                     >
                                         <option value="">
-                                            {loadingAffiliates ? 'Loading affiliates...' : 'Select Affiliate'}
+                                            {loadingAffiliates ? 'Loading publishers...' : 'Select Publisher (Optional)'}
                                         </option>
                                         {affiliates.map(affiliate => (
                                             <option key={affiliate.id} value={affiliate.id}>
@@ -209,102 +258,55 @@ function PostbackTest() {
                                     </div>
                                 )}
 
-                                <div className="affiliate-form-row two-col">
-                                    <div className="form-group">
-                                        <label className="form-label">RCID (Click ID)</label>
-                                        <div className="input-with-action">
-                                            <input
-                                                type="text"
-                                                className="form-control"
-                                                name="rcid"
-                                                value={formData.rcid}
-                                                onChange={handleChange}
-                                                placeholder="affiliate_click_id"
-                                            />
-                                            <button
-                                                type="button"
-                                                className="btn btn-icon"
-                                                onClick={generateRandomId}
-                                                title="Generate Random ID"
-                                            >
-                                                <span style={{ fontSize: '18px' }}>↺</span>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Payout</label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            className="form-control"
-                                            name="payout"
-                                            value={formData.payout}
-                                            onChange={handleChange}
-                                            placeholder="0.00"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="affiliate-form-row two-col">
-                                    <div className="form-group">
-                                        <label className="form-label">Status</label>
-                                        <select
-                                            className="form-control"
-                                            name="status"
-                                            value={formData.status}
-                                            onChange={handleChange}
-                                        >
-                                            <option value="approved">Approved</option>
-                                            <option value="pending">Pending</option>
-                                            <option value="rejected">Rejected</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="form-group">
-                                        <label className="form-label">Transaction ID (Optional)</label>
+                                <div className="form-group">
+                                    <label className="form-label">RCID (Click ID) - Optional</label>
+                                    <div className="input-with-action">
                                         <input
                                             type="text"
                                             className="form-control"
-                                            name="txid"
-                                            value={formData.txid}
+                                            name="rcid"
+                                            value={formData.rcid}
                                             onChange={handleChange}
-                                            placeholder="tx_123456"
+                                            placeholder="Optional: Custom tracking ID"
                                         />
-                                    </div>
-                                </div>
-
-                                <div className="affiliate-form-row two-col">
-                                    <div className="form-group">
-                                        <label className="form-label">Method</label>
-                                        <select
-                                            className="form-control"
-                                            name="method"
-                                            value={formData.method}
-                                            onChange={handleChange}
+                                        <button
+                                            type="button"
+                                            className="btn btn-icon"
+                                            onClick={generateRandomId}
+                                            title="Generate Random ID"
                                         >
-                                            <option value="GET">GET</option>
-                                            <option value="POST">POST</option>
-                                        </select>
+                                            <span style={{ fontSize: '18px' }}>↺</span>
+                                        </button>
                                     </div>
-                                    <div className="form-group checkbox-wrapper">
-                                        <label className="checkbox-item">
-                                            <input
-                                                type="checkbox"
-                                                name="dryRun"
-                                                checked={formData.dryRun}
-                                                onChange={handleChange}
-                                            />
-                                            <span>Dry Run (Do not fire)</span>
-                                        </label>
-                                    </div>
+                                    <small className="form-hint">
+                                        Optional: Add a custom tracking ID (will be appended as tid parameter)
+                                    </small>
                                 </div>
                             </div>
 
                             <div className="affiliate-form-actions">
-                                <button type="submit" className="btn btn-primary" disabled={loading || !formData.affiliateId}>
-                                    {loading ? 'Processing...' : (formData.dryRun ? 'Simulate Postback' : 'Fire Test Postback')}
+                                <button
+                                    type="submit"
+                                    className="btn btn-primary"
+                                    disabled={loading || !formData.trackingUrl}
+                                >
+                                    {loading ? 'Opening...' : 'Fire Test'}
                                 </button>
+                            </div>
+
+                            <div className="info-box">
+                                <div className="info-icon">ℹ️</div>
+                                <div className="info-content">
+                                    <strong>How it works:</strong>
+                                    <ol>
+                                        <li>Enter your tracking URL above</li>
+                                        <li>Click "Fire Test" to open the URL in a new tab</li>
+                                        <li>The browser will follow the real redirect chain: Publisher → Tracker → Advertiser</li>
+                                        <li>A real click will be recorded in the database</li>
+                                        <li>If a conversion fires, the postback will be triggered automatically</li>
+                                        <li>Return here to monitor postback logs and conversion status</li>
+                                    </ol>
+                                </div>
                             </div>
                         </div>
                     </form>
@@ -313,56 +315,140 @@ function PostbackTest() {
                 {/* Results Panel */}
                 <div className="postback-results-panel">
                     {result ? (
-                        <div className={`postback-result-card ${result.success ? 'success' : 'error'} ${result.mode === 'DRY_RUN' ? 'dry-run' : ''}`}>
+                        <div className={`postback-result-card ${result.success ? 'success' : 'error'} ${result.mode === 'BROWSER_CLICK' ? 'browser-mode' : ''}`}>
                             <div className="result-header">
-                                <h3>Test Results</h3>
+                                <h3>Test Status</h3>
                                 <div className="result-meta">
-                                    {result.mode === 'DRY_RUN' && <span className="badge dry-run">DRY RUN</span>}
+                                    {result.mode === 'BROWSER_CLICK' && <span className="badge browser-mode">BROWSER CLICK</span>}
                                     <span className="timestamp">{new Date(result.timestamp).toLocaleTimeString()}</span>
                                 </div>
                             </div>
 
                             <div className="result-body">
-                                <div className="result-item">
-                                    <label>Fired URL</label>
-                                    <div className="code-block url">
-                                        {result.url}
-                                        <button className="copy-btn" onClick={() => copyToClipboard(result.url)}>
-                                            <CopyIcon />
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="result-row-flex">
-                                    <div className="result-item">
-                                        <label>Method</label>
-                                        <div className="value-box">{result.method}</div>
-                                    </div>
-                                    <div className="result-item">
-                                        <label>Status Code</label>
-                                        <div className={`value-box ${result.status >= 200 && result.status < 300 ? 'green' : 'red'}`}>
-                                            {result.status || 'N/A'}
+                                {result.mode === 'BROWSER_CLICK' ? (
+                                    <>
+                                        <div className="result-item">
+                                            <label>Tracking URL Opened</label>
+                                            <div className="code-block url">
+                                                {result.url}
+                                                <button className="copy-btn" onClick={() => copyToClipboard(result.url)}>
+                                                    <CopyIcon />
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="result-item">
-                                        <label>Duration</label>
-                                        <div className="value-box">{result.duration ? `${result.duration}ms` : 'N/A'}</div>
-                                    </div>
-                                </div>
 
-                                <div className="result-item">
-                                    <label>Response Body</label>
-                                    <pre className="code-block response">
-                                        {result.body || result.error || '(No response body)'}
-                                    </pre>
-                                </div>
+                                        {result.conversion && (
+                                            <>
+                                                <div className="result-item">
+                                                    <label>Test Conversion Details</label>
+                                                    <div className="conversion-details">
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Conversion ID:</span>
+                                                            <span className="detail-value">{result.conversion.conversion_id}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Click ID:</span>
+                                                            <span className="detail-value">{result.conversion.click_id}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Publisher Click ID:</span>
+                                                            <span className="detail-value">{result.conversion.affiliate_click_id || 'N/A'}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Status:</span>
+                                                            <span className="detail-value status-approved">
+                                                                {result.conversion.status}
+                                                                {(result.conversion.is_test || (parseFloat(result.conversion.payout || 0) === 0 && parseFloat(result.conversion.amount || 0) === 0)) && (
+                                                                    <span className="badge test" style={{ marginLeft: '6px', background: '#fef3c7', color: '#92400e', fontSize: '10px', padding: '2px 6px', borderRadius: '4px' }}>TEST</span>
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Payout:</span>
+                                                            <span className="detail-value">${result.conversion.payout}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Is Test:</span>
+                                                            <span className="detail-value test-badge">✓ TEST</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {result.conversion.postback && (
+                                                    <div className="result-item">
+                                                        <label>Postback Result</label>
+                                                        {result.conversion.postback.error ? (
+                                                            <div className="postback-error">
+                                                                <span className="error-icon">⚠️</span>
+                                                                <span>{result.conversion.postback.error}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <div className="code-block url">
+                                                                    {result.conversion.postback.url}
+                                                                    <button className="copy-btn" onClick={() => copyToClipboard(result.conversion.postback.url)}>
+                                                                        <CopyIcon />
+                                                                    </button>
+                                                                </div>
+                                                                <div className="postback-stats">
+                                                                    <div className="stat-item">
+                                                                        <span className="stat-label">Status:</span>
+                                                                        <span className={`stat-value ${result.conversion.postback.status >= 200 && result.conversion.postback.status < 300 ? 'success' : 'error'}`}>
+                                                                            {result.conversion.postback.status}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="stat-item">
+                                                                        <span className="stat-label">Latency:</span>
+                                                                        <span className="stat-value">{result.conversion.postback.latency_ms}ms</span>
+                                                                    </div>
+                                                                </div>
+                                                                {result.conversion.postback.response && (
+                                                                    <div className="postback-response">
+                                                                        <label>Response:</label>
+                                                                        <pre className="code-block response">
+                                                                            {result.conversion.postback.response}
+                                                                        </pre>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+
+                                        <div className={result.status === 'completed' ? 'success-box' : result.status === 'processing' ? 'info-box' : 'instruction-box'}>
+                                            <div className="instruction-icon">
+                                                {result.status === 'completed' ? '✅' : result.status === 'processing' ? '⏳' : '👉'}
+                                            </div>
+                                            <div className="instruction-content">
+                                                <h4>{result.status === 'completed' ? 'Success!' : result.status === 'processing' ? 'Processing...' : 'Next Steps:'}</h4>
+                                                <p>{result.message}</p>
+                                                {result.status === 'completed' && (
+                                                    <p className="hint">Check the "Postback Logs" page to see the full postback history.</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="result-item">
+                                            <label>Error</label>
+                                            <pre className="code-block response error">
+                                                {result.error || '(Unknown error)'}
+
+                                            </pre>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     ) : (
                         <div className="empty-state">
-                            <div className="empty-icon">⇋</div>
+                            <div className="empty-icon">🔗</div>
                             <h3>Ready to Test</h3>
-                            <p>Configure the test parameters on the left and click Fire to see results here.</p>
+                            <p>Select a publisher and offer assignment, then click "Open Tracking URL" to start the test.</p>
+                            <p className="empty-hint">The tracking URL will open in a new tab, simulating a real user click through your tracking system.</p>
                         </div>
                     )}
                 </div>
@@ -411,6 +497,91 @@ function PostbackTest() {
                     color: #17a2b8;
                     font-size: 12px;
                 }
+
+                .form-hint {
+                    display: block;
+                    margin-top: 4px;
+                    font-size: 12px;
+                    color: #6c757d;
+                }
+
+                .info-box {
+                    background: #e7f3ff;
+                    border: 1px solid #b3d9ff;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 20px;
+                    display: flex;
+                    gap: 12px;
+                }
+
+                .info-icon {
+                    font-size: 24px;
+                    flex-shrink: 0;
+                }
+
+                .info-content {
+                    flex: 1;
+                }
+
+                .info-content strong {
+                    display: block;
+                    margin-bottom: 8px;
+                    color: #0066cc;
+                }
+
+                .info-content ol {
+                    margin: 0;
+                    padding-left: 20px;
+                    font-size: 13px;
+                    color: #495057;
+                }
+
+                .info-content li {
+                    margin-bottom: 4px;
+                }
+
+                .instruction-box {
+                    background: #fff3cd;
+                    border: 1px solid #ffc107;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 16px;
+                    display: flex;
+                    gap: 12px;
+                }
+
+                .instruction-icon {
+                    font-size: 24px;
+                    flex-shrink: 0;
+                }
+
+                .instruction-content {
+                    flex: 1;
+                }
+
+                .instruction-content h4 {
+                    margin: 0 0 8px 0;
+                    color: #856404;
+                    font-size: 16px;
+                }
+
+                .instruction-content p {
+                    margin: 0 0 12px 0;
+                    color: #856404;
+                    font-size: 14px;
+                }
+
+                .instruction-content ul {
+                    margin: 0;
+                    padding-left: 20px;
+                    font-size: 13px;
+                    color: #856404;
+                }
+
+                .instruction-content li {
+                    margin-bottom: 6px;
+                }
                 
                 .checkbox-wrapper {
                     display: flex;
@@ -436,7 +607,7 @@ function PostbackTest() {
                 
                 .postback-result-card.success { border-top: 4px solid #10b981; }
                 .postback-result-card.error { border-top: 4px solid #ef4444; }
-                .postback-result-card.dry-run { border-top: 4px solid #f59e0b; }
+                .postback-result-card.browser-mode { border-top: 4px solid #3b82f6; }
                 
                 .result-header {
                     padding: 16px;
@@ -457,13 +628,13 @@ function PostbackTest() {
                     color: #64748b;
                 }
                 
-                .badge.dry-run {
-                    background: #fffbeb;
-                    color: #d97706;
+                .badge.browser-mode {
+                    background: #dbeafe;
+                    color: #1e40af;
                     padding: 2px 8px;
                     border-radius: 99px;
                     font-weight: 600;
-                    border: 1px solid #fbbf24;
+                    border: 1px solid #3b82f6;
                 }
                 
                 .result-body { padding: 20px; }
@@ -505,6 +676,12 @@ function PostbackTest() {
                     max-height: 300px;
                     overflow-y: auto;
                     white-space: pre-wrap;
+                }
+
+                .code-block.response.error {
+                    background: #fef2f2;
+                    color: #991b1b;
+                    border: 1px solid #fecaca;
                 }
                 
                 .copy-btn {
@@ -556,6 +733,142 @@ function PostbackTest() {
                     font-size: 48px;
                     margin-bottom: 16px;
                     opacity: 0.5;
+                }
+
+                .empty-hint {
+                    font-size: 13px;
+                    color: #64748b;
+                    margin-top: 8px;
+                }
+
+                .conversion-details {
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 6px;
+                    padding: 12px;
+                }
+
+                .detail-row {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 8px 0;
+                    border-bottom: 1px solid #e2e8f0;
+                }
+
+                .detail-row:last-child {
+                    border-bottom: none;
+                }
+
+                .detail-label {
+                    font-weight: 500;
+                    color: #64748b;
+                    font-size: 13px;
+                }
+
+                .detail-value {
+                    font-weight: 600;
+                    color: #1e293b;
+                    font-size: 13px;
+                }
+
+                .status-approved {
+                    color: #10b981 !important;
+                    text-transform: uppercase;
+                }
+
+                .test-badge {
+                    background: #fef3c7;
+                    color: #92400e;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: 700;
+                }
+
+                .postback-stats {
+                    display: flex;
+                    gap: 20px;
+                    margin-top: 12px;
+                    padding: 12px;
+                    background: #f8fafc;
+                    border-radius: 6px;
+                }
+
+                .stat-item {
+                    display: flex;
+                    gap: 8px;
+                    align-items: center;
+                }
+
+                .stat-label {
+                    font-size: 12px;
+                    color: #64748b;
+                    font-weight: 500;
+                }
+
+                .stat-value {
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #1e293b;
+                }
+
+                .stat-value.success {
+                    color: #10b981;
+                }
+
+                .stat-value.error {
+                    color: #ef4444;
+                }
+
+                .postback-response {
+                    margin-top: 12px;
+                }
+
+                .postback-response label {
+                    font-size: 12px;
+                    color: #64748b;
+                    font-weight: 600;
+                    margin-bottom: 6px;
+                    display: block;
+                }
+
+                .postback-error {
+                    background: #fef2f2;
+                    border: 1px solid #fecaca;
+                    border-radius: 6px;
+                    padding: 12px;
+                    display: flex;
+                    gap: 8px;
+                    align-items: center;
+                    color: #991b1b;
+                }
+
+                .error-icon {
+                    font-size: 20px;
+                }
+
+                .success-box {
+                    background: #ecfdf5;
+                    border: 1px solid #10b981;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 16px;
+                    display: flex;
+                    gap: 12px;
+                }
+
+                .success-box .instruction-content h4 {
+                    color: #047857;
+                }
+
+                .success-box .instruction-content p {
+                    color: #065f46;
+                }
+
+                .hint {
+                    font-size: 12px;
+                    opacity: 0.8;
+                    margin-top: 8px;
                 }
                 
                 @media (max-width: 1024px) {

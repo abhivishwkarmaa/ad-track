@@ -213,7 +213,7 @@ function AdvertiserDetail() {
                                         <th className="text-right">Clicks</th>
                                         <th className="text-right">Conversions</th>
                                         <th className="text-right">Advertiser Pay</th>
-                                        <th className="text-right">Affiliate Pay</th>
+                                        <th className="text-right">Publisher Pay</th>
                                         <th className="text-right">Profit</th>
                                     </tr>
                                 </thead>

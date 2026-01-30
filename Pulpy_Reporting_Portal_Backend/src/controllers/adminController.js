@@ -1129,6 +1129,231 @@ export class AdminController {
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
+
+  async createTestConversion(request, reply) {
+    const startTime = Date.now();
+    try {
+      const { tracking_url } = request.body;
+
+      if (!tracking_url) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'tracking_url is required',
+        });
+      }
+
+      // ✅ CRITICAL: Get tenant_id from request for tenant isolation
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      // Parse tracking URL to extract parameters
+      let urlObj;
+      try {
+        urlObj = new URL(tracking_url);
+      } catch (e) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Invalid tracking URL format',
+        });
+      }
+
+      const offerId = urlObj.searchParams.get('offer_id') || urlObj.searchParams.get('oid');
+      const pubId = urlObj.searchParams.get('pub_id') || urlObj.searchParams.get('a');
+      const tid = urlObj.searchParams.get('tid') || urlObj.searchParams.get('click_id');
+
+      if (!offerId || !pubId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tracking URL must contain offer_id and pub_id parameters',
+        });
+      }
+
+      // Wait a moment for the click to be processed (if just opened)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Try to find the most recent click for this offer/publisher/tenant
+      const pool = (await import('../db/connection.js')).default;
+
+      let clickQuery = `
+        SELECT * FROM clicks 
+        WHERE offer_id = ? AND publisher_id = ? AND tenant_id = ?
+      `;
+      const clickParams = [offerId, pubId, tenantId];
+
+      // If tid provided, try to find that specific click
+      if (tid) {
+        clickQuery += ' AND (tid = ? OR click_uuid = ?)';
+        clickParams.push(tid, tid);
+      }
+
+      clickQuery += ' ORDER BY created_at DESC LIMIT 1';
+
+      const [clickRows] = await pool.query(clickQuery, clickParams);
+      const click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+
+      if (!click) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'No click found for this tracking URL. Please ensure the tracking URL was opened and try again.',
+          hint: 'Wait a few seconds after opening the tracking URL before creating the test conversion'
+        });
+      }
+
+      // Get publisher for postback
+      const publisher = await publisherService.findById(pubId, tenantId);
+      if (!publisher) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Publisher not found',
+        });
+      }
+
+      // Generate test conversion
+      const { v4: uuidv4 } = await import('uuid');
+      const conversionId = uuidv4();
+      const affiliateClickId = click.tid || click.click_uuid;
+
+
+
+
+      // Create test conversion in database
+      await pool.query(
+        `INSERT INTO conversions (
+          conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id,
+          publisher_offer_id, rcid, status, amount, payout, is_test, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+        [
+          conversionId,
+          click.click_uuid,
+          offerId,
+          pubId,
+          tenantId,
+          click.publisher_offer_id || null,
+          affiliateClickId,  // rcid
+          'approved',
+          0,  // amount (revenue)
+          0,  // payout
+          1   // is_test = 1 for test conversions
+        ]
+      );
+
+
+
+
+      logger.info('[TEST CONVERSION] Created test conversion', {
+        conversion_id: conversionId,
+        click_id: click.click_uuid,
+        offer_id: offerId,
+        publisher_id: pubId,
+        tenant_id: tenantId,
+        is_test: true
+      });
+
+
+      // Fire affiliate postback if configured
+      let postbackResult = null;
+      if (publisher.global_postback_url) {
+        try {
+          let postbackUrl = publisher.global_postback_url;
+
+          // Replace macros
+          postbackUrl = postbackUrl
+            .replace(/{click_id}/gi, affiliateClickId || '')
+            .replace(/{clickid}/gi, affiliateClickId || '')
+            .replace(/{affiliate_click_id}/gi, affiliateClickId || '')
+            .replace(/{rcid}/gi, affiliateClickId || '')
+            .replace(/{status}/gi, 'approved')
+            .replace(/{payout}/gi, '0')
+            .replace(/{amount}/gi, '0')
+            .replace(/{txid}/gi, conversionId)
+            .replace(/{transaction_id}/gi, conversionId)
+            .replace(/{test}/gi, '1');
+
+          const postbackStartTime = Date.now();
+          const postbackResponse = await fetch(postbackUrl);
+          const responseText = await postbackResponse.text().catch(() => '');
+
+          postbackResult = {
+            url: postbackUrl,
+            status: postbackResponse.status,
+            response: responseText.substring(0, 500),
+            latency_ms: Date.now() - postbackStartTime
+          };
+
+          // Log postback
+          await pool.query(
+            `INSERT INTO affiliate_postback_logs (
+              conversion_id, publisher_id, tenant_id, affiliate_click_id,
+              postback_url, http_status, response_body, fired_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+            [
+              conversionId,
+              pubId,
+              tenantId,
+              affiliateClickId,
+              postbackUrl,
+              postbackResponse.status,
+              responseText.substring(0, 1000)
+            ]
+          );
+
+          logger.info('[TEST POSTBACK] Fired test postback', {
+            conversion_id: conversionId,
+            publisher_id: pubId,
+            postback_url: postbackUrl,
+            status: postbackResponse.status
+          });
+        } catch (postbackError) {
+          logger.error('[TEST POSTBACK] Failed to fire postback', {
+            error: postbackError.message,
+            conversion_id: conversionId
+          });
+          postbackResult = {
+            error: postbackError.message
+          };
+        }
+      }
+
+      return reply.send({
+        success: true,
+        message: 'Test conversion created and postback fired',
+        data: {
+          conversion_id: conversionId,
+          click_id: click.click_uuid,
+          affiliate_click_id: affiliateClickId,
+          offer_id: offerId,
+          publisher_id: pubId,
+          status: 'approved',
+          payout: 0,
+          revenue: 0,
+          is_test: true,
+          postback: postbackResult
+        },
+        execution_time_ms: Date.now() - startTime
+      });
+
+
+    } catch (error) {
+      logger.error('AdminController.createTestConversion error:', error);
+      return reply.code(500).send({
+        success: false,
+        error: 'Internal Server Error',
+        message: error.message,
+        execution_time_ms: Date.now() - startTime,
+      });
+    }
+  }
 }
 
 export default new AdminController();

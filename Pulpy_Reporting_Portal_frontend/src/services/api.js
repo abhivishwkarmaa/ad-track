@@ -309,7 +309,14 @@ export const publishersAPI = {
             body: JSON.stringify(data),
         });
     },
+    createTestConversion: async (tracking_url) => {
+        return apiRequest('/api/admin/create-test-conversion', {
+            method: 'POST',
+            body: JSON.stringify({ tracking_url }),
+        });
+    },
 };
+
 
 // Advertisers API
 export const advertisersAPI = {

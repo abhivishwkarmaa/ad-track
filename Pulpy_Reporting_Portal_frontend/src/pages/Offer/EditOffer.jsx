@@ -1067,7 +1067,7 @@ function EditOffer() {
                         </div>
                         <div className="offer-form-row two-col">
                             <div className="form-group">
-                                <label className="form-label">Affiliate Model (Cost)</label>
+                                <label className="form-label">Publisher Model (Cost)</label>
                                 <select
                                     className="form-control"
                                     name="affiliate_model"
@@ -1080,7 +1080,7 @@ function EditOffer() {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label required">Affiliate Amount</label>
+                                <label className="form-label required">Publisher Amount</label>
                                 <input
                                     type="number"
                                     step="0.01"
@@ -1302,10 +1302,10 @@ function EditOffer() {
                                                 <strong>{'{raw_useragent}'}</strong> = Raw Device UserAgent (not recommended)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_id}'}</strong> = Affiliate Account ID (affiliate data)
+                                                <strong>{'{aff_id}'}</strong> = Publisher Account ID (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{sub_aff_id}'}</strong> = Sub Affiliate Account ID (affiliate data)
+                                                <strong>{'{sub_aff_id}'}</strong> = Sub Publisher Account ID (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
                                                 <strong>{'{adv_id}'}</strong> = Advertiser Account ID (advertiser data)
@@ -1317,34 +1317,34 @@ function EditOffer() {
                                                 <strong>{'{timestamp}'}</strong> = UTC Timestamp 1991-04-20 00:00:00
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_sub1}'}</strong> = Aff Sub ID 1 (affiliate data)
+                                                <strong>{'{aff_sub1}'}</strong> = Sub ID 1 (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_sub2}'}</strong> = Aff Sub ID 2 (affiliate data)
+                                                <strong>{'{aff_sub2}'}</strong> = Sub ID 2 (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_sub3}'}</strong> = Aff Sub ID 3 (affiliate data)
+                                                <strong>{'{aff_sub3}'}</strong> = Sub ID 3 (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_sub4}'}</strong> = Aff Sub ID 4 (affiliate data)
+                                                <strong>{'{aff_sub4}'}</strong> = Sub ID 4 (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{aff_sub5}'}</strong> = Aff Sub ID 5 (affiliate data)
+                                                <strong>{'{aff_sub5}'}</strong> = Sub ID 5 (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{deviceid}'}</strong> = Device ID (affiliate data)
+                                                <strong>{'{deviceid}'}</strong> = Device ID (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{source}'}</strong> = Traffic Source (affiliate data)
+                                                <strong>{'{source}'}</strong> = Traffic Source (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{googleaid}'}</strong> = Google AID (affiliate data)
+                                                <strong>{'{googleaid}'}</strong> = Google AID (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{androidid}'}</strong> = Android ID (affiliate data)
+                                                <strong>{'{androidid}'}</strong> = Android ID (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
-                                                <strong>{'{iosidfa}'}</strong> = iOS IDFA (affiliate data)
+                                                <strong>{'{iosidfa}'}</strong> = iOS IDFA (publisher data)
                                             </p>
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
                                                 <strong>{'{os}'}</strong> = OS Name (device data)
@@ -1671,15 +1671,15 @@ function EditOffer() {
                                 </select>
                             </div>
                             <div className="form-group">
-                                <label className="form-label">Affiliate Over Capping</label>
+                                <label className="form-label">Publisher Over Capping</label>
                                 <select
                                     className="form-control"
                                     name="affiliate_over_capping"
                                     value={formData.affiliate_over_capping}
                                     onChange={handleChange}
                                 >
-                                    <option value="STOP">Stop Offer for affiliate</option>
-                                    <option value="ENABLEFALLBACK">Enable Fallback for affiliate</option>
+                                    <option value="STOP">Stop Offer for publisher</option>
+                                    <option value="ENABLEFALLBACK">Enable Fallback for publisher</option>
                                 </select>
                             </div>
                         </div>
