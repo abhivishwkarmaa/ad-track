@@ -534,8 +534,7 @@ function PostbackTest() {
                         <div className="empty-state">
                             <div className="empty-icon">🔗</div>
                             <h3>Ready to Test</h3>
-                            <p>Select a publisher and offer assignment, then click "Open Tracking URL" to start the test.</p>
-                            <p className="empty-hint">The tracking URL will open in a new tab, simulating a real user click through your tracking system.</p>
+                            <p>Fill out the form and click "Fire Test" to start.</p>
                         </div>
                     )}
                 </div>
