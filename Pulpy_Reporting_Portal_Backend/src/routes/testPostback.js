@@ -93,7 +93,7 @@ async function testPostbackRoutes(fastify, options) {
 
             const key = `test:postback:${tenantId}:${affiliate_id}:${offer_id}`;
             const data = await redis.get(key);
-
+            
             // Session expired or never existed
             if (!data) {
                 return {

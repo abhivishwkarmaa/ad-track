@@ -14,7 +14,7 @@
 
 ### 🚀 For Users
 
-| Document | Purpose | Read Time |
+| Document | Purpose | Read Time 
 |----------|---------|-----------|
 | **`TEST_POSTBACK_FINAL_SUMMARY.md`** | Complete overview of what was implemented | 5 min |
 | **`README_TEST_POSTBACK.md`** | How to use the feature + troubleshooting | 10 min |
