@@ -16,6 +16,7 @@ import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
 import cacheService from './cacheService.js';
+import postbackService from './postbackService.js';
 
 export class TrackingService {
   async trackClick(query, request) {
@@ -49,6 +50,8 @@ export class TrackingService {
         const { TenantRequiredError } = await import('../utils/secureErrors.js');
         throw new TenantRequiredError('Tenant required');
       }
+
+
 
       // ✅ OPTIONAL: Create fingerprint ONLY for redirect URL caching (not for blocking)
       // This is a performance optimization - does NOT block clicks
@@ -217,6 +220,13 @@ export class TrackingService {
         });
         throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
+
+      // ============================================
+      // 🕵️ TEST POSTBACK INTERCEPTION
+      // ============================================
+      // Check if there is an active test session for this tenant
+      // If so, fire the postback immediately (side effect) but continue normal flow
+      await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
 
       // ============================================
       // 3. LOGIC: VALIDATION & CALCULATIONS (Zero DB)
@@ -531,7 +541,99 @@ export class TrackingService {
     });
   }
 
+  async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {
+    try {
+      const sessionKey = `test_session:tenant:${tenantId}`;
+      const session = await redis.hgetall(sessionKey);
 
+      // Only fire if session exists and is waiting
+      if (!session || session.status !== 'waiting') return;
+
+      logger.info('[TEST] Intercepting click for test postback', { tenantId });
+
+      // Generate a Temporary Click ID matching production format
+      // We use this for the test postback payload
+      const tempClickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+
+      // Resolve Global Postback URL or Callback URL
+      const callbackUrl = assignment.callback_url || publisher.global_postback_url;
+
+      let postbackResult = null;
+      if (callbackUrl) {
+        // Mock conversion object (Test Mode)
+        const mockConversion = {
+          conversion_uuid: 'TEST-' + uuidv4(),
+          click_uuid: tempClickUuid, // Use generated ID
+          offer_id: offer.id,
+          publisher_id: publisher.id,
+          publisher_offer_id: assignment.id,
+          tenant_id: tenantId,
+          rcid: query.rcid || '',
+          status: 'approved',
+          amount: 0,
+          payout: 0,
+          ip: extractIP(request),
+          timestamp: new Date().toISOString(),
+          is_test: true // Critical: Prevents logging to DB in PostbackService
+        };
+
+        // Mock click object
+        const mockClick = {
+          click_uuid: tempClickUuid,
+          offer_id: offer.id,
+          publisher_id: publisher.id,
+          publisher_offer_id: assignment.id,
+          tid: query.click_id || query.tid || '', // CRITICAL: Use Affiliate's Click ID from URL
+          rcid: query.rcid || ''
+        };
+
+        logger.info('[TEST] Firing Postback', { url: callbackUrl, click_id: mockClick.tid });
+
+        // Fire Postback
+        postbackResult = await postbackService.sendPublisherPostback(callbackUrl, mockConversion, mockClick);
+      } else {
+        postbackResult = {
+          success: false,
+          error: 'No postback URL configured for this affiliate/assignment'
+        };
+      }
+
+      // Update Session
+      const resultData = {
+        success: true,
+        click_id: tempClickUuid,
+        affiliate_click_id: query.click_id || query.tid || 'N/A',
+        conversion: {
+          conversion_id: 'TEST_CONVERSION',
+          status: 'approved',
+          postback: {
+            url: postbackResult.fired_url || callbackUrl,
+            status: postbackResult.http_status,
+            response: postbackResult.response_body,
+            error: postbackResult.error,
+          }
+        }
+      };
+
+      // Mark as FIRED and expire in 60s (giving UI time to read)
+      await redis.hset(sessionKey, {
+        status: 'fired',
+        result: JSON.stringify(resultData),
+        updated_at: new Date().toISOString()
+      });
+      await redis.expire(sessionKey, 60);
+
+    } catch (err) {
+      logger.error('[TEST] Interception failed', err);
+      // Don't block production flow on test failure
+    }
+  }
+
+  async _checkTestSession(tenantId) {
+    const sessionKey = `test_session:tenant:${tenantId}`;
+    const session = await redis.hgetall(sessionKey);
+    return session && session.status === 'waiting';
+  }
 
   async isTotalCapHit(offer, tenantId) {
     if (!offer.total_cap || offer.total_cap <= 0) return false;

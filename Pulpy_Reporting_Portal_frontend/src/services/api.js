@@ -315,6 +315,15 @@ export const publishersAPI = {
             body: JSON.stringify({ tracking_url }),
         });
     },
+    startTestPostbackSession: async (data) => {
+        return apiRequest('/api/test-postback/start', {
+            method: 'POST',
+            body: JSON.stringify(data), // { affiliate_id, tracking_url }
+        });
+    },
+    checkTestPostbackStatus: async () => {
+        return apiRequest(`/api/test-postback/status`);
+    },
 };
 
 

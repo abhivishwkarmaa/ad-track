@@ -115,7 +115,18 @@ function PostbackTest() {
                 trackingUrl += `${separator}tid=${encodeURIComponent(formData.rcid)}`;
             }
 
-            // Open tracking URL in new tab (real browser click)
+            // 1. Start Test Session
+            const sessionResponse = await publishersAPI.startTestPostbackSession({
+                affiliate_id: formData.affiliateId,
+                tracking_url: trackingUrl
+            });
+
+            if (!sessionResponse.success) {
+                throw new Error(sessionResponse.error || 'Failed to start test session');
+            }
+
+            // 2. Open URL (Unmodified)
+            // Real User Traffic Simulation
             const newWindow = window.open(trackingUrl, '_blank');
 
             if (!newWindow) {
@@ -124,61 +135,85 @@ function PostbackTest() {
                 return;
             }
 
-            // Show initial status
             setResult({
                 success: true,
                 mode: 'BROWSER_CLICK',
                 url: trackingUrl,
                 timestamp: new Date().toISOString(),
-                message: 'Tracking URL opened! Creating test conversion...',
+                message: 'Tracking URL opened! Waiting for click to reach tracker...',
                 status: 'processing'
             });
 
-            toast.success('Tracking URL opened! Creating test conversion...');
+            toast.success('Test initiated! Waiting for results...');
 
-            // Wait a moment for the click to be registered
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // 3. Poll for results
+            let attempts = 0;
+            const maxAttempts = 30; // 60 seconds (2s interval)
 
-            // Create test conversion
-            try {
-                const conversionResponse = await publishersAPI.createTestConversion(trackingUrl);
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                try {
+                    const statusResponse = await publishersAPI.checkTestPostbackStatus();
 
-                if (conversionResponse.success) {
-                    setResult({
-                        success: true,
-                        mode: 'BROWSER_CLICK',
-                        url: trackingUrl,
-                        timestamp: new Date().toISOString(),
-                        message: 'Test conversion created and postback fired successfully!',
-                        status: 'completed',
-                        conversion: conversionResponse.data
-                    });
-                    toast.success('Test conversion created and postback fired!');
-                } else {
-                    throw new Error(conversionResponse.message || 'Failed to create test conversion');
+                    if (statusResponse.success) {
+                        // Backend sets status to 'fired' when complete
+                        if (statusResponse.status === 'fired') {
+                            clearInterval(pollInterval);
+                            setLoading(false);
+
+                            // Merge result data for display
+                            const resultData = statusResponse.result || {};
+                            const conversionData = resultData.conversion || {};
+
+                            setResult({
+                                success: true,
+                                mode: 'BROWSER_CLICK',
+                                url: trackingUrl,
+                                timestamp: new Date().toISOString(),
+                                message: 'Test completed successfully! Postback fired.',
+                                status: 'completed',
+                                conversion: {
+                                    ...conversionData,
+                                    click_id: resultData.click_id, // Ensure click_id is available
+                                    affiliate_click_id: resultData.affiliate_click_id
+                                }
+                            });
+                            toast.success('Test Postback Successfully Fired!');
+                        } else if (statusResponse.status === 'failed') {
+                            clearInterval(pollInterval);
+                            setLoading(false);
+                            setResult(prev => ({
+                                ...prev,
+                                success: false,
+                                status: 'error',
+                                error: statusResponse.result?.error || 'Test failed on server side',
+                                message: 'Test failed.'
+                            }));
+                            toast.error('Test Failed.');
+                        } else if (statusResponse.status === 'expired' || attempts >= maxAttempts) {
+                            clearInterval(pollInterval);
+                            setLoading(false);
+                            setResult(prev => ({
+                                ...prev,
+                                status: 'timeout',
+                                message: 'Test timed out. The click might not have reached the tracker.'
+                            }));
+                            toast.warning('Test timed out. Check your tracking URL.');
+                        }
+                    }
+                } catch (pollErr) {
+                    console.error('Polling error:', pollErr);
                 }
-            } catch (conversionError) {
-                setResult({
-                    success: false,
-                    mode: 'BROWSER_CLICK',
-                    url: trackingUrl,
-                    timestamp: new Date().toISOString(),
-                    error: conversionError.message || 'Failed to create test conversion',
-                    message: 'Tracking URL opened but failed to create test conversion. The click may not have been registered yet.',
-                    status: 'error'
-                });
-                toast.error('Failed to create test conversion: ' + conversionError.message);
-            }
+            }, 2000);
 
         } catch (error) {
             setResult({
                 success: false,
-                error: error.message || 'Failed to open tracking URL',
+                error: error.message || 'Failed to start test',
                 timestamp: new Date().toISOString(),
                 status: 'error'
             });
             toast.error('Test failed: ' + (error.message || 'Unknown error'));
-        } finally {
             setLoading(false);
         }
     };

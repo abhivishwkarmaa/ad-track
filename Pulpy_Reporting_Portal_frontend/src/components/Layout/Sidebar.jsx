@@ -166,12 +166,12 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                 icon: <AffiliateIcon />,
                 text: 'Publishers'
             },
-            // {
-            //     type: 'link',
-            //     path: '/affiliate/postback-test',
-            //     icon: <PostbackIcon />,
-            //     text: 'Test Postback'
-            // },
+            {
+                type: 'link',
+                path: '/affiliate/postback-test',
+                icon: <PostbackIcon />,
+                text: 'Test Postback'
+            },
             {
                 type: 'link',
                 path: '/advertiser/manage',

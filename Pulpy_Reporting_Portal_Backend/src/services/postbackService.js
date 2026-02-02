@@ -847,17 +847,19 @@ export class PostbackService {
             logger.info(`Postback sent to publisher: ${finalUrl} - Status: ${res.statusCode}`);
             logger.info('Publisher Postback Function Success', { url: finalUrl, status: httpStatus });
 
-            // Log success
-            await this.logPostbackAttempt({
-              publisher_id: conversion.publisher_id || click?.publisher_id,
-              conversion_id: conversion.id,
-              affiliate_click_id: affiliateClickId,
-              fired_url: finalUrl,
-              http_status: httpStatus,
-              response_body: responseBody,
-              execution_time_ms: Date.now() - startTime,
-              tenant_id: conversion.tenant_id
-            });
+            // Log success (Skip if test)
+            if (!conversion.is_test) {
+              await this.logPostbackAttempt({
+                publisher_id: conversion.publisher_id || click?.publisher_id,
+                conversion_id: conversion.id,
+                affiliate_click_id: affiliateClickId,
+                fired_url: finalUrl,
+                http_status: httpStatus,
+                response_body: responseBody,
+                execution_time_ms: Date.now() - startTime,
+                tenant_id: conversion.tenant_id
+              });
+            }
 
             resolve({
               success: httpStatus >= 200 && httpStatus < 300,
@@ -873,18 +875,20 @@ export class PostbackService {
           logger.error(`PostbackService.sendPublisherPostback error for ${finalUrl}:`, err.message);
           logger.error('Publisher Postback Function Failed', { url: finalUrl, error: errorMessage });
 
-          // Log error
-          await this.logPostbackAttempt({
-            publisher_id: conversion.publisher_id || click?.publisher_id,
-            conversion_id: conversion.id,
-            affiliate_click_id: affiliateClickId,
-            fired_url: finalUrl,
-            http_status: 0,
-            response_body: null,
-            error_message: errorMessage,
-            execution_time_ms: Date.now() - startTime,
-            tenant_id: conversion.tenant_id
-          });
+          // Log error (Skip if test)
+          if (!conversion.is_test) {
+            await this.logPostbackAttempt({
+              publisher_id: conversion.publisher_id || click?.publisher_id,
+              conversion_id: conversion.id,
+              affiliate_click_id: affiliateClickId,
+              fired_url: finalUrl,
+              http_status: 0,
+              response_body: null,
+              error_message: errorMessage,
+              execution_time_ms: Date.now() - startTime,
+              tenant_id: conversion.tenant_id
+            });
+          }
 
           resolve({
             success: false,
@@ -916,17 +920,19 @@ export class PostbackService {
 
         // Use an IIFE to handle async logging in catch block
         (async () => {
-          await this.logPostbackAttempt({
-            publisher_id: conversion.publisher_id || click?.publisher_id,
-            conversion_id: conversion.id,
-            affiliate_click_id: affiliateClickId,
-            fired_url: finalUrl,
-            http_status: 0,
-            response_body: null,
-            error_message: errorMessage,
-            execution_time_ms: Date.now() - startTime,
-            tenant_id: conversion.tenant_id
-          });
+          if (!conversion.is_test) {
+            await this.logPostbackAttempt({
+              publisher_id: conversion.publisher_id || click?.publisher_id,
+              conversion_id: conversion.id,
+              affiliate_click_id: affiliateClickId,
+              fired_url: finalUrl,
+              http_status: 0,
+              response_body: null,
+              error_message: errorMessage,
+              execution_time_ms: Date.now() - startTime,
+              tenant_id: conversion.tenant_id
+            });
+          }
         })();
 
         resolve({
