@@ -71,12 +71,12 @@ const LiveLogs = () => {
     useEffect(() => {
         let interval;
         if (autoRefresh) {
-            interval = setInterval(fetchLogs, 5000);
+            interval = setInterval(() => fetchLogs(true), 5000);
         }
         return () => clearInterval(interval);
     }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher]);
 
-    const fetchLogs = async () => {
+    const fetchLogs = async (isBackground = false) => {
         setLoading(true);
         try {
             const params = { limit, page: 1 };
@@ -85,7 +85,7 @@ const LiveLogs = () => {
                 if (selectedOffer) params.offer_id = selectedOffer;
                 if (selectedPublisher) params.publisher_id = selectedPublisher;
 
-                const response = await dashboardAPI.getDetailed(params);
+                const response = await dashboardAPI.getDetailed(params, { trackActivity: !isBackground });
                 if (response.success && response.data) {
                     setData(response.data);
                 }
@@ -94,7 +94,7 @@ const LiveLogs = () => {
                 if (selectedOffer) params.offer_id = selectedOffer;
                 if (selectedPublisher) params.publisher_id = selectedPublisher;
 
-                const response = await dashboardAPI.getConversions(params);
+                const response = await dashboardAPI.getConversions(params, { trackActivity: !isBackground });
                 if (response.success && response.data) {
                     setData(response.data);
                 }

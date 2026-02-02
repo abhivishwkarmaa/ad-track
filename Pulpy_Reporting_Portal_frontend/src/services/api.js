@@ -1,3 +1,5 @@
+import { getLastActivity, markActivity, broadcastLogout } from '../utils/activityTracker';
+
 // 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
 // ✅ CORRECT: Use relative paths for API calls
 // Frontend operates on tenant subdomain (e.g., tenant1.domain.com)
@@ -13,36 +15,102 @@ if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
 }
 
 const BASE_URL = '';
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
-// Get token from localStorage
-const getToken = () => {
+let accessToken = null;
+
+export const setAccessToken = (token) => {
+    accessToken = token || null;
+};
+
+export const clearAccessToken = () => {
+    accessToken = null;
+};
+
+export const getAccessToken = () => accessToken;
+
+const getStoredUser = () => {
     const user = localStorage.getItem('track-myads_user');
-    if (user) {
-        try {
-            const parsedUser = JSON.parse(user);
-            return parsedUser.token;
-        } catch (e) {
-            return null;
-        }
+    if (!user) return null;
+    try {
+        return JSON.parse(user);
+    } catch (e) {
+        return null;
     }
-    return null;
+};
+
+const isIdle = () => Date.now() - getLastActivity() > IDLE_TIMEOUT_MS;
+
+const clearClientSession = () => {
+    clearAccessToken();
+    localStorage.removeItem('track-myads_user');
+    localStorage.removeItem('bng_token');
+    broadcastLogout();
+};
+
+const redirectToLogin = () => {
+    window.location.href = '/login';
+};
+
+const refreshAccessToken = async () => {
+    try {
+        const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+        });
+
+        const contentType = response.headers.get('content-type');
+        const data = contentType && contentType.includes('application/json')
+            ? await response.json()
+            : null;
+
+        if (!response.ok || !data?.success || !data?.data?.token) {
+            return false;
+        }
+
+        setAccessToken(data.data.token);
+        return true;
+    } catch (error) {
+        return false;
+    }
 };
 
 // API request helper
-const apiRequest = async (endpoint, options = {}) => {
-    const token = getToken();
+const apiRequest = async (endpoint, options = {}, meta = {}) => {
+    const {
+        trackActivity = true,
+        skipAuth = false,
+        skipIdleCheck = false,
+        allowUnauthorized = false,
+        isRetry = false,
+    } = meta;
+
     const url = `${BASE_URL}${endpoint}`;
+    const storedUser = getStoredUser();
+
+    if (!skipIdleCheck && storedUser && isIdle()) {
+        clearClientSession();
+        redirectToLogin();
+        throw new Error('SESSION_EXPIRED');
+    }
+
+    if (trackActivity) {
+        markActivity();
+    }
 
     // ✅ CRITICAL: Only set Content-Type for requests with body (POST, PUT, PATCH)
     // DELETE and GET requests don't need Content-Type if they have no body
     const hasBody = options.body !== undefined && options.body !== null;
     const needsContentType = hasBody && (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH' || !options.method);
+    const token = accessToken;
 
     const config = {
         ...options,
+        credentials: 'include',
         headers: {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
-            ...(token && { 'Authorization': `Bearer ${token}` }),
+            ...(!skipAuth && token && { 'Authorization': `Bearer ${token}` }),
+            ...(trackActivity && { 'X-User-Activity': '1' }),
             // 🔒 STRICT: Never add tenant headers (x-tenant-slug, x-tenant-id, etc.)
             // Tenant is resolved by backend from Host header (subdomain) ONLY
             ...options.headers,
@@ -72,24 +140,17 @@ const apiRequest = async (endpoint, options = {}) => {
             }
         }
 
-        // ✅ AUTO-LOGOUT: Check for 401 Unauthorized or token-related errors
-        if (response.status === 401) {
-            const errorMessage = data?.message || data?.error || '';
-            const isTokenError = errorMessage.toLowerCase().includes('token') ||
-                errorMessage.toLowerCase().includes('unauthorized') ||
-                errorMessage.toLowerCase().includes('expired') ||
-                errorMessage.toLowerCase().includes('invalid');
-
-            if (isTokenError) {
-                // ✅ Silent logout - no error messages shown to user
-                localStorage.removeItem('track-myads_user');
-
-                // Redirect to login page
-                window.location.href = '/login';
-
-                // Throw error to stop further execution
-                throw new Error('SESSION_EXPIRED');
+        if (response.status === 401 && !allowUnauthorized) {
+            if (!skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
+                const refreshed = await refreshAccessToken();
+                if (refreshed) {
+                    return apiRequest(endpoint, options, { ...meta, isRetry: true });
+                }
             }
+
+            clearClientSession();
+            redirectToLogin();
+            throw new Error('SESSION_EXPIRED');
         }
 
         if (response.status === 502) {
@@ -121,27 +182,66 @@ const apiRequest = async (endpoint, options = {}) => {
 // Auth API
 export const authAPI = {
     login: async (email, password) => {
-        return apiRequest('/api/auth/login', {
+        const response = await apiRequest('/api/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            allowUnauthorized: true,
+        });
+
+        if (response?.success && response?.data?.token) {
+            setAccessToken(response.data.token);
+        }
+
+        return response;
+    },
+    refresh: async () => {
+        const success = await refreshAccessToken();
+        if (!success) {
+            throw new Error('SESSION_EXPIRED');
+        }
+        return { success: true };
+    },
+    logout: async () => {
+        return apiRequest('/api/auth/logout', {
+            method: 'POST',
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            trackActivity: false,
+            allowUnauthorized: true,
         });
     },
     requestPasswordResetOtp: async (email) => {
         return apiRequest('/api/auth/forgot-password/request-otp', {
             method: 'POST',
             body: JSON.stringify({ email }),
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            allowUnauthorized: true,
         });
     },
     verifyPasswordResetOtp: async (email, otp) => {
         return apiRequest('/api/auth/forgot-password/verify-otp', {
             method: 'POST',
             body: JSON.stringify({ email, otp }),
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            allowUnauthorized: true,
         });
     },
     resetPassword: async (resetToken, newPassword) => {
         return apiRequest('/api/auth/forgot-password/reset', {
             method: 'POST',
             body: JSON.stringify({ resetToken, newPassword }),
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            allowUnauthorized: true,
         });
     },
     requestChangePasswordOtp: async () => {
@@ -201,18 +301,18 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/summary?${queryString}`);
     },
-    getDetailed: async (params = {}) => {
+    getDetailed: async (params = {}, meta) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/detailed?${queryString}`);
+        return apiRequest(`/api/admin/reports/detailed?${queryString}`, {}, meta);
     },
     getPublisherConversions: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`);
     },
     // New Conversion Logs
-    getConversions: async (params = {}) => {
+    getConversions: async (params = {}, meta) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/conversions?${queryString}`);
+        return apiRequest(`/api/admin/reports/conversions?${queryString}`, {}, meta);
     },
     // Offer Statistics
     getOfferStatistics: async (params = {}) => {
@@ -321,8 +421,8 @@ export const publishersAPI = {
             body: JSON.stringify(data), // { affiliate_id, tracking_url }
         });
     },
-    checkTestPostbackStatus: async (affiliateId, offerId) => {
-        return apiRequest(`/api/test-postback/status?affiliate_id=${affiliateId}&offer_id=${offerId}`);
+    checkTestPostbackStatus: async (affiliateId, offerId, meta) => {
+        return apiRequest(`/api/test-postback/status?affiliate_id=${affiliateId}&offer_id=${offerId}`, {}, meta);
     },
 };
 

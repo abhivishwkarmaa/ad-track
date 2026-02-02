@@ -6,10 +6,30 @@ import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import emailService from '../services/emailService.js';
 import crypto from 'crypto';
+import redis from '../config/redis.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
+const ACCESS_TOKEN_TTL = '5m';
+const REFRESH_TTL_SECONDS = 15 * 60;
+const SESSION_TTL_MS = 15 * 60 * 1000;
+const REFRESH_COOKIE_NAME = 'refresh_token';
+
+const generateRefreshToken = () => {
+  if (crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return crypto.randomBytes(32).toString('hex');
+};
+
+const getRefreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/',
+  maxAge: REFRESH_TTL_SECONDS,
+});
 
 export class AuthController {
   async register(request, reply) {
@@ -107,8 +127,22 @@ export class AuthController {
       const token = jwt.sign(
         { id: adminId, email, name, role, tenant_id: tenantId, token_type: tokenType },
         jwtSecret,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        { expiresIn: ACCESS_TOKEN_TTL }
       );
+
+      const refreshToken = generateRefreshToken();
+      await redis.set(
+        `auth:session:${refreshToken}`,
+        JSON.stringify({
+          user_id: adminId,
+          tenant_id: tenantId,
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
+
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
       logger.info('[REGISTER] Registration successful', {
         adminId: adminId,
@@ -319,8 +353,22 @@ export class AuthController {
           token_type: tokenType
         },
         jwtSecret,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        { expiresIn: ACCESS_TOKEN_TTL }
       );
+
+      const refreshToken = generateRefreshToken();
+      await redis.set(
+        `auth:session:${refreshToken}`,
+        JSON.stringify({
+          user_id: admin.id,
+          tenant_id: tenantId,
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
+
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
       logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
@@ -359,6 +407,176 @@ export class AuthController {
       });
     } catch (error) {
       logger.error('AuthController.getProfile error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async refresh(request, reply) {
+    try {
+      const refreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
+      if (!refreshToken) {
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Missing refresh token',
+        });
+      }
+
+      const sessionKey = `auth:session:${refreshToken}`;
+      const sessionRaw = await redis.get(sessionKey);
+
+      if (!sessionRaw) {
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Session expired',
+        });
+      }
+
+      let session;
+      try {
+        session = JSON.parse(sessionRaw);
+      } catch (parseError) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Session invalid',
+        });
+      }
+
+      if (Date.now() - session.last_activity > SESSION_TTL_MS) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Session expired',
+        });
+      }
+
+      let [rows] = [];
+      try {
+        [rows] = await pool.query(
+          'SELECT id, email, name, role, tenant_id FROM admin_users WHERE id = ?',
+          [session.user_id]
+        );
+      } catch (error) {
+        if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
+          logger.warn('tenant_id column not found in admin_users table. Please run migration.');
+          [rows] = await pool.query(
+            'SELECT id, email, name, role FROM admin_users WHERE id = ?',
+            [session.user_id]
+          );
+        } else {
+          throw error;
+        }
+      }
+
+      if (!rows || rows.length === 0) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'User not found',
+        });
+      }
+
+      const admin = rows[0];
+      const tenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
+      const sessionTenantId = session?.tenant_id !== undefined ? session?.tenant_id : null;
+
+      if (sessionTenantId !== null && tenantId !== null && parseInt(sessionTenantId) !== parseInt(tenantId)) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Session tenant mismatch',
+        });
+      }
+
+      if (sessionTenantId === null && tenantId !== null) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Session tenant mismatch',
+        });
+      }
+
+      const requestTenantId = getTenantIdFromRequest(request);
+      const isAdminSubdomain = request.isAdminSubdomain || false;
+
+      if (!tenantId) {
+        if (!isAdminSubdomain) {
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid session context',
+          });
+        }
+      } else {
+        if (!requestTenantId || parseInt(requestTenantId) !== parseInt(tenantId)) {
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid session context',
+          });
+        }
+        if (request.tenant && request.tenant.status !== 'active') {
+          return reply.code(403).send({
+            success: false,
+            error: 'Tenant Suspended',
+            message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+          });
+        }
+      }
+
+      const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
+      const tokenType = tenantId ? 'tenant' : 'admin';
+      const token = jwt.sign(
+        {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          role: admin.role,
+          tenant_id: tenantId,
+          token_type: tokenType
+        },
+        jwtSecret,
+        { expiresIn: ACCESS_TOKEN_TTL }
+      );
+
+      return reply.send({
+        success: true,
+        data: {
+          token,
+        },
+      });
+    } catch (error) {
+      logger.error('AuthController.refresh error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async logout(request, reply) {
+    try {
+      const refreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
+      if (refreshToken) {
+        await redis.del(`auth:session:${refreshToken}`);
+      }
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.send({
+        success: true,
+        message: 'Logged out',
+      });
+    } catch (error) {
+      logger.error('AuthController.logout error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }

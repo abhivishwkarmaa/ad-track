@@ -2,10 +2,13 @@ import jwt from 'jsonwebtoken';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getTenantId } from './tenant.js';
+import redis from '../config/redis.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
+const REFRESH_COOKIE_NAME = 'refresh_token';
+const SESSION_TTL_MS = 15 * 60 * 1000;
 
 /**
  * JWT authentication middleware
@@ -59,6 +62,74 @@ export async function authenticateAdmin(request, reply) {
       }
     }
     
+    const refreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
+
+    if (!refreshToken) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Missing refresh token',
+      });
+    }
+
+    const sessionKey = `auth:session:${refreshToken}`;
+    const sessionRaw = await redis.get(sessionKey);
+
+    if (!sessionRaw) {
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session expired',
+      });
+    }
+
+    let session;
+    try {
+      session = JSON.parse(sessionRaw);
+    } catch (parseError) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session invalid',
+      });
+    }
+
+    if (session?.user_id && decoded?.id && parseInt(session.user_id) !== parseInt(decoded.id)) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session mismatch',
+      });
+    }
+
+    if (Date.now() - session.last_activity > SESSION_TTL_MS) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session expired',
+      });
+    }
+
+    // Activity tracking: update last_activity only for user-initiated requests
+    const isUserActivity = request.headers['x-user-activity'] === '1';
+    if (isUserActivity) {
+      await redis.set(
+        sessionKey,
+        JSON.stringify({
+          ...session,
+          last_activity: Date.now(),
+        }),
+        'KEEPTTL'
+      );
+    }
+
     // Get admin info from database (handle tenant_id column gracefully)
     let [rows] = [];
     try {
@@ -93,6 +164,23 @@ export async function authenticateAdmin(request, reply) {
     
     // Get tenant_id (may be undefined if column doesn't exist)
     const tenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
+    const sessionTenantId = session?.tenant_id !== undefined ? session?.tenant_id : null;
+
+    if (sessionTenantId !== null && tenantId !== null && parseInt(sessionTenantId) !== parseInt(tenantId)) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session tenant mismatch',
+      });
+    }
+
+    if (sessionTenantId === null && tenantId !== null) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session tenant mismatch',
+      });
+    }
     
     // 🔒 STRICT TENANT ISOLATION ENFORCEMENT
     // Rule 1: Super admins (tenant_id = NULL) can ONLY access via admin subdomain

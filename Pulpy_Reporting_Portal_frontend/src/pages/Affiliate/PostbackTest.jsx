@@ -184,7 +184,11 @@ function PostbackTest() {
             const pollInterval = setInterval(async () => {
                 attempts++;
                 try {
-                    const statusResponse = await publishersAPI.checkTestPostbackStatus(formData.affiliateId, formData.offerId);
+                    const statusResponse = await publishersAPI.checkTestPostbackStatus(
+                        formData.affiliateId,
+                        formData.offerId,
+                        { trackActivity: false }
+                    );
 
                     if (statusResponse.success) {
                         // Backend sets status to 'success' (matching Redis value) when complete

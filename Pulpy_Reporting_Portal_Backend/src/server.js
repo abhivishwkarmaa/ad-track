@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import dotenv from 'dotenv';
@@ -39,13 +40,15 @@ async function initializeServer() {
     origin: true, // allow all origins/ports
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-User-Activity'],
     exposedHeaders: ['Content-Length', 'Content-Type'],
   });
 
   await fastify.register(helmet, {
     contentSecurityPolicy: false, // Allow tracking pixels
   });
+
+  await fastify.register(cookie);
 
   await fastify.register(rateLimit, {
     max: 5000,

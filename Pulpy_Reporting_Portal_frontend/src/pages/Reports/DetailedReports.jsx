@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
+import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI, authAPI, getAccessToken } from '../../services/api';
 import './Reports.css';
 
 // Icons
@@ -264,12 +264,16 @@ function DetailedReports() {
             // We use fetch with blob to handle auth headers if needed, or just window.open if cookies usage
             // Since we use Bearer token, we must use fetch
 
-            const token = localStorage.getItem('track-myads_user') ? JSON.parse(localStorage.getItem('track-myads_user')).token : null;
+            if (!getAccessToken()) {
+                await authAPI.refresh();
+            }
+            const token = getAccessToken();
 
             const response = await fetch(`/api/admin/reports/detailed?${params.toString()}`, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                    ...(token && { 'Authorization': `Bearer ${token}` })
+                },
+                credentials: 'include'
             });
 
             if (!response.ok) throw new Error('Export failed');
