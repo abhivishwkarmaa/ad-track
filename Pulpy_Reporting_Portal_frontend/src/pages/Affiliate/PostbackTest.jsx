@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { publishersAPI } from '../../services/api';
+import { publishersAPI, offersAPI } from '../../services/api';
 import './Affiliate.css';
 
 // Simple check icon
@@ -27,11 +27,14 @@ function PostbackTest() {
     const [affiliates, setAffiliates] = useState([]);
     const [loadingAffiliates, setLoadingAffiliates] = useState(true);
     const [selectedAffiliate, setSelectedAffiliate] = useState(null);
+    const [offers, setOffers] = useState([]);
+    const [loadingOffers, setLoadingOffers] = useState(true);
 
     const [formData, setFormData] = useState({
         trackingUrl: '',
-        affiliateId: '', // Optional - for postback URL preview
-        rcid: '', // Optional - for custom tracking ID
+        affiliateId: '',
+        offerId: '', // Added offerId requirement
+        rcid: '',
     });
 
     useEffect(() => {
@@ -51,7 +54,24 @@ function PostbackTest() {
             }
         };
 
+        const fetchOffers = async () => {
+            try {
+                const response = await offersAPI.getOffers({ limit: 1000 });
+                if (response.success) {
+                    setOffers(response.data);
+                } else {
+                    toast.error('Failed to load offers');
+                }
+            } catch (error) {
+                console.error('Error fetching offers:', error);
+                toast.error('Error fetching offers');
+            } finally {
+                setLoadingOffers(false);
+            }
+        };
+
         fetchAffiliates();
+        fetchOffers();
     }, [refreshKey]);
 
 
@@ -91,6 +111,16 @@ function PostbackTest() {
             return;
         }
 
+        if (!formData.affiliateId) {
+            toast.error('Please select a Publisher');
+            return;
+        }
+
+        if (!formData.offerId) {
+            toast.error('Please select an Offer');
+            return;
+        }
+
         // Validate URL format
         try {
             const url = new URL(formData.trackingUrl);
@@ -118,6 +148,7 @@ function PostbackTest() {
             // 1. Start Test Session
             const sessionResponse = await publishersAPI.startTestPostbackSession({
                 affiliate_id: formData.affiliateId,
+                offer_id: formData.offerId,
                 tracking_url: trackingUrl
             });
 
@@ -153,11 +184,11 @@ function PostbackTest() {
             const pollInterval = setInterval(async () => {
                 attempts++;
                 try {
-                    const statusResponse = await publishersAPI.checkTestPostbackStatus();
+                    const statusResponse = await publishersAPI.checkTestPostbackStatus(formData.affiliateId, formData.offerId);
 
                     if (statusResponse.success) {
-                        // Backend sets status to 'fired' when complete
-                        if (statusResponse.status === 'fired') {
+                        // Backend sets status to 'success' (matching Redis value) when complete
+                        if (statusResponse.status === 'success') {
                             clearInterval(pollInterval);
                             setLoading(false);
 
@@ -264,7 +295,28 @@ function PostbackTest() {
                                 </div>
 
                                 <div className="form-group">
-                                    <label className="form-label">Publisher (Optional - for postback preview)</label>
+                                    <label className="form-label required">Offer</label>
+                                    <select
+                                        className="form-control"
+                                        name="offerId"
+                                        value={formData.offerId}
+                                        onChange={handleChange}
+                                        disabled={loadingOffers}
+                                        required
+                                    >
+                                        <option value="">
+                                            {loadingOffers ? 'Loading offers...' : 'Select Offer'}
+                                        </option>
+                                        {offers.map(offer => (
+                                            <option key={offer.id} value={offer.id}>
+                                                {offer.name} ({offer.id})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="form-group">
+                                    <label className="form-label required">Publisher</label>
                                     <select
                                         className="form-control"
                                         name="affiliateId"
@@ -273,7 +325,7 @@ function PostbackTest() {
                                         disabled={loadingAffiliates}
                                     >
                                         <option value="">
-                                            {loadingAffiliates ? 'Loading publishers...' : 'Select Publisher (Optional)'}
+                                            {loadingAffiliates ? 'Loading publishers...' : 'Select Publisher'}
                                         </option>
                                         {affiliates.map(affiliate => (
                                             <option key={affiliate.id} value={affiliate.id}>

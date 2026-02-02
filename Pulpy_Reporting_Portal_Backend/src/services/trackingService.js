@@ -225,8 +225,10 @@ export class TrackingService {
       // 🕵️ TEST POSTBACK INTERCEPTION
       // ============================================
       // Check if there is an active test session for this tenant
-      // If so, fire the postback immediately (side effect) but continue normal flow
-      await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
+      const testResult = await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
+      if (testResult) {
+        return testResult; // 🛑 EXIT EARLY: No Production DB Writes
+      }
 
       // ============================================
       // 3. LOGIC: VALIDATION & CALCULATIONS (Zero DB)
@@ -543,97 +545,82 @@ export class TrackingService {
 
   async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {
     try {
-      const sessionKey = `test_session:tenant:${tenantId}`;
-      const session = await redis.hgetall(sessionKey);
+      // ✅ Key Pattern: test:postback:{tenant_id}:{publisher_id}:{offer_id}
+      const key = `test:postback:${tenantId}:${publisher.id}:${offer.id}`;
+      const sessionRaw = await redis.get(key);
 
-      // Only fire if session exists and is waiting
-      if (!session || session.status !== 'waiting') return;
+      if (!sessionRaw) return null;
 
-      logger.info('[TEST] Intercepting click for test postback', { tenantId });
+      const session = JSON.parse(sessionRaw);
 
-      // Generate a Temporary Click ID matching production format
-      // We use this for the test postback payload
-      const tempClickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+      // ✅ Strict Safety: Only process if status is 'pending' AND no click captured yet
+      if (session.status !== 'pending' || session.affiliate_click_id) {
+        return null;
+      }
 
-      // Resolve Global Postback URL or Callback URL
-      const callbackUrl = assignment.callback_url || publisher.global_postback_url;
+      logger.info('[TEST] Intercepting click for test postback (Redis)', {
+        tenantId,
+        publisherId: publisher.id,
+        offerId: offer.id
+      });
 
-      let postbackResult = null;
-      if (callbackUrl) {
-        // Mock conversion object (Test Mode)
+      // Determine Affiliate's Click ID
+      const incomingTid = query.click_id || query.tid;
+
+      if (!incomingTid) {
+        logger.warn('[TEST] No click_id/tid provided in test URL', { query });
+      }
+
+      // Update Redis Session -> Click Received
+      session.affiliate_click_id = incomingTid || 'MISSING_ID';
+      session.status = 'click_received';
+      await redis.set(key, JSON.stringify(session), 'KEEPTTL');
+
+      // Fire Global Postback Immediately
+      const callbackUrl = session.postback_url;
+
+      if (callbackUrl && incomingTid) {
         const mockConversion = {
           conversion_uuid: 'TEST-' + uuidv4(),
-          click_uuid: tempClickUuid, // Use generated ID
+          click_uuid: 'TEST-CLICK-' + uuidv4(),
           offer_id: offer.id,
           publisher_id: publisher.id,
-          publisher_offer_id: assignment.id,
           tenant_id: tenantId,
-          rcid: query.rcid || '',
           status: 'approved',
           amount: 0,
           payout: 0,
-          ip: extractIP(request),
-          timestamp: new Date().toISOString(),
-          is_test: true // Critical: Prevents logging to DB in PostbackService
+          is_test: true
         };
+        const mockClick = { tid: incomingTid };
 
-        // Mock click object
-        const mockClick = {
-          click_uuid: tempClickUuid,
-          offer_id: offer.id,
-          publisher_id: publisher.id,
-          publisher_offer_id: assignment.id,
-          tid: query.click_id || query.tid || '', // CRITICAL: Use Affiliate's Click ID from URL
-          rcid: query.rcid || ''
-        };
+        logger.info('[TEST] Firing Postback', { url: callbackUrl, click_id: incomingTid });
 
-        logger.info('[TEST] Firing Postback', { url: callbackUrl, click_id: mockClick.tid });
+        await postbackService.sendPublisherPostback(callbackUrl, mockConversion, mockClick);
 
-        // Fire Postback
-        postbackResult = await postbackService.sendPublisherPostback(callbackUrl, mockConversion, mockClick);
-      } else {
-        postbackResult = {
-          success: false,
-          error: 'No postback URL configured for this affiliate/assignment'
-        };
+        session.postback_fired = true;
       }
 
-      // Update Session
-      const resultData = {
-        success: true,
-        click_id: tempClickUuid,
-        affiliate_click_id: query.click_id || query.tid || 'N/A',
-        conversion: {
-          conversion_id: 'TEST_CONVERSION',
-          status: 'approved',
-          postback: {
-            url: postbackResult.fired_url || callbackUrl,
-            status: postbackResult.http_status,
-            response: postbackResult.response_body,
-            error: postbackResult.error,
-          }
-        }
-      };
+      // Update Redis Session -> Completed
+      session.status = 'completed';
+      await redis.set(key, JSON.stringify(session), 'KEEPTTL');
 
-      // Mark as FIRED and expire in 60s (giving UI time to read)
-      await redis.hset(sessionKey, {
-        status: 'fired',
-        result: JSON.stringify(resultData),
-        updated_at: new Date().toISOString()
-      });
-      await redis.expire(sessionKey, 60);
+      // Return Redirect to Controller (Bypassing DB Insert)
+      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+      const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+
+      return {
+        redirect: redirectUrl,
+        clickId: clickUuid
+      };
 
     } catch (err) {
       logger.error('[TEST] Interception failed', err);
-      // Don't block production flow on test failure
+      // If test logic fails, we return null to allow potential normal flow or just fail safely
+      return null;
     }
   }
 
-  async _checkTestSession(tenantId) {
-    const sessionKey = `test_session:tenant:${tenantId}`;
-    const session = await redis.hgetall(sessionKey);
-    return session && session.status === 'waiting';
-  }
+
 
   async isTotalCapHit(offer, tenantId) {
     if (!offer.total_cap || offer.total_cap <= 0) return false;

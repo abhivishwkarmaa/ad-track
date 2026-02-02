@@ -321,8 +321,8 @@ export const publishersAPI = {
             body: JSON.stringify(data), // { affiliate_id, tracking_url }
         });
     },
-    checkTestPostbackStatus: async () => {
-        return apiRequest(`/api/test-postback/status`);
+    checkTestPostbackStatus: async (affiliateId, offerId) => {
+        return apiRequest(`/api/test-postback/status?affiliate_id=${affiliateId}&offer_id=${offerId}`);
     },
 };
 
