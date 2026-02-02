@@ -549,37 +549,67 @@ export class TrackingService {
       const key = `test:postback:${tenantId}:${publisher.id}:${offer.id}`;
       const sessionRaw = await redis.get(key);
 
+      // 🚦 NO TEST SESSION = NORMAL PRODUCTION FLOW
       if (!sessionRaw) return null;
 
       const session = JSON.parse(sessionRaw);
 
       // ✅ Strict Safety: Only process if status is 'pending' AND no click captured yet
       if (session.status !== 'pending' || session.affiliate_click_id) {
+        logger.debug('[TEST] Session already processed or not pending', {
+          status: session.status,
+          has_click_id: !!session.affiliate_click_id
+        });
         return null;
       }
 
-      logger.info('[TEST] Intercepting click for test postback (Redis)', {
+      logger.info('[TEST] 🧪 TEST MODE ACTIVATED - Intercepting click for test postback', {
         tenantId,
         publisherId: publisher.id,
-        offerId: offer.id
+        offerId: offer.id,
+        key
       });
 
-      // Determine Affiliate's Click ID
-      const incomingTid = query.click_id || query.tid;
+      // 🔍 Extract Affiliate's Click ID from URL
+      const affiliateClickId = query.click_id || query.tid || null;
 
-      if (!incomingTid) {
-        logger.warn('[TEST] No click_id/tid provided in test URL', { query });
+      // 🚨 CRITICAL: If no click_id, mark as FAILED and continue redirect
+      if (!affiliateClickId) {
+        logger.warn('[TEST] ❌ No click_id/tid in URL - marking test as FAILED', {
+          query,
+          available_params: Object.keys(query)
+        });
+
+        // Update Redis: Mark as failed
+        session.status = 'failed';
+        session.completed_at = Date.now();
+        await redis.set(key, JSON.stringify(session), 'KEEPTTL');
+
+        // Continue redirect normally (no postback fired)
+        const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+        const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+
+        return {
+          redirect: redirectUrl,
+          clickId: clickUuid
+        };
       }
 
+      // ✅ Click ID found - proceed with test
+      logger.info('[TEST] ✓ Affiliate click_id extracted', {
+        affiliate_click_id: affiliateClickId
+      });
+
       // Update Redis Session -> Click Received
-      session.affiliate_click_id = incomingTid || 'MISSING_ID';
+      session.affiliate_click_id = affiliateClickId;
       session.status = 'click_received';
       await redis.set(key, JSON.stringify(session), 'KEEPTTL');
 
-      // Fire Global Postback Immediately
+      // 🔥 Fire Global Postback Immediately
       const callbackUrl = session.postback_url;
+      let postbackResult = null;
 
-      if (callbackUrl && incomingTid) {
+      if (callbackUrl) {
         const mockConversion = {
           conversion_uuid: 'TEST-' + uuidv4(),
           click_uuid: 'TEST-CLICK-' + uuidv4(),
@@ -591,22 +621,72 @@ export class TrackingService {
           payout: 0,
           is_test: true
         };
-        const mockClick = { tid: incomingTid };
+        const mockClick = { tid: affiliateClickId };
 
-        logger.info('[TEST] Firing Postback', { url: callbackUrl, click_id: incomingTid });
+        logger.info('[TEST] 🚀 Firing Postback', {
+          url: callbackUrl,
+          click_id: affiliateClickId
+        });
 
-        await postbackService.sendPublisherPostback(callbackUrl, mockConversion, mockClick);
+        try {
+          // Fire postback and capture response
+          postbackResult = await postbackService.sendPublisherPostback(
+            callbackUrl,
+            mockConversion,
+            mockClick
+          );
 
-        session.postback_fired = true;
+          session.postback_fired = true;
+          session.postback_response = {
+            status: postbackResult?.status || 200,
+            response: postbackResult?.response || 'OK',
+            latency_ms: postbackResult?.latency_ms || 0,
+            fired_at: Date.now()
+          };
+
+          logger.info('[TEST] ✅ Postback fired successfully', {
+            status: postbackResult?.status,
+            latency: postbackResult?.latency_ms
+          });
+
+        } catch (postbackErr) {
+          logger.error('[TEST] ❌ Postback firing failed', {
+            error: postbackErr.message,
+            url: callbackUrl
+          });
+
+          session.postback_fired = false;
+          session.postback_response = {
+            error: postbackErr.message,
+            fired_at: Date.now()
+          };
+        }
+      } else {
+        logger.warn('[TEST] ⚠️ No postback URL configured for publisher', {
+          publisher_id: publisher.id
+        });
       }
 
       // Update Redis Session -> Completed
       session.status = 'completed';
+      session.completed_at = Date.now();
       await redis.set(key, JSON.stringify(session), 'KEEPTTL');
 
-      // Return Redirect to Controller (Bypassing DB Insert)
+      logger.info('[TEST] ✅ Test completed successfully', {
+        affiliate_click_id: affiliateClickId,
+        postback_fired: session.postback_fired
+      });
+
+      // 🚨 ABSOLUTE RULE: Return Redirect WITHOUT Any DB Writes
+      // ❌ NO clicks table insert
+      // ❌ NO conversions table insert
+      // ❌ NO postback_logs table insert
       const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
       const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+
+      logger.info('[TEST] 🔄 Returning redirect (ZERO DB WRITES)', {
+        redirect_url: redirectUrl.substring(0, 100) + '...'
+      });
 
       return {
         redirect: redirectUrl,
@@ -614,8 +694,13 @@ export class TrackingService {
       };
 
     } catch (err) {
-      logger.error('[TEST] Interception failed', err);
-      // If test logic fails, we return null to allow potential normal flow or just fail safely
+      logger.error('[TEST] ❌ Test interception failed catastrophically', {
+        error: err.message,
+        stack: err.stack
+      });
+
+      // If test logic fails, return null to fall back to normal production flow
+      // This ensures production traffic is never blocked by test failures
       return null;
     }
   }

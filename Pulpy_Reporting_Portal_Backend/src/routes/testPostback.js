@@ -43,18 +43,20 @@ async function testPostbackRoutes(fastify, options) {
             const key = `test:postback:${tenantId}:${affiliate_id}:${offer_id}`;
 
             const sessionData = {
-                status: 'pending',
+                status: 'pending', // pending | click_received | completed | failed
                 started_at: Date.now(),
                 affiliate_click_id: null,
                 postback_url: postbackUrl,
-                postback_fired: false
+                postback_fired: false,
+                postback_response: null,
+                completed_at: null
             };
 
             // Remove any existing key (overwrite)
             // await redis.del(key); // set replaces anyway
 
-            // Create new session with 120s TTL
-            await redis.set(key, JSON.stringify(sessionData), 'EX', 120);
+            // Create new session with 900s TTL (15 minutes)
+            await redis.set(key, JSON.stringify(sessionData), 'EX', 900);
 
             logger.info('Test Postback Session Started [Redis]', {
                 tenant_id: tenantId,
@@ -66,7 +68,7 @@ async function testPostbackRoutes(fastify, options) {
             return {
                 success: true,
                 message: 'Test started. Waiting for click...',
-                expires_in_seconds: 120
+                expires_in_seconds: 900
             };
 
         } catch (error) {
@@ -92,6 +94,7 @@ async function testPostbackRoutes(fastify, options) {
             const key = `test:postback:${tenantId}:${affiliate_id}:${offer_id}`;
             const data = await redis.get(key);
 
+            // Session expired or never existed
             if (!data) {
                 return {
                     success: true,
@@ -102,15 +105,25 @@ async function testPostbackRoutes(fastify, options) {
 
             const session = JSON.parse(data);
 
+            // Handle FAILED state
+            if (session.status === 'failed') {
+                return {
+                    success: false,
+                    status: 'failed',
+                    message: 'Test failed: No click_id found in URL',
+                    error: 'Missing click_id or tid parameter in tracking URL'
+                };
+            }
+
             // Map internal Redis status to Frontend Expected Status
             // pending -> pending
             // click_received -> processing
             // completed -> success
-
             let status = 'pending';
             if (session.status === 'click_received') status = 'processing';
             if (session.status === 'completed') status = 'success';
 
+            // Return SUCCESS with full details
             if (status === 'success') {
                 return {
                     success: true,
@@ -118,11 +131,11 @@ async function testPostbackRoutes(fastify, options) {
                     result: {
                         click_id: session.affiliate_click_id,
                         affiliate_click_id: session.affiliate_click_id,
-                        postback_fired: true,
+                        postback_fired: session.postback_fired || false,
                         conversion: {
                             status: 'approved',
                             click_id: session.affiliate_click_id,
-                            postback: {
+                            postback: session.postback_response || {
                                 url: session.postback_url?.replace('{click_id}', session.affiliate_click_id) || 'Unknown',
                                 status: 200,
                                 response: 'Fired via Redis Isolation'
@@ -133,10 +146,13 @@ async function testPostbackRoutes(fastify, options) {
                 };
             }
 
+            // Return PENDING or PROCESSING
             return {
                 success: true,
                 status: status,
-                message: session.status === 'click_received' ? 'Click received, firing postback...' : 'Waiting for click...'
+                message: session.status === 'click_received'
+                    ? 'Click received, firing postback...'
+                    : 'Waiting for click...'
             };
 
         } catch (error) {

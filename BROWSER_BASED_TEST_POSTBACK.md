@@ -1,125 +1,265 @@
-# Browser-Based Test Postback Implementation
+# Redis-Driven Test Postback Implementation (No DB Pollution)
 
-## Overview
-Successfully implemented browser-based test postback flow that uses real browser clicks instead of server-side simulation.
+## 🎯 Goal
+Test postback functionality using **real browser clicks** that fire postbacks with the **affiliate's click_id**, while ensuring:
+- ✅ **NO pollution** of production `clicks` or `conversions` tables
+- ✅ **NO breaking** of existing production tracking flow
+- ✅ **Isolated testing** per tenant + publisher + offer combination
+- ✅ **Fast, reliable, and debuggable** test flow
 
-## Changes Made
-
-### Frontend Changes (`PostbackTest.jsx`)
-
-#### 1. **Removed Server-Side Simulation**
-- Removed `testAffiliatePostback` API call
-- Removed assignment selection logic
-- Removed server-side postback firing
-
-#### 2. **New User Interface**
-- **Primary Input**: Tracking URL (required)
-  - Placeholder: `https://affiliate.com/track?offer_id=...&pub_id=...`
-  - Validates URL format before opening
-  
-- **Optional Inputs**:
-  - Affiliate selection (for postback URL preview only)
-  - RCID/Click ID (appended as `tid` parameter)
-
-#### 3. **Browser-Based Flow**
-```javascript
-// Opens tracking URL in new tab (real browser click)
-const newWindow = window.open(trackingUrl, '_blank');
-```
-
-#### 4. **Updated UI Elements**
-- Changed button text to "Fire Test"
-- Added tracking URL input field with validation
-- Made affiliate selection optional
-- Updated instructions to reflect new flow
-- Added browser-mode badge for results
-
-### Backend Changes
-**No backend changes required!** The implementation uses the existing tracking infrastructure:
-- Real clicks are tracked via `/track` or `/click` endpoints
-- Conversions fire through existing conversion tracking
-- Postbacks trigger automatically via existing postback system
-
-## User Flow
+## 🔄 Complete Flow
 
 ```
-1. User enters tracking URL
+1. User enters Tracking URL + selects Publisher + Offer
    ↓
 2. User clicks "Fire Test"
    ↓
-3. Tracking URL opens in new browser tab
+3. Backend creates TEST SESSION in Redis (15 min TTL)
+   Key: test:postback:{tenant_id}:{publisher_id}:{offer_id}
+   Value: { status: "pending", affiliate_click_id: null, ... }
    ↓
-4. Real redirect chain: Affiliate → Tracker → Advertiser
+4. Browser opens Affiliate Tracking URL in new tab
    ↓
-5. Real click stored in database
+5. Affiliate redirects → lands on OUR /click endpoint
    ↓
-6. Conversion fires (if configured)
+6. /click detects active TEST SESSION (tenant + publisher + offer match)
    ↓
-7. Postback fires automatically
+7. Extract affiliate's click_id from URL (query.click_id or query.tid)
    ↓
-8. User monitors results in Postback Logs page
+8. Immediately fire GLOBAL POSTBACK using that click_id
+   ↓
+9. Mark test session SUCCESS in Redis
+   ↓
+10. Return normal redirect (NO DB writes to clicks/conversions)
+   ↓
+11. UI polls Redis → shows success with affiliate_click_id
 ```
 
-## Key Features
+## 🗂️ Redis Schema
 
-### ✅ Real Browser Traffic
-- Uses `window.open()` to simulate actual user clicks
-- Follows complete redirect chain
-- Stores real clicks in database
-- Triggers real conversions and postbacks
+### Key Pattern
+```
+test:postback:{tenant_id}:{publisher_id}:{offer_id}
+```
 
-### ✅ No Server-Side Simulation
-- Removed temporary click ID generation
-- Removed redirect-follow logic
-- Removed simulated click requests
-- Removed DB polling for fake clicks
+### Value Structure
+```json
+{
+  "status": "pending | click_received | completed",
+  "affiliate_click_id": null,
+  "started_at": 1700000000000,
+  "completed_at": null,
+  "postback_url": "https://affiliate.com/postback?click_id={click_id}",
+  "postback_fired": false
+}
+```
 
-### ✅ Simplified Testing
-- Just paste tracking URL and click "Fire Test"
-- Optional RCID for custom tracking
-- Optional affiliate selection for postback preview
-- Clear instructions for users
+### TTL
+- **900 seconds** (15 minutes) - gives users time to complete the flow
 
-### ✅ Better UX
-- Popup blocker detection
-- URL validation
-- Clear status messages
-- Instructions panel with step-by-step guide
+## 🔧 Backend Implementation
 
-## Files Modified
+### 1️⃣ Start Test Session
+**Endpoint**: `POST /api/test-postback/start`
 
-1. **Frontend**:
-   - `/Pulpy_Reporting_Portal_frontend/src/pages/Affiliate/PostbackTest.jsx`
-     - Removed assignment selection
-     - Added tracking URL input
-     - Implemented browser-based opening
-     - Updated UI and messaging
+**Request**:
+```json
+{
+  "affiliate_id": 123,
+  "offer_id": 456,
+  "tracking_url": "https://affiliate.com/track?..."
+}
+```
 
-2. **Backend**:
-   - No changes required (existing endpoints handle real traffic)
+**Actions**:
+- ✅ Validates publisher and offer exist
+- ✅ Retrieves publisher's global postback URL
+- ✅ Creates Redis session with `status: "pending"`
+- ✅ Sets 900-second TTL
+- ❌ **Does NOT** touch `clicks` or `conversions` tables
 
-## Testing Instructions
+**Response**:
+```json
+{
+  "success": true,
+  "message": "Test started. Waiting for click...",
+  "expires_in_seconds": 900
+}
+```
 
-1. Navigate to "Test Postback" page
-2. Enter a valid tracking URL (e.g., from an assignment)
-3. Optionally select an affiliate to preview their postback URL
-4. Optionally add a custom RCID for tracking
-5. Click "Fire Test"
-6. Complete the flow in the opened tab
-7. Monitor results in "Postback Logs" page
+### 2️⃣ Click Interception
+**Location**: `/services/trackingService.js` → `_processTestInterception()`
 
-## Benefits
+**Detection Logic**:
+```javascript
+const key = `test:postback:${tenantId}:${publisher.id}:${offer.id}`;
+const session = await redis.get(key);
 
-1. **Realistic Testing**: Tests actual user flow, not simulations
-2. **Simpler Code**: Removed complex simulation logic
-3. **Better Debugging**: Real clicks appear in logs/database
-4. **Accurate Results**: Postbacks fire exactly as they would in production
-5. **No Backend Changes**: Uses existing tracking infrastructure
+if (session && session.status === 'pending') {
+  // TEST MODE ACTIVATED
+}
+```
 
-## Notes
+**Actions When Test Session Detected**:
+1. Extract affiliate's click_id: `query.click_id || query.tid`
+2. Update Redis: `status = "click_received"`
+3. Fire postback immediately using `postbackService.sendPublisherPostback()`
+4. Update Redis: `status = "completed"`
+5. Return redirect URL (normal flow)
+6. ❌ **SKIP** all database writes to `clicks` and `conversions`
 
-- Popup blockers must be disabled for this site
-- Tracking URL must be complete and valid
-- Real clicks will appear in click logs
-- Real conversions will appear in conversion logs
-- Real postbacks will fire to affiliate endpoints
+**Mock Conversion for Postback**:
+```javascript
+const mockConversion = {
+  conversion_uuid: 'TEST-' + uuidv4(),
+  click_uuid: 'TEST-CLICK-' + uuidv4(),
+  offer_id: offer.id,
+  publisher_id: publisher.id,
+  tenant_id: tenantId,
+  status: 'approved',
+  amount: 0,
+  payout: 0,
+  is_test: true
+};
+const mockClick = { tid: affiliateClickId };
+```
+
+### 3️⃣ Status Polling
+**Endpoint**: `GET /api/test-postback/status?affiliate_id=123&offer_id=456`
+
+**Response States**:
+
+**Pending**:
+```json
+{
+  "success": true,
+  "status": "pending",
+  "message": "Waiting for click..."
+}
+```
+
+**Processing**:
+```json
+{
+  "success": true,
+  "status": "processing",
+  "message": "Click received, firing postback..."
+}
+```
+
+**Success**:
+```json
+{
+  "success": true,
+  "status": "success",
+  "result": {
+    "click_id": "abc123",
+    "affiliate_click_id": "abc123",
+    "postback_fired": true,
+    "conversion": {
+      "status": "approved",
+      "click_id": "abc123",
+      "postback": {
+        "url": "https://affiliate.com/postback?click_id=abc123",
+        "status": 200,
+        "response": "Fired via Redis Isolation"
+      }
+    }
+  },
+  "message": "Test postback fired successfully"
+}
+```
+
+**Expired**:
+```json
+{
+  "success": true,
+  "status": "expired",
+  "message": "Test timed out. No click received."
+}
+```
+
+## 🎨 Frontend Implementation
+
+### Key Features
+1. **Required Fields**: Tracking URL, Publisher, Offer
+2. **Optional Field**: RCID (appended as `tid` parameter)
+3. **Browser Opening**: `window.open(trackingUrl, '_blank')`
+4. **Polling**: Every 2 seconds for up to 60 seconds
+5. **Status Display**: Real-time updates showing test progress
+
+### User Experience
+- User fills form and clicks "Fire Test"
+- New tab opens with tracking URL
+- User completes redirect flow in new tab
+- Original tab polls for results
+- Success message shows affiliate's click_id and postback details
+
+## ✅ What This Achieves
+
+### 🚫 No DB Pollution
+- Test clicks **never** written to `clicks` table
+- Test conversions **never** written to `conversions` table
+- Production analytics remain clean
+
+### 🔒 No Logic Breaking
+- Production clicks continue normal flow
+- Test detection is isolated to Redis key existence
+- If Redis key doesn't exist → normal production flow
+
+### 🎯 Accurate Testing
+- Uses **real** affiliate click_id from URL
+- Fires **real** postback to publisher's endpoint
+- Tests **actual** redirect chain
+
+### ⚡ Fast & Reliable
+- Redis-based session (sub-millisecond lookups)
+- 15-minute TTL (plenty of time for testing)
+- Immediate postback firing (no queue delays)
+
+## 📁 Files Modified
+
+### Backend
+1. **`/routes/testPostback.js`**
+   - Start session endpoint
+   - Status polling endpoint
+   - 900-second TTL
+
+2. **`/services/trackingService.js`**
+   - `_processTestInterception()` method
+   - Detects test sessions
+   - Fires postback without DB writes
+
+### Frontend
+3. **`/pages/Affiliate/PostbackTest.jsx`**
+   - Form with tracking URL, publisher, offer
+   - Browser-based URL opening
+   - Status polling and display
+
+## 🧪 Testing Instructions
+
+1. Navigate to **"Test Postback"** page
+2. Enter a **tracking URL** (from affiliate/publisher)
+3. Select the **Publisher** (to get postback URL)
+4. Select the **Offer** (to match test session)
+5. Optionally add **RCID** (custom tracking ID)
+6. Click **"Fire Test"**
+7. New tab opens → complete the redirect flow
+8. Return to original tab → see results
+
+## 🎉 Benefits
+
+1. ✅ **Zero DB Pollution**: No test data in production tables
+2. ✅ **Real Click Testing**: Uses actual affiliate click_id
+3. ✅ **Isolated Sessions**: Per tenant + publisher + offer
+4. ✅ **Fast Execution**: Redis-based, no DB queries
+5. ✅ **Production Safe**: Doesn't break existing tracking
+6. ✅ **Easy Debugging**: Clear Redis keys and status flow
+
+## ⚠️ Important Notes
+
+- **Popup Blocker**: Must be disabled for this site
+- **Valid URL**: Tracking URL must be complete and valid
+- **Session Scope**: Test is isolated to exact tenant + publisher + offer combo
+- **No Persistence**: Test results expire after 15 minutes (Redis TTL)
+- **Real Postback**: Actual HTTP request sent to publisher's endpoint
