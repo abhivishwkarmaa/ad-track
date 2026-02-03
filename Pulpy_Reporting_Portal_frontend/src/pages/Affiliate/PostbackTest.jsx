@@ -299,7 +299,7 @@ function PostbackTest() {
                                 </div>
 
                                 <div className="form-group">
-                                    <label className="form-label required">Offer</label>
+                                    <label className="form-label required">Offer (Public ID)</label>
                                     <select
                                         className="form-control"
                                         name="offerId"
@@ -313,10 +313,13 @@ function PostbackTest() {
                                         </option>
                                         {offers.map(offer => (
                                             <option key={offer.id} value={offer.public_offer_id || offer.id}>
-                                                {offer.name} (ID: {offer.public_offer_id || offer.id})
+                                                {offer.name} (Public ID: {offer.public_offer_id || offer.id})
                                             </option>
                                         ))}
                                     </select>
+                                    <small className="form-hint">
+                                        Use the public offer ID that appears in your tracking URLs
+                                    </small>
                                 </div>
 
                                 <div className="form-group">

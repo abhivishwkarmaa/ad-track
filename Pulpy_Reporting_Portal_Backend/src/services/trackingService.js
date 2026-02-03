@@ -227,11 +227,11 @@ export class TrackingService {
       // Check if there is an active test session for this tenant
       console.log('Checking for test session...');
       console.log('tenantId:', tenantId);
-      console.log('offer:', offer);
-      console.log('publisher:', publisher);
-      console.log('assignment:', assignment);
+      console.log('offer.id:', offer.id);
+      console.log('publisher.id:', publisher.id);
+      console.log('assignment.id:', assignment.id);
       console.log('query:', query);
-      console.log('request:', request);
+      // console.log('request:', request);
       const testResult = await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
       if (testResult) {
         return testResult; // 🛑 EXIT EARLY: No Production DB Writes
