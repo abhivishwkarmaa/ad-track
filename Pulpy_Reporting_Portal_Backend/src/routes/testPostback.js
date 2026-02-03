@@ -26,12 +26,32 @@ async function testPostbackRoutes(fastify, options) {
                 return reply.code(404).send({ success: false, error: 'Publisher not found' });
             }
 
-            // 2. Verify Offer (Optional but good for validation)
-            // We use public ID in URL but internal ID here, mostly fine.
-            const offer = await offerService.getOfferById(offer_id, tenantId);
+            // 2. 🔥 CRITICAL FIX: Resolve Public Offer ID to Internal Offer ID
+            // The offer_id from the tracking URL is a PUBLIC ID (external-facing)
+            // We need to resolve it to the INTERNAL ID (database primary key)
+            // This ensures the Redis key matches what trackClick will look up
+            const publicOfferId = parseInt(offer_id);
+            const offer = await offerPublicIdService.getOfferByPublicId(publicOfferId, tenantId, null);
+
             if (!offer) {
-                return reply.code(404).send({ success: false, error: 'Offer not found' });
+                logger.error('❌ Offer not found', {
+                    public_offer_id: publicOfferId,
+                    tenant_id: tenantId
+                });
+                return reply.code(404).send({
+                    success: false,
+                    error: `Offer with public ID ${publicOfferId} not found`
+                });
             }
+
+            // ✅ Now we have the INTERNAL offer ID (offer.id)
+            const internalOfferId = offer.id;
+
+            logger.info('✅ Resolved Public Offer ID to Internal ID', {
+                public_offer_id: publicOfferId,
+                internal_offer_id: internalOfferId,
+                tenant_id: tenantId
+            });
 
             // 3. Resolve Postback URL
             const postbackUrl = publisher.global_postback_url;
@@ -39,8 +59,9 @@ async function testPostbackRoutes(fastify, options) {
                 return reply.code(400).send({ success: false, error: 'Publisher has no global postback URL configured' });
             }
 
-            // ✅ Key Pattern: test:postback:{tenant_id}:{publisher_id}:{offer_id}
-            const key = `test:postback:${tenantId}:${affiliate_id}:${offer_id}`;
+            // ✅ CRITICAL: Use INTERNAL offer ID for Redis key
+            // This MUST match the key that trackClick will look up
+            const key = `test:postback:${tenantId}:${affiliate_id}:${internalOfferId}`;
 
             const sessionData = {
                 status: 'pending', // pending | click_received | completed | failed
@@ -49,7 +70,9 @@ async function testPostbackRoutes(fastify, options) {
                 postback_url: postbackUrl,
                 postback_fired: false,
                 postback_response: null,
-                completed_at: null
+                completed_at: null,
+                public_offer_id: publicOfferId, // Store for reference
+                internal_offer_id: internalOfferId // Store for reference
             };
 
             // Remove any existing key (overwrite)
@@ -61,7 +84,8 @@ async function testPostbackRoutes(fastify, options) {
             logger.info('Test Postback Session Started [Redis]', {
                 tenant_id: tenantId,
                 affiliate_id,
-                offer_id,
+                public_offer_id: publicOfferId,
+                internal_offer_id: internalOfferId,
                 key
             });
 
@@ -91,9 +115,35 @@ async function testPostbackRoutes(fastify, options) {
                 return reply.code(400).send({ success: false, error: 'Affiliate ID and Offer ID required for status check' });
             }
 
-            const key = `test:postback:${tenantId}:${affiliate_id}:${offer_id}`;
+            // 🔥 CRITICAL FIX: Resolve Public Offer ID to Internal Offer ID
+            // The offer_id from the query is a PUBLIC ID (same as in tracking URL)
+            // We need to resolve it to the INTERNAL ID to match the Redis key
+            const publicOfferId = parseInt(offer_id);
+            const offer = await offerPublicIdService.getOfferByPublicId(publicOfferId, tenantId, null);
+
+            if (!offer) {
+                logger.error('❌ Offer not found for status check', {
+                    public_offer_id: publicOfferId,
+                    tenant_id: tenantId
+                });
+                return reply.code(404).send({
+                    success: false,
+                    error: `Offer with public ID ${publicOfferId} not found`
+                });
+            }
+
+            const internalOfferId = offer.id;
+
+            logger.debug('✅ Status check: Resolved Public Offer ID to Internal ID', {
+                public_offer_id: publicOfferId,
+                internal_offer_id: internalOfferId,
+                tenant_id: tenantId
+            });
+
+            // ✅ CRITICAL: Use INTERNAL offer ID for Redis key lookup
+            const key = `test:postback:${tenantId}:${affiliate_id}:${internalOfferId}`;
             const data = await redis.get(key);
-            
+
             // Session expired or never existed
             if (!data) {
                 return {

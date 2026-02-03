@@ -312,8 +312,8 @@ function PostbackTest() {
                                             {loadingOffers ? 'Loading offers...' : 'Select Offer'}
                                         </option>
                                         {offers.map(offer => (
-                                            <option key={offer.id} value={offer.id}>
-                                                {offer.name} ({offer.id})
+                                            <option key={offer.id} value={offer.public_offer_id || offer.id}>
+                                                {offer.name} (ID: {offer.public_offer_id || offer.id})
                                             </option>
                                         ))}
                                     </select>
