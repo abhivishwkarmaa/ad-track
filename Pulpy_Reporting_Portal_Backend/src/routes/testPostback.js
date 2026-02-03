@@ -44,10 +44,10 @@ async function testPostbackRoutes(fastify, options) {
                     error: `Offer with public ID ${publicOfferId} not found`
                 });
             }
-         
+
             // ✅ Now we have the INTERNAL offer ID (offer.id)
             const internalOfferId = offer.id;
-   console.log(affiliate_id, offer_id, tracking_url,internalOfferId)
+            console.log(affiliate_id, offer_id, tracking_url, internalOfferId)
             logger.info('✅ Resolved Public Offer ID to Internal ID', {
                 public_offer_id: publicOfferId,
                 internal_offer_id: internalOfferId,
@@ -79,8 +79,8 @@ async function testPostbackRoutes(fastify, options) {
             // Remove any existing key (overwrite)
             // await redis.del(key); // set replaces anyway
 
-            // Create new session with 900s TTL (15 minutes)
-            await redis.set(key, JSON.stringify(sessionData), 'EX', 900);
+            // Create new session with 900s TTL (2 minutes)
+            await redis.set(key, JSON.stringify(sessionData), 'EX', 120);
 
             logger.info('Test Postback Session Started [Redis]', {
                 tenant_id: tenantId,
