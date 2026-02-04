@@ -74,6 +74,7 @@ function UpdateProfile() {
         try {
             await authAPI.changePassword(resetToken, newPassword);
             toast.success('Password changed successfully');
+            updateProfile({ mustChangePassword: false });
             setPassStep(0);
             setOtp('');
             setNewPassword('');

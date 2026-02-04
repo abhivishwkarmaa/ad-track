@@ -187,6 +187,19 @@ class EmailService {
   }
 
   /**
+   * Send OTP email for contact form verification
+   */
+  async sendContactOtpEmail(data) {
+    const html = this.getContactOtpEmailTemplate(data);
+
+    return await this.sendEmail({
+      to: data.email,
+      subject: 'Verify Your Contact Request - TrackMyAds',
+      html,
+    });
+  }
+
+  /**
    * Send tenant welcome email (admin-created tenant)
    */
   async sendTenantWelcomeEmail(data) {
@@ -322,6 +335,77 @@ class EmailService {
   }
 
   /**
+   * Contact OTP email template (to user)
+   */
+  getContactOtpEmailTemplate(data) {
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify Your Contact Request</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #ff6b35; margin: 0;">TrackMyAds</h1>
+  </div>
+
+  <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 30px;">
+    <h2 style="color: #333; margin-top: 0;">Verify Your Contact Request</h2>
+    
+    <p style="color: #666; font-size: 16px;">
+      Hello ${this.escapeHtml(data.firstName)},
+    </p>
+
+    <p style="color: #666; font-size: 16px;">
+      Thank you for contacting TrackMyAds. To complete your message submission, please use the verification code below:
+    </p>
+
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; margin: 25px 0;">
+      <p style="margin: 0 0 10px; color: #666; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Your Verification Code</p>
+      <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #ff6b35; font-family: 'Courier New', monospace;">
+        ${data.otp}
+      </div>
+    </div>
+
+    <div style="background-color: #fff3e0; border-left: 4px solid #ff6b35; padding: 15px; margin: 20px 0; border-radius: 4px;">
+      <p style="margin: 0; color: #666; font-size: 14px;">
+        ⏱️ <strong>This code will expire in 5 minutes.</strong><br>
+        🔒 For security, do not share this code with anyone.
+      </p>
+    </div>
+
+    <p style="color: #666; font-size: 14px; margin-top: 25px;">
+      If you did not request this verification code, please ignore this email. Your contact request will not be submitted without verification.
+    </p>
+
+    <p style="color: #666; font-size: 16px; margin-top: 30px;">
+      Best regards,<br>
+      <strong style="color: #ff6b35;">The TrackMyAds Team</strong>
+    </p>
+  </div>
+
+  <div style="margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px; text-align: center;">
+    <p style="margin: 0; color: #666; font-size: 14px;">
+      <strong>TrackMyAds</strong><br>
+      PARK SERENE, Gurgaon, Sector 37D<br>
+      Haryana, India<br><br>
+      Office Hours: Monday - Friday, 9:00 AM - 6:00 PM IST
+    </p>
+  </div>
+
+  <div style="margin-top: 20px; text-align: center; color: #999; font-size: 12px;">
+    <p style="margin: 0;">
+      This is an automated email. Please do not reply to this message.
+    </p>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  /**
    * Tenant welcome email template (to tenant admin)
    */
   getTenantWelcomeEmailTemplate(data) {
@@ -356,7 +440,7 @@ class EmailService {
     <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
       <p style="margin: 0 0 10px; color: #333; font-weight: bold;">Tenant Details</p>
       <p style="margin: 4px 0; color: #666;"><strong>Name:</strong> ${tenantName}</p>
-      <p style="margin: 4px 0; color: #666;"><strong>Slug:</strong> ${tenantSlug}</p>
+      <p style="margin: 4px 0; color: #666;"><strong>Subdomain:</strong> ${tenantSlug}</p>
       <p style="margin: 4px 0; color: #666;"><strong>Portal:</strong> <a href="${loginUrl}" style="color: #ff6b35; text-decoration: none;">${loginUrl}</a></p>
     </div>
 

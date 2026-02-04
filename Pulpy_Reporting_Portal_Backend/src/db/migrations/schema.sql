@@ -52,6 +52,7 @@ CREATE TABLE `admin_users` (
   `password_hash` varchar(255) NOT NULL,
   `role` varchar(50) DEFAULT 'admin',
   `tenant_id` int(11) DEFAULT NULL,
+  `must_change_password` tinyint(1) NOT NULL DEFAULT '0',
   `created_at` timestamp NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),

@@ -135,13 +135,13 @@ export async function authenticateAdmin(request, reply) {
     try {
       // Try query with tenant_id first
       [rows] = await pool.query(
-        'SELECT id, email, name, role, tenant_id FROM admin_users WHERE id = ? AND email = ?',
+        'SELECT id, email, name, role, tenant_id, must_change_password FROM admin_users WHERE id = ? AND email = ?',
         [decoded.id, decoded.email]
       );
     } catch (error) {
       // If tenant_id column doesn't exist, fall back to query without it
-      if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
-        logger.warn('tenant_id column not found in admin_users table. Please run migration.');
+      if (error.code === 'ER_BAD_FIELD_ERROR' && (error.message.includes('tenant_id') || error.message.includes('must_change_password'))) {
+        logger.warn('tenant_id or must_change_password column not found in admin_users table. Please run migration.');
         [rows] = await pool.query(
           'SELECT id, email, name, role FROM admin_users WHERE id = ? AND email = ?',
           [decoded.id, decoded.email]

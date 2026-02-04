@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Login/Login';
@@ -42,6 +42,46 @@ function PrivateRoute({ children }) {
   return isAuthenticated ? children : <Navigate to="/login" />;
 }
 
+function ChangePasswordPrompt() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setOpen(Boolean(user?.mustChangePassword));
+  }, [user?.mustChangePassword]);
+
+  if (!open) return null;
+
+  return (
+    <div className="password-prompt-backdrop" role="dialog" aria-modal="true">
+      <div className="password-prompt-card">
+        <h3>Change Your Password</h3>
+        <p>
+          This is your first login. For security, please change your password now.
+        </p>
+        <div className="password-prompt-actions">
+          <button
+            className="password-prompt-primary"
+            onClick={() => {
+              setOpen(false);
+              navigate('/settings');
+            }}
+          >
+            Go to Settings
+          </button>
+          <button
+            className="password-prompt-secondary"
+            onClick={() => setOpen(false)}
+          >
+            Later
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
 
@@ -50,7 +90,9 @@ function AppRoutes() {
   const isAdminDomain = hostname.startsWith('admin');
 
   return (
-    <Routes>
+    <>
+      {isAuthenticated && <ChangePasswordPrompt />}
+      <Routes>
       <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
       <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
       <Route
@@ -121,7 +163,8 @@ function AppRoutes() {
           <Route path="profile" element={<UpdateProfile />} />
         </Route>
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

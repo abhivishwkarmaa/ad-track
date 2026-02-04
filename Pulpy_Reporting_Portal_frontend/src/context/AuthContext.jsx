@@ -26,6 +26,9 @@ export function AuthProvider({ children }) {
                 if (parsedUser.tenant_id === undefined) {
                     parsedUser.tenant_id = null;
                 }
+                if (parsedUser.mustChangePassword === undefined) {
+                    parsedUser.mustChangePassword = false;
+                }
                 setUser(parsedUser);
                 setIsAuthenticated(true);
             } catch (e) {
@@ -107,7 +110,8 @@ export function AuthProvider({ children }) {
                     name: response.data.name,
                     fullName: response.data.name,
                     role: response.data.role,
-                    tenant_id: response.data.tenant_id || null // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
+                    tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
+                    mustChangePassword: Boolean(response.data.must_change_password)
                 };
 
                 setUser(userData);

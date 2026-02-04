@@ -15,7 +15,6 @@ function NewTenant() {
         status: 'active',
         adminEmail: '',
         adminName: '',
-        adminPassword: '',
     });
 
     const [errors, setErrors] = useState({});
@@ -53,9 +52,6 @@ function NewTenant() {
                 newErrors.adminName = 'Admin name is required';
             }
 
-            if (!formData.adminPassword || formData.adminPassword.length < 6) {
-                newErrors.adminPassword = 'Password must be at least 6 characters';
-            }
         }
 
         setErrors(newErrors);
@@ -79,7 +75,6 @@ function NewTenant() {
             if (createAdmin) {
                 payload.adminEmail = formData.adminEmail.trim();
                 payload.adminName = formData.adminName.trim();
-                payload.adminPassword = formData.adminPassword;
             }
 
             const response = await tenantsAPI.createTenant(payload);
@@ -198,22 +193,11 @@ function NewTenant() {
                                     disabled={loading}
                                 />
                                 {errors.adminEmail && <div className="error">{errors.adminEmail}</div>}
+                                <div className="help-text">
+                                    A temporary password will be generated and emailed to this address.
+                                </div>
                             </div>
 
-                            <div className="tenant-form-group">
-                                <label>
-                                    Admin Password <span className="required">*</span>
-                                </label>
-                                <input
-                                    type="password"
-                                    name="adminPassword"
-                                    value={formData.adminPassword}
-                                    onChange={handleChange}
-                                    placeholder="Minimum 6 characters"
-                                    disabled={loading}
-                                />
-                                {errors.adminPassword && <div className="error">{errors.adminPassword}</div>}
-                            </div>
                         </>
                     )}
 

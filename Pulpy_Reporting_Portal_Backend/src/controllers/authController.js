@@ -213,13 +213,13 @@ export class AuthController {
       try {
         // Try query with tenant_id first
         [rows] = await pool.query(
-          'SELECT id, email, name, password_hash, role, tenant_id FROM admin_users WHERE email = ?',
+          'SELECT id, email, name, password_hash, role, tenant_id, must_change_password FROM admin_users WHERE email = ?',
           [email]
         );
       } catch (error) {
         // If tenant_id column doesn't exist, fall back to query without it
-        if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
-          logger.warn('tenant_id column not found in admin_users table. Please run migration.');
+        if (error.code === 'ER_BAD_FIELD_ERROR' && (error.message.includes('tenant_id') || error.message.includes('must_change_password'))) {
+          logger.warn('tenant_id or must_change_password column not found in admin_users table. Please run migration.');
           [rows] = await pool.query(
             'SELECT id, email, name, password_hash, role FROM admin_users WHERE email = ?',
             [email]
@@ -242,6 +242,7 @@ export class AuthController {
 
       const admin = Array.isArray(rows) ? rows[0] : rows;
       const userTenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
+      const mustChangePassword = admin.must_change_password !== undefined ? Boolean(admin.must_change_password) : false;
 
       // ✅ STEP 4: Verify password
       const isValid = await bcrypt.compare(password, admin.password_hash);
@@ -387,6 +388,7 @@ export class AuthController {
           name: admin.name,
           role: admin.role,
           tenant_id: tenantId, // Include tenant_id in response
+          must_change_password: mustChangePassword,
           token,
         },
       });
@@ -711,8 +713,19 @@ export class AuthController {
       // Hash new password
       const passwordHash = await bcrypt.hash(newPassword, 10);
 
-      // Update password
-      await pool.query('UPDATE admin_users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+      // Update password and clear must-change flag if present
+      try {
+        await pool.query(
+          'UPDATE admin_users SET password_hash = ?, must_change_password = 0 WHERE email = ?',
+          [passwordHash, email]
+        );
+      } catch (error) {
+        if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('must_change_password')) {
+          await pool.query('UPDATE admin_users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+        } else {
+          throw error;
+        }
+      }
 
       // Clear OTP
       await pool.query('DELETE FROM password_resets WHERE email = ?', [email]);
@@ -730,4 +743,3 @@ export class AuthController {
 }
 
 export default new AuthController();
-

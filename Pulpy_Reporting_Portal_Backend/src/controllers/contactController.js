@@ -340,6 +340,256 @@ class ContactController {
   }
 
   /**
+   * Send OTP for contact form verification
+   * POST /api/contact/send-otp
+   */
+  async sendOtp(request, reply) {
+    try {
+      const { firstName, lastName, email, message } = request.body;
+
+      // Validate required fields
+      if (!firstName || !lastName || !email || !message) {
+        return reply.code(400).send({
+          success: false,
+          message: 'All fields are required: firstName, lastName, email, message',
+        });
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Invalid email address format',
+        });
+      }
+
+      // Validate message length
+      if (message.trim().length < 10) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Message must be at least 10 characters long',
+        });
+      }
+
+      // Rate limiting: Check if OTP was recently sent to this email
+      const redis = (await import('../config/redis.js')).default;
+      const rateLimitKey = `otp:ratelimit:${email.toLowerCase()}`;
+      const recentOtp = await redis.get(rateLimitKey);
+
+      if (recentOtp) {
+        return reply.code(429).send({
+          success: false,
+          message: 'Please wait before requesting another OTP. Check your email.',
+        });
+      }
+
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Store OTP and form data in Redis (5 minutes expiration)
+      const otpKey = `otp:contact:${email.toLowerCase()}`;
+      const otpData = {
+        otp,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim().toLowerCase(),
+        message: message.trim(),
+        attempts: 0,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Store OTP data with 5-minute expiration (300 seconds)
+      await redis.setex(otpKey, 300, JSON.stringify(otpData));
+
+      // Set rate limit (90 seconds cooldown)
+      await redis.setex(rateLimitKey, 90, '1');
+
+      logger.info('📧 OTP generated for contact form', {
+        email: email.toLowerCase(),
+        name: `${firstName} ${lastName}`,
+      });
+
+      // Send OTP email
+      try {
+        await emailService.sendContactOtpEmail({
+          email: email.trim().toLowerCase(),
+          firstName: firstName.trim(),
+          otp,
+        });
+
+        logger.info('✅ OTP email sent successfully', {
+          email: email.toLowerCase(),
+        });
+
+        return reply.code(200).send({
+          success: true,
+          message: 'OTP sent successfully to your email',
+        });
+      } catch (emailError) {
+        logger.error('❌ Failed to send OTP email:', emailError);
+
+        // Clean up Redis data if email fails
+        await redis.del(otpKey);
+        await redis.del(rateLimitKey);
+
+        return reply.code(500).send({
+          success: false,
+          message: 'Failed to send OTP email. Please try again.',
+        });
+      }
+    } catch (error) {
+      logger.error('❌ Error sending OTP:', error);
+      return reply.code(500).send({
+        success: false,
+        message: 'An error occurred while processing your request. Please try again later.',
+      });
+    }
+  }
+
+  /**
+   * Verify OTP and submit contact form
+   * POST /api/contact/verify-otp
+   */
+  async verifyOtp(request, reply) {
+    try {
+      const { email, otp } = request.body;
+
+      // Validate required fields
+      if (!email || !otp) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Email and OTP are required',
+        });
+      }
+
+      // Validate OTP format (6 digits)
+      if (!/^\d{6}$/.test(otp)) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Invalid OTP format. Must be 6 digits.',
+        });
+      }
+
+      const redis = (await import('../config/redis.js')).default;
+      const otpKey = `otp:contact:${email.toLowerCase()}`;
+
+      // Retrieve OTP data from Redis
+      const otpDataStr = await redis.get(otpKey);
+
+      if (!otpDataStr) {
+        return reply.code(400).send({
+          success: false,
+          message: 'OTP expired or not found. Please request a new OTP.',
+        });
+      }
+
+      const otpData = JSON.parse(otpDataStr);
+
+      // Check maximum attempts (3 attempts allowed)
+      if (otpData.attempts >= 3) {
+        await redis.del(otpKey);
+        return reply.code(400).send({
+          success: false,
+          message: 'Maximum verification attempts exceeded. Please request a new OTP.',
+        });
+      }
+
+      // Verify OTP
+      if (otpData.otp !== otp) {
+        // Increment failed attempts
+        otpData.attempts += 1;
+        const ttl = await redis.ttl(otpKey);
+        await redis.setex(otpKey, ttl > 0 ? ttl : 60, JSON.stringify(otpData));
+
+        logger.warn('⚠️ Invalid OTP attempt', {
+          email: email.toLowerCase(),
+          attempts: otpData.attempts,
+        });
+
+        return reply.code(400).send({
+          success: false,
+          message: `Invalid OTP. ${3 - otpData.attempts} attempts remaining.`,
+        });
+      }
+
+      // OTP verified successfully - prepare contact data
+      const contactData = {
+        firstName: otpData.firstName,
+        lastName: otpData.lastName,
+        email: otpData.email,
+        message: otpData.message,
+        submittedAt: new Date().toISOString(),
+        ip: request.ip || request.headers['x-forwarded-for'] || 'unknown',
+        userAgent: request.headers['user-agent'] || null,
+        referer: request.headers.referer || null,
+        verified: true, // Mark as verified via OTP
+      };
+
+      logger.info('✅ OTP verified successfully', {
+        email: contactData.email,
+        name: `${contactData.firstName} ${contactData.lastName}`,
+      });
+
+      // Save to database
+      let submissionId = null;
+      try {
+        const [insertResult] = await pool.query(
+          `INSERT INTO contact_submissions 
+           (first_name, last_name, email, message, ip_address, user_agent, referer, status) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'new')`,
+          [
+            contactData.firstName,
+            contactData.lastName,
+            contactData.email,
+            contactData.message,
+            contactData.ip,
+            contactData.userAgent,
+            contactData.referer,
+          ]
+        );
+        submissionId = insertResult.insertId;
+        logger.info('✅ Contact submission saved to database', {
+          submissionId,
+          email: contactData.email,
+        });
+      } catch (dbError) {
+        logger.error('❌ Failed to save contact submission to database:', dbError);
+        // Continue with email sending even if DB save fails
+      }
+
+      // Send notification email to admin (asynchronously)
+      emailService.sendContactNotification(contactData).catch((err) => {
+        logger.error('❌ Failed to send notification email:', err);
+      });
+
+      // Send confirmation email to user (asynchronously)
+      emailService.sendContactConfirmation(contactData).catch((err) => {
+        logger.error('❌ Failed to send confirmation email:', err);
+      });
+
+      // Delete OTP from Redis (one-time use)
+      await redis.del(otpKey);
+
+      logger.info('✅ Contact form submitted successfully via OTP', {
+        email: contactData.email,
+        submissionId,
+      });
+
+      return reply.code(200).send({
+        success: true,
+        message: 'Your message has been sent successfully!',
+      });
+    } catch (error) {
+      logger.error('❌ Error verifying OTP:', error);
+      return reply.code(500).send({
+        success: false,
+        message: 'An error occurred while verifying OTP. Please try again later.',
+      });
+    }
+  }
+
+  /**
    * Handle contact form submission
    * POST /api/contact
    */

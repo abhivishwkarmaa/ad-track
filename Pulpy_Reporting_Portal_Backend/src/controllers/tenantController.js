@@ -2,9 +2,16 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 
 import tenantResolutionService from '../services/tenantResolutionService.js';
 import emailService from '../services/emailService.js';
+
+const generateRandomPassword = (length = 12) => {
+  const bytes = crypto.randomBytes(Math.ceil(length));
+  const base = bytes.toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+  return base.slice(0, length);
+};
 
 export class TenantController {
   /**
@@ -13,7 +20,7 @@ export class TenantController {
    */
   async createTenant(request, reply) {
     try {
-      const { name, slug, status = 'active', adminEmail, adminName, adminPassword } = request.body;
+      const { name, slug, status = 'active', adminEmail, adminName } = request.body;
 
       // Validate input
       if (!name || !slug) {
@@ -61,7 +68,8 @@ export class TenantController {
 
         // Create tenant admin user if credentials provided
         let adminUserId = null;
-        if (adminEmail && adminName && adminPassword) {
+        let finalAdminPassword = null;
+        if (adminEmail && adminName) {
           // Check if admin email already exists
           const [existingAdminRows] = await pool.query(
             'SELECT id FROM admin_users WHERE email = ?',
@@ -77,16 +85,30 @@ export class TenantController {
             });
           }
 
+          const generatedPassword = generateRandomPassword();
+          finalAdminPassword = generatedPassword;
+
           // Hash password
-          const passwordHash = await bcrypt.hash(adminPassword, 10);
+          const passwordHash = await bcrypt.hash(generatedPassword, 10);
 
-          // Create tenant admin
-          const [adminResult] = await pool.query(
-            'INSERT INTO admin_users (email, name, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)',
-            [adminEmail, adminName, passwordHash, 'tenant_admin', tenantId]
-          );
-
-          adminUserId = adminResult.insertId || adminResult[0]?.insertId;
+          // Create tenant admin (force password change on first login)
+          try {
+            const [adminResult] = await pool.query(
+              'INSERT INTO admin_users (email, name, password_hash, role, tenant_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?)',
+              [adminEmail, adminName, passwordHash, 'tenant_admin', tenantId, 1]
+            );
+            adminUserId = adminResult.insertId || adminResult[0]?.insertId;
+          } catch (error) {
+            if (error.code === 'ER_BAD_FIELD_ERROR' && (error.message.includes('must_change_password') || error.message.includes('tenant_id'))) {
+              const [adminResult] = await pool.query(
+                'INSERT INTO admin_users (email, name, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)',
+                [adminEmail, adminName, passwordHash, 'tenant_admin', tenantId]
+              );
+              adminUserId = adminResult.insertId || adminResult[0]?.insertId;
+            } else {
+              throw error;
+            }
+          }
         }
 
         await pool.query('COMMIT');
@@ -98,14 +120,14 @@ export class TenantController {
         );
 
         // Send tenant welcome email (best effort, do not block creation)
-        if (adminEmail) {
+        if (adminEmail && finalAdminPassword) {
           try {
             await emailService.sendTenantWelcomeEmail({
               tenantName: name,
-              tenantSlug: slug + '.track-myads.com',
+              tenantSlug: slug,
               adminName,
               adminEmail,
-              adminPassword,
+              adminPassword: finalAdminPassword,
             });
           } catch (emailError) {
             logger.warn('⚠️ Tenant welcome email failed to send:', {
