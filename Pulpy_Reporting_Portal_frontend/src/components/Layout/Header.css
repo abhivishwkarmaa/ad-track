@@ -92,6 +92,19 @@
     gap: 16px;
 }
 
+.header-subscription-alert {
+    max-width: 360px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    padding: 6px 10px;
+    border-radius: 999px;
+    white-space: normal;
+    line-height: 1.4;
+}
+
 .header-icon-btn {
     width: 40px;
     height: 40px;
@@ -188,6 +201,12 @@
     color: var(--text-muted);
 }
 
+@media (max-width: 1024px) {
+    .header-subscription-alert {
+        max-width: 240px;
+    }
+}
+
 @media (max-width: 768px) {
     .header {
         padding: 0 12px;
@@ -213,6 +232,10 @@
 
     .header-right {
         gap: 8px;
+    }
+
+    .header-subscription-alert {
+        display: none;
     }
 
     .header-icon-btn {

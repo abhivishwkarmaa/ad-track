@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { tenantsAPI } from '../../services/api';
+import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
 import './Tenant.css';
 
 const EditIcon = () => (
@@ -44,10 +44,12 @@ function TenantDetail() {
     const [tenant, setTenant] = useState(null);
     const [metrics, setMetrics] = useState(null);
     const [metricsLoading, setMetricsLoading] = useState(false);
+    const [subscriptionStatus, setSubscriptionStatus] = useState(null);
 
     useEffect(() => {
         fetchTenant();
         fetchMetrics();
+        fetchSubscriptionStatus();
     }, [id, refreshKey]);
 
     const fetchTenant = async () => {
@@ -80,6 +82,32 @@ function TenantDetail() {
             console.error('Fetch metrics error:', error);
         } finally {
             setMetricsLoading(false);
+        }
+    };
+
+    const formatUtcDateTime = (value) => {
+        if (!value) return 'N/A';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return 'N/A';
+        return date.toLocaleString('en-US', {
+            timeZone: 'UTC',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+        });
+    };
+
+    const fetchSubscriptionStatus = async () => {
+        try {
+            const response = await adminSubscriptionAPI.getTenantStatus(id);
+            if (response.success) {
+                setSubscriptionStatus(response.data);
+            }
+        } catch (error) {
+            console.error('Fetch subscription status error:', error);
         }
     };
 
@@ -171,6 +199,52 @@ function TenantDetail() {
                         </div>
                     </div>
                 </div>
+
+                {subscriptionStatus && (
+                    <div className="tenant-detail-section">
+                        <h3>Subscription Details</h3>
+                        <div className="tenant-detail-grid">
+                            <div className="tenant-detail-card">
+                                <label>State</label>
+                                <div className="value">
+                                    <span className={`tenant-status ${getStatusClass(subscriptionStatus.tenant.status)}`}>
+                                        {getStatusLabel(subscriptionStatus.tenant.status)}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="tenant-detail-card">
+                                <label>Days Left</label>
+                                <div className="value">
+                                    {subscriptionStatus.subscription.days_left ?? 'N/A'}
+                                </div>
+                            </div>
+                            <div className="tenant-detail-card">
+                                <label>Subscription Start (UTC)</label>
+                                <div className="value">
+                                    {formatUtcDateTime(subscriptionStatus.tenant.subscription_start_at)}
+                                </div>
+                            </div>
+                            <div className="tenant-detail-card">
+                                <label>Subscription End (UTC)</label>
+                                <div className="value">
+                                    {formatUtcDateTime(subscriptionStatus.tenant.subscription_end_at)}
+                                </div>
+                            </div>
+                            <div className="tenant-detail-card">
+                                <label>Plan</label>
+                                <div className="value">
+                                    {subscriptionStatus.tenant.subscription_plan || 'N/A'}
+                                </div>
+                            </div>
+                            <div className="tenant-detail-card">
+                                <label>Billing Email</label>
+                                <div className="value">
+                                    {subscriptionStatus.tenant.billing_email || 'N/A'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {metrics && (
                     <div className="tenant-detail-section">

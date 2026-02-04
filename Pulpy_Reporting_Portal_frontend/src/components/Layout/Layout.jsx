@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { DataProvider } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { subscriptionAPI } from '../../services/api';
 import './Layout.css';
 
@@ -12,6 +13,8 @@ function Layout() {
     const [isSuspended, setIsSuspended] = useState(false);
     const [checkingStatus, setCheckingStatus] = useState(true);
     const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+    const [isExpired, setIsExpired] = useState(false);
+    const { user } = useAuth();
 
     const toggleSidebar = () => {
         setSidebarCollapsed(!sidebarCollapsed);
@@ -21,48 +24,78 @@ function Layout() {
         setMobileMenuOpen(!mobileMenuOpen);
     };
 
-    const getCountdownText = (status) => {
+    const formatUtcDateTime = (value) => {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return null;
+        return date.toLocaleString('en-US', {
+            timeZone: 'UTC',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+        });
+    };
+
+    const formatTimeRemaining = (endDate) => {
+        if (!endDate) return null;
+        const end = new Date(endDate);
+        if (Number.isNaN(end.getTime())) return null;
+        const diffMs = end.getTime() - Date.now();
+        if (diffMs <= 0) return null;
+        const totalMinutes = Math.ceil(diffMs / (60 * 1000));
+        const days = Math.floor(totalMinutes / (24 * 60));
+        const hours = Math.floor((totalMinutes - days * 24 * 60) / 60);
+        const minutes = totalMinutes - days * 24 * 60 - hours * 60;
+
+        const parts = [];
+        if (days > 0) parts.push(`${days} day${days !== 1 ? 's' : ''}`);
+        if (hours > 0) parts.push(`${hours} hour${hours !== 1 ? 's' : ''}`);
+        if (days === 0 && hours === 0) {
+            parts.push(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+        }
+        return parts.join(' ');
+    };
+
+    const getExpiringAlert = (status) => {
         const subscription = status?.subscription;
         if (!subscription || subscription.days_left === null) return null;
 
+        const endDate = subscription.end_date;
+        const remaining = formatTimeRemaining(endDate);
+        const endDateUtc = formatUtcDateTime(endDate);
+        if (!remaining || !endDateUtc) {
+            return null;
+        }
+
         if (subscription.is_trial) {
-            return `Trial: ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''} left`;
+            return `Trial: ${remaining} left (UTC ${endDateUtc})`;
         }
 
-        if (subscription.is_active) {
-            return `Subscription expires in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''}`;
+        if (!subscription.is_warning) {
+            return null;
         }
 
-        return null;
-    };
-
-    const getWarningMessage = (status) => {
-        const subscription = status?.subscription;
-        if (!subscription) return null;
-
-        if (subscription.is_expired) {
-            return 'Your access has expired. Please contact billing@track-myads.com to continue.';
-        }
-
-        if (subscription.is_warning && subscription.days_left !== null) {
-            if (subscription.is_trial) {
-                return `Trial ending in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''} — upgrade to avoid interruption`;
-            }
-            return `Subscription expires in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''}`;
-        }
-
-        return null;
+        return `Subscription expires in ${remaining} (UTC ${endDateUtc})`;
     };
 
     // Fetch subscription status on mount
     useEffect(() => {
         const checkTenantStatus = async () => {
+            if (!user?.tenant_id) {
+                setCheckingStatus(false);
+                return;
+            }
+
             try {
                 const response = await subscriptionAPI.getStatus();
                 if (response?.success) {
                     const status = response.data;
                     setSubscriptionStatus(status);
                     setIsSuspended(Boolean(status?.subscription?.is_suspended));
+                    setIsExpired(Boolean(status?.subscription?.is_expired));
                 } else {
                     setSubscriptionStatus(null);
                 }
@@ -82,7 +115,7 @@ function Layout() {
         };
 
         checkTenantStatus();
-    }, []);
+    }, [user?.tenant_id]);
 
     // Show loading while checking status
     if (checkingStatus) {
@@ -94,7 +127,7 @@ function Layout() {
     }
 
     // Show suspended message if tenant is suspended
-    if (isSuspended) {
+    if (isSuspended && user?.tenant_id) {
         return (
             <div className="layout-suspended">
                 <div className="suspended-container">
@@ -113,6 +146,24 @@ function Layout() {
         );
     }
 
+    if (isExpired && user?.tenant_id) {
+        return (
+            <div className="layout-expired">
+                <div className="expired-container">
+                    <div className="expired-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                        </svg>
+                    </div>
+                    <h2>Plan Expired</h2>
+                    <p>Your access has expired.</p>
+                    <p>Please contact billing@track-myads.com to continue.</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <DataProvider>
             <div className={`layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -122,29 +173,10 @@ function Layout() {
                     onCloseMobile={() => setMobileMenuOpen(false)}
                 />
                 <div className="layout-main">
-                    {subscriptionStatus && (
-                        <div className={`subscription-banner ${subscriptionStatus.subscription?.is_expired ? 'expired' : ''}`}>
-                            <div className="subscription-banner-content">
-                                <div className="subscription-banner-title">
-                                    {getWarningMessage(subscriptionStatus) || getCountdownText(subscriptionStatus)}
-                                </div>
-                                {subscriptionStatus.subscription?.is_warning && getCountdownText(subscriptionStatus) && (
-                                    <div className="subscription-banner-countdown">
-                                        {getCountdownText(subscriptionStatus)}
-                                    </div>
-                                )}
-                            </div>
-                            <a
-                                href="mailto:billing@track-myads.com"
-                                className="subscription-banner-action"
-                            >
-                                Contact Billing
-                            </a>
-                        </div>
-                    )}
                     <Header
                         onToggleSidebar={toggleSidebar}
                         onToggleMobileMenu={toggleMobileMenu}
+                        subscriptionAlert={getExpiringAlert(subscriptionStatus)}
                     />
                     <main className="layout-content">
                         <Outlet />

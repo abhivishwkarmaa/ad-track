@@ -606,8 +606,30 @@ export class TenantController {
           message: 'Tenant deleted permanently',
         });
       } else {
-        // Soft delete (suspend) - use suspendTenant method
-        return this.suspendTenant(request, reply);
+        // Soft delete (suspend)
+        const statusResult = await applyTenantStatusUpdate(id, 'SUSPENDED');
+        if (!statusResult.success) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: statusResult.error || 'Failed to suspend tenant',
+          });
+        }
+
+        if (existingRows[0].slug) {
+          await tenantResolutionService.invalidateTenantCache(existingRows[0].slug);
+        }
+
+        logger.info(`Tenant suspended: ${existingRows[0].name} (ID: ${id})`);
+
+        return reply.send({
+          success: true,
+          message: 'Tenant suspended successfully. All access is now blocked.',
+          data: {
+            tenant_id: id,
+            status: 'SUSPENDED',
+          },
+        });
       }
     } catch (error) {
       logger.error('TenantController.deleteTenant error:', error);

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { tenantsAPI } from '../../services/api';
+import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
 import './Tenant.css';
 
 function EditTenant() {
@@ -17,11 +17,19 @@ function EditTenant() {
         name: '',
         status: 'TRIAL',
     });
+    const [subscriptionForm, setSubscriptionForm] = useState({
+        start_date: '',
+        end_date: '',
+        plan: 'basic',
+        billing_email: '',
+    });
+    const [subscriptionSaving, setSubscriptionSaving] = useState(false);
 
     const [errors, setErrors] = useState({});
 
     useEffect(() => {
         fetchTenant();
+        fetchSubscriptionStatus();
     }, [id, refreshKey]);
 
     const fetchTenant = async () => {
@@ -46,12 +54,40 @@ function EditTenant() {
         }
     };
 
+    const toInputDateTime = (value) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toISOString().slice(0, 16);
+    };
+
+    const fetchSubscriptionStatus = async () => {
+        try {
+            const response = await adminSubscriptionAPI.getTenantStatus(id);
+            if (response.success) {
+                setSubscriptionForm({
+                    start_date: toInputDateTime(response.data.tenant.subscription_start_at),
+                    end_date: toInputDateTime(response.data.tenant.subscription_end_at),
+                    plan: response.data.tenant.subscription_plan || 'basic',
+                    billing_email: response.data.tenant.billing_email || '',
+                });
+            }
+        } catch (error) {
+            console.error('Fetch subscription status error:', error);
+        }
+    };
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
         if (errors[name]) {
             setErrors(prev => ({ ...prev, [name]: '' }));
         }
+    };
+
+    const handleSubscriptionChange = (e) => {
+        const { name, value } = e.target;
+        setSubscriptionForm((prev) => ({ ...prev, [name]: value }));
     };
 
     const validate = () => {
@@ -89,6 +125,38 @@ function EditTenant() {
             toast.error(error.message || 'Failed to update tenant');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleSubscriptionSave = async () => {
+        if (!subscriptionForm.end_date) {
+            toast.error('Subscription end date is required');
+            return;
+        }
+
+        setSubscriptionSaving(true);
+        try {
+            const payload = {
+                end_date: new Date(subscriptionForm.end_date).toISOString(),
+                plan: subscriptionForm.plan || 'basic',
+                billing_email: subscriptionForm.billing_email || undefined,
+            };
+
+            if (subscriptionForm.start_date) {
+                payload.start_date = new Date(subscriptionForm.start_date).toISOString();
+            }
+
+            const response = await adminSubscriptionAPI.activateSubscription(id, payload);
+            if (response.success) {
+                toast.success('Subscription updated successfully!');
+            } else {
+                toast.error(response.message || 'Failed to update subscription');
+            }
+        } catch (error) {
+            console.error('Update subscription error:', error);
+            toast.error(error.message || 'Failed to update subscription');
+        } finally {
+            setSubscriptionSaving(false);
         }
     };
 
@@ -158,6 +226,65 @@ function EditTenant() {
                         </button>
                     </div>
                 </form>
+                <div className="tenant-detail-section" style={{ marginTop: '32px' }}>
+                    <h3>Subscription Settings</h3>
+                    <div className="tenant-detail-grid">
+                        <div className="tenant-detail-card">
+                            <label>Subscription Start (UTC)</label>
+                            <input
+                                className="tenant-subscription-input"
+                                type="datetime-local"
+                                name="start_date"
+                                value={subscriptionForm.start_date}
+                                onChange={handleSubscriptionChange}
+                                disabled={subscriptionSaving}
+                            />
+                        </div>
+                        <div className="tenant-detail-card">
+                            <label>Subscription End (UTC)</label>
+                            <input
+                                className="tenant-subscription-input"
+                                type="datetime-local"
+                                name="end_date"
+                                value={subscriptionForm.end_date}
+                                onChange={handleSubscriptionChange}
+                                disabled={subscriptionSaving}
+                            />
+                        </div>
+                        <div className="tenant-detail-card">
+                            <label>Plan</label>
+                            <input
+                                className="tenant-subscription-input"
+                                type="text"
+                                name="plan"
+                                value={subscriptionForm.plan}
+                                onChange={handleSubscriptionChange}
+                                disabled={subscriptionSaving}
+                            />
+                        </div>
+                        <div className="tenant-detail-card">
+                            <label>Billing Email</label>
+                            <input
+                                className="tenant-subscription-input"
+                                type="email"
+                                name="billing_email"
+                                value={subscriptionForm.billing_email}
+                                onChange={handleSubscriptionChange}
+                                disabled={subscriptionSaving}
+                            />
+                        </div>
+                    </div>
+                    <div className="tenant-form-actions" style={{ justifyContent: 'flex-start' }}>
+                        <button
+                            type="button"
+                            className="primary"
+                            disabled={subscriptionSaving}
+                            onClick={handleSubscriptionSave}
+                        >
+                            {subscriptionSaving ? 'Saving...' : 'Update Subscription'}
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     );

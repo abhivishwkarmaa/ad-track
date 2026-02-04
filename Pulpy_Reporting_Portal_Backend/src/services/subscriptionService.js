@@ -126,9 +126,11 @@ class SubscriptionService {
      * @param {Date} endDate - Subscription end date (UTC)
      * @param {string} plan - Subscription plan identifier
      * @param {number} adminId - Admin who activated the subscription
+     * @param {Date|null} startDate - Subscription start date (UTC)
+     * @param {string|null} billingEmail - Billing contact email
      * @returns {Promise<Object>} Updated tenant data
      */
-    async activateSubscription(tenantId, endDate, plan = 'basic', adminId = null) {
+    async activateSubscription(tenantId, endDate, plan = 'basic', adminId = null, startDate = null, billingEmail = null) {
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
@@ -145,22 +147,31 @@ class SubscriptionService {
 
             const tenant = rows[0];
             const now = new Date();
+            const activationStart = startDate || now;
 
             // Validate end date
-            if (endDate <= now) {
+            if (endDate <= activationStart) {
                 throw new Error('Subscription end date must be in the future');
             }
 
             // Update tenant
             await connection.query(
                 `UPDATE tenants 
-         SET subscription_start_at = ?, 
-             subscription_end_at = ?, 
-             subscription_plan = ?,
-             status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [now, endDate, plan, TENANT_STATES.ACTIVE, tenantId]
+        SET subscription_start_at = ?, 
+            subscription_end_at = ?, 
+            subscription_plan = ?,
+            billing_email = COALESCE(?, billing_email),
+            status = ?,
+            updated_at = UTC_TIMESTAMP()
+        WHERE id = ?`,
+                [
+                    activationStart,
+                    endDate,
+                    plan,
+                    billingEmail,
+                    activationStart <= now ? TENANT_STATES.ACTIVE : TENANT_STATES.EXPIRED,
+                    tenantId
+                ]
             );
 
             // Log to subscription history
@@ -172,11 +183,11 @@ class SubscriptionService {
                     tenantId,
                     'SUBSCRIPTION_ACTIVATED',
                     tenant.status,
-                    TENANT_STATES.ACTIVE,
+                    activationStart <= now ? TENANT_STATES.ACTIVE : TENANT_STATES.EXPIRED,
                     tenant.subscription_end_at,
                     endDate,
                     adminId,
-                    `Subscription activated. Plan: ${plan}`
+                    `Subscription activated. Plan: ${plan}${startDate ? `, start: ${activationStart.toISOString()}` : ''}`
                 ]
             );
 
@@ -187,6 +198,7 @@ class SubscriptionService {
                 tenantSlug: tenant.slug,
                 plan,
                 subscriptionEndAt: endDate,
+                subscriptionStartAt: activationStart,
                 adminId
             });
 
@@ -446,7 +458,7 @@ class SubscriptionService {
 
             // Get current tenant state
             const [rows] = await connection.query(
-                `SELECT id, slug, status, trial_end_at, subscription_end_at 
+                `SELECT id, slug, status, trial_end_at, subscription_start_at, subscription_end_at 
          FROM tenants WHERE id = ? FOR UPDATE`,
                 [tenantId]
             );
@@ -705,7 +717,10 @@ class SubscriptionService {
 
             // Check subscription first (takes precedence over trial)
             if (tenant.subscription_end_at) {
-                if (new Date(tenant.subscription_end_at) > now) {
+                const subscriptionStart = tenant.subscription_start_at ? new Date(tenant.subscription_start_at) : null;
+                if (subscriptionStart && subscriptionStart > now) {
+                    newState = TENANT_STATES.EXPIRED;
+                } else if (new Date(tenant.subscription_end_at) > now) {
                     newState = TENANT_STATES.ACTIVE;
                 } else {
                     newState = TENANT_STATES.EXPIRED;

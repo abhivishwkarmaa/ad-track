@@ -46,13 +46,14 @@ class SubscriptionController {
      * Body: {
      *   end_date: "2026-12-31T23:59:59Z",
      *   plan: "pro",
-     *   billing_email: "billing@example.com"
+     *   billing_email: "billing@example.com",
+     *   start_date: "2026-01-01T00:00:00Z"
      * }
      */
     async activateSubscription(request, reply) {
         try {
             const { tenantId } = request.params;
-            const { end_date, plan = 'basic', billing_email } = request.body;
+            const { end_date, plan = 'basic', billing_email, start_date } = request.body;
             const adminId = request.admin?.id;
 
             if (!tenantId) {
@@ -90,11 +91,33 @@ class SubscriptionController {
                 });
             }
 
+            let startDate = null;
+            if (start_date) {
+                startDate = new Date(start_date);
+                if (isNaN(startDate.getTime())) {
+                    return reply.code(400).send({
+                        success: false,
+                        error: 'Validation Error',
+                        message: 'Invalid start date format. Use ISO 8601 format (e.g., 2026-01-01T00:00:00Z)'
+                    });
+                }
+
+                if (endDate <= startDate) {
+                    return reply.code(400).send({
+                        success: false,
+                        error: 'Validation Error',
+                        message: 'End date must be after the start date'
+                    });
+                }
+            }
+
             const status = await subscriptionService.activateSubscription(
                 parseInt(tenantId),
                 endDate,
                 plan,
-                adminId
+                adminId,
+                startDate,
+                billing_email
             );
 
             logger.info('Subscription activated', {

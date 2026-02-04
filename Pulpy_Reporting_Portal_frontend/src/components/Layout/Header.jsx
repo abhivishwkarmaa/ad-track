@@ -39,7 +39,7 @@ const SearchIcon = () => (
 );
 
 
-function Header({ onToggleSidebar, onToggleMobileMenu }) {
+function Header({ onToggleSidebar, onToggleMobileMenu, subscriptionAlert }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const { isDarkMode, toggleTheme } = useTheme();
@@ -68,6 +68,11 @@ function Header({ onToggleSidebar, onToggleMobileMenu }) {
             </div>
 
             <div className="header-right">
+                {subscriptionAlert && (
+                    <div className="header-subscription-alert" title={subscriptionAlert}>
+                        {subscriptionAlert}
+                    </div>
+                )}
                 <button 
                     className="header-icon-btn theme-toggle-btn" 
                     onClick={toggleTheme}

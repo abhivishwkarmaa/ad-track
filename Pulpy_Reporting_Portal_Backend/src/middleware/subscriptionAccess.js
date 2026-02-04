@@ -317,8 +317,8 @@ export async function enforceSubscriptionAccess(request, reply) {
             });
         }
 
-        if (state === TENANT_STATES.EXPIRED && WRITE_METHODS.has(request.method)) {
-            logger.warn('Expired tenant write attempt', {
+        if (state === TENANT_STATES.EXPIRED) {
+            logger.warn('Expired tenant access attempt', {
                 tenantId: request.tenantId,
                 tenantSlug: status.tenant.slug,
                 url: request.url,

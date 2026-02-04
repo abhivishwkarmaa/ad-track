@@ -328,6 +328,18 @@ export const subscriptionAPI = {
     },
 };
 
+export const adminSubscriptionAPI = {
+    getTenantStatus: async (tenantId) => {
+        return apiRequest(`/api/admin/subscriptions/${tenantId}`);
+    },
+    activateSubscription: async (tenantId, data) => {
+        return apiRequest(`/api/admin/subscriptions/${tenantId}/activate`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+};
+
 // Offers API
 export const offersAPI = {
     getOffers: async (params = {}) => {
@@ -578,6 +590,7 @@ export default {
     authAPI,
     dashboardAPI,
     subscriptionAPI,
+    adminSubscriptionAPI,
     offersAPI,
     publishersAPI,
     advertisersAPI,
