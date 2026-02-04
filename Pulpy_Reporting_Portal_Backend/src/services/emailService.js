@@ -187,6 +187,24 @@ class EmailService {
   }
 
   /**
+   * Send tenant welcome email (admin-created tenant)
+   */
+  async sendTenantWelcomeEmail(data) {
+    if (!data?.adminEmail) {
+      logger.warn('⚠️ Tenant welcome email skipped: adminEmail not provided.');
+      return;
+    }
+
+    const html = this.getTenantWelcomeEmailTemplate(data);
+
+    return await this.sendEmail({
+      to: data.adminEmail,
+      subject: `Welcome to TrackMyAds - ${data.tenantName}`,
+      html,
+    });
+  }
+
+  /**
    * Notification email template (to admin)
    */
   getNotificationEmailTemplate(data) {
@@ -301,6 +319,76 @@ class EmailService {
 </body>
 </html>
     `;
+  }
+
+  /**
+   * Tenant welcome email template (to tenant admin)
+   */
+  getTenantWelcomeEmailTemplate(data) {
+    const tenantName = this.escapeHtml(data.tenantName);
+    const tenantSlug = this.escapeHtml(data.tenantSlug);
+    const adminName = this.escapeHtml(data.adminName || 'there');
+    const adminEmail = this.escapeHtml(data.adminEmail);
+    const loginUrl = this.escapeHtml(this.getTenantLoginUrl(data.tenantSlug));
+    const showPassword = Boolean(data.adminPassword);
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to TrackMyAds</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #ff6b35; margin: 0;">TrackMyAds</h1>
+    <p style="margin: 8px 0 0; color: #666;">Tenant onboarding details</p>
+  </div>
+
+  <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 30px;">
+    <h2 style="color: #333; margin-top: 0;">Welcome, ${adminName}!</h2>
+
+    <p style="color: #666; font-size: 16px;">
+      Your tenant <strong>${tenantName}</strong> has been created successfully. You can now access your portal using the details below.
+    </p>
+
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+      <p style="margin: 0 0 10px; color: #333; font-weight: bold;">Tenant Details</p>
+      <p style="margin: 4px 0; color: #666;"><strong>Name:</strong> ${tenantName}</p>
+      <p style="margin: 4px 0; color: #666;"><strong>Slug:</strong> ${tenantSlug}</p>
+      <p style="margin: 4px 0; color: #666;"><strong>Portal:</strong> <a href="${loginUrl}" style="color: #ff6b35; text-decoration: none;">${loginUrl}</a></p>
+    </div>
+
+    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+      <p style="margin: 0 0 10px; color: #333; font-weight: bold;">Admin Login</p>
+      <p style="margin: 4px 0; color: #666;"><strong>Email:</strong> ${adminEmail}</p>
+      ${showPassword ? `<p style="margin: 4px 0; color: #666;"><strong>Temporary Password:</strong> ${this.escapeHtml(data.adminPassword)}</p>` : ''}
+      ${showPassword ? '<p style="margin: 10px 0 0; color: #999; font-size: 13px;">For security, please change your password after the first login.</p>' : ''}
+    </div>
+
+    <p style="color: #666; font-size: 16px;">
+      If you need any help, please contact our support team.
+    </p>
+
+    <p style="color: #666; font-size: 16px; margin-top: 30px;">
+      Best regards,<br>
+      <strong style="color: #ff6b35;">The TrackMyAds Team</strong>
+    </p>
+  </div>
+</body>
+</html>
+    `;
+  }
+
+  /**
+   * Build tenant login URL
+   */
+  getTenantLoginUrl(tenantSlug) {
+    const baseDomain = process.env.TENANT_BASE_DOMAIN || 'track-myads.com';
+    const protocol = process.env.TENANT_PORTAL_PROTOCOL || 'https';
+    const loginPath = process.env.TENANT_LOGIN_PATH || '/login';
+    return `${protocol}://${tenantSlug}.${baseDomain}${loginPath}`;
   }
 
   /**

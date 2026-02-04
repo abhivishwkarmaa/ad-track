@@ -4,6 +4,7 @@ import { createErrorResponse } from '../utils/errorResponse.js';
 import bcrypt from 'bcrypt';
 
 import tenantResolutionService from '../services/tenantResolutionService.js';
+import emailService from '../services/emailService.js';
 
 export class TenantController {
   /**
@@ -95,6 +96,25 @@ export class TenantController {
           'SELECT id, name, slug, status, created_at FROM tenants WHERE id = ?',
           [tenantId]
         );
+
+        // Send tenant welcome email (best effort, do not block creation)
+        if (adminEmail) {
+          try {
+            await emailService.sendTenantWelcomeEmail({
+              tenantName: name,
+              tenantSlug: slug + '.track-myads.com',
+              adminName,
+              adminEmail,
+              adminPassword,
+            });
+          } catch (emailError) {
+            logger.warn('⚠️ Tenant welcome email failed to send:', {
+              tenant: slug,
+              adminEmail,
+              error: emailError?.message || emailError,
+            });
+          }
+        }
 
         return reply.code(201).send({
           success: true,
