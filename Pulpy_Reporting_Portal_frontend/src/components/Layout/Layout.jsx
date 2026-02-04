@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { DataProvider } from '../../context/DataContext';
-import { dashboardAPI } from '../../services/api';
+import { subscriptionAPI } from '../../services/api';
 import './Layout.css';
 
 function Layout() {
@@ -11,6 +11,7 @@ function Layout() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [isSuspended, setIsSuspended] = useState(false);
     const [checkingStatus, setCheckingStatus] = useState(true);
+    const [subscriptionStatus, setSubscriptionStatus] = useState(null);
 
     const toggleSidebar = () => {
         setSidebarCollapsed(!sidebarCollapsed);
@@ -20,13 +21,51 @@ function Layout() {
         setMobileMenuOpen(!mobileMenuOpen);
     };
 
-    // Check if tenant is suspended on mount
+    const getCountdownText = (status) => {
+        const subscription = status?.subscription;
+        if (!subscription || subscription.days_left === null) return null;
+
+        if (subscription.is_trial) {
+            return `Trial: ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''} left`;
+        }
+
+        if (subscription.is_active) {
+            return `Subscription expires in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''}`;
+        }
+
+        return null;
+    };
+
+    const getWarningMessage = (status) => {
+        const subscription = status?.subscription;
+        if (!subscription) return null;
+
+        if (subscription.is_expired) {
+            return 'Your access has expired. Please contact billing@track-myads.com to continue.';
+        }
+
+        if (subscription.is_warning && subscription.days_left !== null) {
+            if (subscription.is_trial) {
+                return `Trial ending in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''} — upgrade to avoid interruption`;
+            }
+            return `Subscription expires in ${subscription.days_left} day${subscription.days_left !== 1 ? 's' : ''}`;
+        }
+
+        return null;
+    };
+
+    // Fetch subscription status on mount
     useEffect(() => {
         const checkTenantStatus = async () => {
             try {
-                // Make a lightweight API call to check if tenant is accessible
-                await dashboardAPI.getDashboardCards();
-                setIsSuspended(false);
+                const response = await subscriptionAPI.getStatus();
+                if (response?.success) {
+                    const status = response.data;
+                    setSubscriptionStatus(status);
+                    setIsSuspended(Boolean(status?.subscription?.is_suspended));
+                } else {
+                    setSubscriptionStatus(null);
+                }
             } catch (err) {
                 const errorMessage = err?.message || err?.toString() || '';
                 const isForbidden = errorMessage.includes('Forbidden') || 
@@ -83,6 +122,26 @@ function Layout() {
                     onCloseMobile={() => setMobileMenuOpen(false)}
                 />
                 <div className="layout-main">
+                    {subscriptionStatus && (
+                        <div className={`subscription-banner ${subscriptionStatus.subscription?.is_expired ? 'expired' : ''}`}>
+                            <div className="subscription-banner-content">
+                                <div className="subscription-banner-title">
+                                    {getWarningMessage(subscriptionStatus) || getCountdownText(subscriptionStatus)}
+                                </div>
+                                {subscriptionStatus.subscription?.is_warning && getCountdownText(subscriptionStatus) && (
+                                    <div className="subscription-banner-countdown">
+                                        {getCountdownText(subscriptionStatus)}
+                                    </div>
+                                )}
+                            </div>
+                            <a
+                                href="mailto:billing@track-myads.com"
+                                className="subscription-banner-action"
+                            >
+                                Contact Billing
+                            </a>
+                        </div>
+                    )}
                     <Header
                         onToggleSidebar={toggleSidebar}
                         onToggleMobileMenu={toggleMobileMenu}

@@ -22,6 +22,7 @@ import postbackRoutes from './routes/postback.js';
 import reportRoutes from './routes/reports.js';
 import contactRoutes from './routes/contact.js';
 import testPostbackRoutes from './routes/testPostback.js';
+import subscriptionRoutes from './routes/subscription.js';
 
 const fastify = Fastify({
   logger: logger,
@@ -81,6 +82,12 @@ async function initializeServer() {
     await resolveTenant(request, reply);
   });
 
+  // Subscription enforcement (centralized tenant access control)
+  fastify.addHook('preHandler', async (request, reply) => {
+    const { enforceSubscriptionAccess } = await import('./middleware/subscriptionAccess.js');
+    await enforceSubscriptionAccess(request, reply);
+  });
+
   fastify.addHook('onResponse', responseLogger);
   fastify.setErrorHandler(errorHandler);
 
@@ -100,6 +107,7 @@ async function initializeServer() {
   await fastify.register(reportRoutes, { prefix: '/api/admin/reports' });
   await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
   await fastify.register(contactRoutes, { prefix: '/api' }); // Contact form endpoint
+  await fastify.register(subscriptionRoutes, { prefix: '/api' }); // Subscription management
 
   // 🔒 SECURE 404 Not Found Handler
   // Must be after routes - returns minimal response, logs full details server-side

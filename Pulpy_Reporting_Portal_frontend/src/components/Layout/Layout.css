@@ -31,6 +31,53 @@
     transition: padding var(--transition-normal), background-color var(--transition-normal);
 }
 
+.subscription-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 24px;
+    background: #fef3c7;
+    color: #92400e;
+    border-bottom: 1px solid #fde68a;
+}
+
+.subscription-banner.expired {
+    background: #fee2e2;
+    color: #991b1b;
+    border-bottom-color: #fecaca;
+}
+
+.subscription-banner-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+}
+
+.subscription-banner-title {
+    font-weight: 600;
+}
+
+.subscription-banner-countdown {
+    font-size: 13px;
+    opacity: 0.9;
+}
+
+.subscription-banner-action {
+    color: inherit;
+    text-decoration: none;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+.subscription-banner-action:hover {
+    opacity: 0.85;
+}
+
 /* Tablet (768px - 1024px) */
 @media (min-width: 769px) and (max-width: 1024px) {
     .layout-content {

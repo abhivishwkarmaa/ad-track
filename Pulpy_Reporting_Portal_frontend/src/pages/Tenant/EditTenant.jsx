@@ -15,7 +15,7 @@ function EditTenant() {
 
     const [formData, setFormData] = useState({
         name: '',
-        status: 'active',
+        status: 'TRIAL',
     });
 
     const [errors, setErrors] = useState({});
@@ -31,7 +31,7 @@ function EditTenant() {
             if (response.success) {
                 setFormData({
                     name: response.data.name || '',
-                    status: response.data.status || 'active',
+                    status: (response.data.status || 'TRIAL').toUpperCase(),
                 });
             } else {
                 toast.error('Failed to load tenant');
@@ -130,8 +130,10 @@ function EditTenant() {
                             onChange={handleChange}
                             disabled={saving}
                         >
-                            <option value="active">Active</option>
-                            <option value="suspended">Suspended</option>
+                            <option value="TRIAL">Trial</option>
+                            <option value="ACTIVE">Active</option>
+                            <option value="EXPIRED">Expired</option>
+                            <option value="SUSPENDED">Suspended</option>
                         </select>
                         <div className="help-text">
                             Note: Subdomain slug cannot be changed after creation.

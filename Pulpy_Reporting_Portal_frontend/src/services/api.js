@@ -321,6 +321,13 @@ export const dashboardAPI = {
     },
 };
 
+// Subscription API
+export const subscriptionAPI = {
+    getStatus: async () => {
+        return apiRequest('/api/subscription/status');
+    },
+};
+
 // Offers API
 export const offersAPI = {
     getOffers: async (params = {}) => {
@@ -570,6 +577,7 @@ export const contactSubmissionsAPI = {
 export default {
     authAPI,
     dashboardAPI,
+    subscriptionAPI,
     offersAPI,
     publishersAPI,
     advertisersAPI,

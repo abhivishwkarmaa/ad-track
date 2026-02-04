@@ -54,6 +54,29 @@ const TrashIcon = () => (
     </svg>
 );
 
+const normalizeStatus = (status) => String(status || '').toUpperCase();
+
+const getStatusLabel = (status) => {
+    switch (normalizeStatus(status)) {
+        case 'TRIAL':
+            return 'Trial';
+        case 'ACTIVE':
+            return 'Active';
+        case 'EXPIRED':
+            return 'Expired';
+        case 'SUSPENDED':
+            return 'Suspended';
+        default:
+            return 'Unknown';
+    }
+};
+
+const getStatusClass = (status) => {
+    const normalized = normalizeStatus(status);
+    const allowed = new Set(['TRIAL', 'ACTIVE', 'EXPIRED', 'SUSPENDED']);
+    return allowed.has(normalized) ? normalized.toLowerCase() : 'unknown';
+};
+
 function ManageTenant() {
     const toast = useToast();
     const navigate = useNavigate();
@@ -213,8 +236,10 @@ function ManageTenant() {
                 <div className="tenant-status-filter">
                     <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                         <option value="all">All Status</option>
-                        <option value="active">Active</option>
-                        <option value="suspended">Suspended</option>
+                        <option value="TRIAL">Trial</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="EXPIRED">Expired</option>
+                        <option value="SUSPENDED">Suspended</option>
                     </select>
                 </div>
             </div>
@@ -245,8 +270,8 @@ function ManageTenant() {
                                         <div className="tenant-slug">{tenant.slug}.track-myads.com</div>
                                     </td>
                                     <td>
-                                        <span className={`tenant-status ${tenant.status}`}>
-                                            {tenant.status === 'active' ? 'Active' : 'Suspended'}
+                                        <span className={`tenant-status ${getStatusClass(tenant.status)}`}>
+                                            {getStatusLabel(tenant.status)}
                                         </span>
                                     </td>
                                     <td>{formatDate(tenant.created_at)}</td>
@@ -268,16 +293,7 @@ function ManageTenant() {
                                                 <EditIcon />
                                                 Edit
                                             </Link>
-                                            {tenant.status === 'active' ? (
-                                                <button
-                                                    className="tenant-action-btn suspend"
-                                                    onClick={() => setActionModal({ open: true, type: 'suspend', tenant })}
-                                                    title="Suspend Tenant"
-                                                >
-                                                    <PauseIcon />
-                                                    Suspend
-                                                </button>
-                                            ) : (
+                                            {normalizeStatus(tenant.status) === 'SUSPENDED' ? (
                                                 <button
                                                     className="tenant-action-btn resume"
                                                     onClick={() => setActionModal({ open: true, type: 'resume', tenant })}
@@ -285,6 +301,15 @@ function ManageTenant() {
                                                 >
                                                     <PlayIcon />
                                                     Resume
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    className="tenant-action-btn suspend"
+                                                    onClick={() => setActionModal({ open: true, type: 'suspend', tenant })}
+                                                    title="Suspend Tenant"
+                                                >
+                                                    <PauseIcon />
+                                                    Suspend
                                                 </button>
                                             )}
                                             <button

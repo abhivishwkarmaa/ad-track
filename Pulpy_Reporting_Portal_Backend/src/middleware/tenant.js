@@ -90,7 +90,8 @@ export async function resolveTenant(request, reply) {
       }
 
       // 🔒 STRICT: Reject suspended tenants immediately
-      if (tenant.status !== 'active') {
+      const normalizedStatus = String(tenant.status || '').toUpperCase();
+      if (normalizedStatus === 'SUSPENDED') {
         // ✅ Log full details server-side
         logger.warn(`Suspended tenant access attempt: ${subdomain}`, {
           tenant: tenant,

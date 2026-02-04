@@ -12,6 +12,29 @@ const EditIcon = () => (
     </svg>
 );
 
+const normalizeStatus = (status) => String(status || '').toUpperCase();
+
+const getStatusLabel = (status) => {
+    switch (normalizeStatus(status)) {
+        case 'TRIAL':
+            return 'Trial';
+        case 'ACTIVE':
+            return 'Active';
+        case 'EXPIRED':
+            return 'Expired';
+        case 'SUSPENDED':
+            return 'Suspended';
+        default:
+            return 'Unknown';
+    }
+};
+
+const getStatusClass = (status) => {
+    const normalized = normalizeStatus(status);
+    const allowed = new Set(['TRIAL', 'ACTIVE', 'EXPIRED', 'SUSPENDED']);
+    return allowed.has(normalized) ? normalized.toLowerCase() : 'unknown';
+};
+
 function TenantDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -127,8 +150,8 @@ function TenantDetail() {
                         <div className="tenant-detail-card">
                             <label>Status</label>
                             <div className="value">
-                                <span className={`tenant-status ${tenant.status}`}>
-                                    {tenant.status === 'active' ? 'Active' : 'Suspended'}
+                                <span className={`tenant-status ${getStatusClass(tenant.status)}`}>
+                                    {getStatusLabel(tenant.status)}
                                 </span>
                             </div>
                         </div>

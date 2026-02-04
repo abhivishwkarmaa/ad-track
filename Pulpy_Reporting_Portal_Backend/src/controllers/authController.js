@@ -7,6 +7,7 @@ import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import emailService from '../services/emailService.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
+import subscriptionService from '../services/subscriptionService.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -321,8 +322,10 @@ export class AuthController {
           });
         }
 
-        // Verify tenant is active (already checked in tenant middleware, but double-check)
-        if (request.tenant && request.tenant.status !== 'active') {
+        // Verify tenant is not suspended (already checked in tenant middleware, but double-check)
+        if (request.tenant) {
+          const normalizedStatus = String(request.tenant.status || '').toUpperCase();
+          if (normalizedStatus === 'SUSPENDED') {
           logger.warn('[LOGIN] Suspended tenant login attempt', {
             email: admin.email,
             tenantId: requestTenantId,
@@ -333,12 +336,60 @@ export class AuthController {
             error: 'Tenant Suspended',
             message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
           });
+          }
         }
 
         // Tenant admin + matching tenant subdomain = ✅ OK
       }
 
-      // ✅ STEP 6: All validations passed - generate JWT token
+      // ✅ STEP 6: Handle subscription and trial logic (tenant users only)
+      if (userTenantId) {
+        try {
+          // Update tenant state based on current dates
+          await subscriptionService.updateTenantState(userTenantId);
+
+          // Get current subscription status
+          const subscriptionStatus = await subscriptionService.getTenantSubscriptionStatus(userTenantId);
+
+          // Start trial on first login if not already started
+          if (!subscriptionStatus.tenant.trial_start_at && !subscriptionStatus.tenant.subscription_start_at) {
+            logger.info('[LOGIN] Starting trial on first login', {
+              tenantId: userTenantId,
+              userId: admin.id,
+              email: admin.email
+            });
+            await subscriptionService.startTrial(userTenantId, admin.id);
+          }
+
+          // Re-fetch subscription status after potential trial start
+          const updatedStatus = await subscriptionService.getTenantSubscriptionStatus(userTenantId);
+
+          // Check if tenant has access
+          const state = updatedStatus.tenant.status;
+          if (state === 'SUSPENDED') {
+            logger.warn('[LOGIN] Suspended tenant login blocked', {
+              email: admin.email,
+              tenantId: userTenantId,
+              tenantSlug: updatedStatus.tenant.slug
+            });
+            return reply.code(403).send({
+              success: false,
+              error: 'Account Suspended',
+              message: 'Your account has been suspended. Please contact billing@track-myads.com for assistance.',
+              subscription_status: 'suspended'
+            });
+          }
+
+          // Note: EXPIRED tenants can still log in, but will have restricted access
+          // This is enforced by middleware on individual routes
+        } catch (subscriptionError) {
+          logger.error('[LOGIN] Error handling subscription logic:', subscriptionError);
+          // Don't block login if subscription check fails
+          // This ensures users can still access the system even if subscription service has issues
+        }
+      }
+
+      // ✅ STEP 7: All validations passed - generate JWT token
       const tenantId = userTenantId; // Use user's tenant_id (matches request tenant)
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
@@ -530,12 +581,15 @@ export class AuthController {
             message: 'Invalid session context',
           });
         }
-        if (request.tenant && request.tenant.status !== 'active') {
+        if (request.tenant) {
+          const normalizedStatus = String(request.tenant.status || '').toUpperCase();
+          if (normalizedStatus === 'SUSPENDED') {
           return reply.code(403).send({
             success: false,
             error: 'Tenant Suspended',
             message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
           });
+          }
         }
       }
 

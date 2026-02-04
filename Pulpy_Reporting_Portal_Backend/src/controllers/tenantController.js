@@ -13,6 +13,65 @@ const generateRandomPassword = (length = 12) => {
   return base.slice(0, length);
 };
 
+const normalizeTenantStatus = (status) => {
+  if (!status) return null;
+  const normalized = String(status).toUpperCase();
+  const allowedStatuses = new Set(['TRIAL', 'ACTIVE', 'EXPIRED', 'SUSPENDED']);
+  return allowedStatuses.has(normalized) ? normalized : null;
+};
+
+const getLegacyStatusValue = (normalizedStatus) => {
+  if (!normalizedStatus) return null;
+  if (normalizedStatus === 'SUSPENDED') return 'suspended';
+  if (normalizedStatus === 'ACTIVE') return 'active';
+  return null;
+};
+
+const statusesMatch = (currentStatus, desiredStatus) => {
+  const normalizedCurrent = normalizeTenantStatus(currentStatus);
+  const normalizedDesired = normalizeTenantStatus(desiredStatus);
+  return Boolean(normalizedCurrent && normalizedDesired && normalizedCurrent === normalizedDesired);
+};
+
+const applyTenantStatusUpdate = async (tenantId, desiredStatus) => {
+  const normalizedStatus = normalizeTenantStatus(desiredStatus);
+  if (!normalizedStatus) {
+    return { success: false, error: 'Invalid tenant status. Allowed values: TRIAL, ACTIVE, EXPIRED, SUSPENDED' };
+  }
+
+  await pool.query(
+    'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+    [normalizedStatus, tenantId]
+  );
+
+  const [statusRows] = await pool.query(
+    'SELECT status FROM tenants WHERE id = ?',
+    [tenantId]
+  );
+
+  const currentStatus = statusRows?.[0]?.status || null;
+  if (statusesMatch(currentStatus, normalizedStatus)) {
+    return { success: true, status: currentStatus };
+  }
+
+  const fallbackStatus = getLegacyStatusValue(normalizedStatus);
+  if (!fallbackStatus) {
+    return { success: false, error: 'Tenant status update failed due to schema mismatch. Please run the subscription migration.' };
+  }
+
+  await pool.query(
+    'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+    [fallbackStatus, tenantId]
+  );
+
+  const [fallbackRows] = await pool.query(
+    'SELECT status FROM tenants WHERE id = ?',
+    [tenantId]
+  );
+
+  return { success: true, status: fallbackRows?.[0]?.status || fallbackStatus };
+};
+
 export class TenantController {
   /**
    * Create a new tenant
@@ -20,7 +79,7 @@ export class TenantController {
    */
   async createTenant(request, reply) {
     try {
-      const { name, slug, status = 'active', adminEmail, adminName } = request.body;
+      const { name, slug, status = 'TRIAL', adminEmail, adminName } = request.body;
 
       // Validate input
       if (!name || !slug) {
@@ -59,9 +118,19 @@ export class TenantController {
 
       try {
         // Create tenant
+        const normalizedStatus = normalizeTenantStatus(status);
+        if (!normalizedStatus) {
+          await pool.query('ROLLBACK');
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: 'Invalid tenant status. Allowed values: TRIAL, ACTIVE, EXPIRED, SUSPENDED',
+          });
+        }
+
         const [tenantResult] = await pool.query(
           'INSERT INTO tenants (name, slug, status) VALUES (?, ?, ?)',
-          [name, slug, status]
+          [name, slug, normalizedStatus]
         );
 
         const tenantId = tenantResult.insertId || tenantResult[0]?.insertId;
@@ -185,7 +254,7 @@ export class TenantController {
       const params = [];
 
       if (status) {
-        query += ' WHERE status = ?';
+        query += ' WHERE UPPER(status) = UPPER(?)';
         params.push(status);
       }
 
@@ -198,7 +267,7 @@ export class TenantController {
       let countQuery = 'SELECT COUNT(*) as total FROM tenants';
       const countParams = [];
       if (status) {
-        countQuery += ' WHERE status = ?';
+        countQuery += ' WHERE UPPER(status) = UPPER(?)';
         countParams.push(status);
       }
       const [countRows] = await pool.query(countQuery, countParams);
@@ -284,23 +353,31 @@ export class TenantController {
       // Build update query dynamically
       const updates = [];
       const params = [];
+      const requestedStatus = status || null;
 
       if (name) {
         updates.push('name = ?');
         params.push(name);
       }
 
-      if (status) {
-        updates.push('status = ?');
-        params.push(status);
+      if (updates.length > 0) {
+        params.push(id);
+        await pool.query(
+          `UPDATE tenants SET ${updates.join(', ')} WHERE id = ?`,
+          params
+        );
       }
 
-      params.push(id);
-
-      await pool.query(
-        `UPDATE tenants SET ${updates.join(', ')} WHERE id = ?`,
-        params
-      );
+      if (requestedStatus) {
+        const statusResult = await applyTenantStatusUpdate(id, requestedStatus);
+        if (!statusResult.success) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: statusResult.error || 'Failed to update tenant status',
+          });
+        }
+      }
 
       // Invalidate cache
       if (existingRows[0] && existingRows[0].slug) {
@@ -347,7 +424,8 @@ export class TenantController {
 
       const tenant = existingRows[0];
 
-      if (tenant.status === 'suspended') {
+      const normalizedStatus = normalizeTenantStatus(tenant.status);
+      if (normalizedStatus === 'SUSPENDED') {
         return reply.code(400).send({
           success: false,
           error: 'Bad Request',
@@ -356,10 +434,14 @@ export class TenantController {
       }
 
       // Suspend tenant
-      await pool.query(
-        'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
-        ['suspended', id]
-      );
+      const statusResult = await applyTenantStatusUpdate(id, 'SUSPENDED');
+      if (!statusResult.success) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Validation Error',
+          message: statusResult.error || 'Failed to suspend tenant',
+        });
+      }
 
       // Invalidate cache
       if (tenant.slug) {
@@ -373,7 +455,7 @@ export class TenantController {
         message: 'Tenant suspended successfully. All access is now blocked.',
         data: {
           tenant_id: id,
-          status: 'suspended',
+          status: 'SUSPENDED',
         },
       });
     } catch (error) {
@@ -405,19 +487,24 @@ export class TenantController {
 
       const tenant = existingRows[0];
 
-      if (tenant.status === 'active') {
+      const normalizedStatus = normalizeTenantStatus(tenant.status);
+      if (normalizedStatus && normalizedStatus !== 'SUSPENDED') {
         return reply.code(400).send({
           success: false,
           error: 'Bad Request',
-          message: 'Tenant is already active',
+          message: 'Tenant is not suspended',
         });
       }
 
       // Resume tenant
-      await pool.query(
-        'UPDATE tenants SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
-        ['active', id]
-      );
+      const statusResult = await applyTenantStatusUpdate(id, 'ACTIVE');
+      if (!statusResult.success) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Validation Error',
+          message: statusResult.error || 'Failed to resume tenant',
+        });
+      }
 
       // Invalidate cache
       if (tenant.slug) {
@@ -431,7 +518,7 @@ export class TenantController {
         message: 'Tenant resumed successfully. Access has been restored.',
         data: {
           tenant_id: id,
-          status: 'active',
+          status: 'ACTIVE',
         },
       });
     } catch (error) {

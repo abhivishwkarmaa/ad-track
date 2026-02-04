@@ -232,9 +232,10 @@ export async function authenticateAdmin(request, reply) {
         });
       }
       
-      // Rule 3: Verify tenant is active (not suspended)
+      // Rule 3: Verify tenant is not suspended
       if (request.tenant) {
-        if (request.tenant.status !== 'active') {
+        const normalizedStatus = String(request.tenant.status || '').toUpperCase();
+        if (normalizedStatus === 'SUSPENDED') {
           logger.warn('[AUTH] Suspended tenant access attempt', {
             tenantId: tenantId,
             tenantSlug: request.tenant.slug,

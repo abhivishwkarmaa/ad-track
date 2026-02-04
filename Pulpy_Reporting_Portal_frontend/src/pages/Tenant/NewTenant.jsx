@@ -12,7 +12,7 @@ function NewTenant() {
     const [formData, setFormData] = useState({
         name: '',
         slug: '',
-        status: 'active',
+        status: 'TRIAL',
         adminEmail: '',
         adminName: '',
     });
@@ -143,8 +143,10 @@ function NewTenant() {
                             onChange={handleChange}
                             disabled={loading}
                         >
-                            <option value="active">Active</option>
-                            <option value="suspended">Suspended</option>
+                            <option value="TRIAL">Trial</option>
+                            <option value="ACTIVE">Active</option>
+                            <option value="EXPIRED">Expired</option>
+                            <option value="SUSPENDED">Suspended</option>
                         </select>
                     </div>
 

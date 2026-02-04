@@ -7,7 +7,7 @@ async function authRoutes(fastify, options) {
   fastify.post('/login', authController.login);
   fastify.post('/refresh', authController.refresh.bind(authController));
   fastify.post('/logout', authController.logout.bind(authController));
-
+  fastify.post('/register', authController.register);
   // Protected route (requires auth)
   fastify.get('/profile', {
     preHandler: authenticateAdmin,

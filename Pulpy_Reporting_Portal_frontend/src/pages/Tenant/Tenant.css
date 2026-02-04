@@ -144,9 +144,24 @@
     color: #065f46;
 }
 
+.tenant-status.trial {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.tenant-status.expired {
+    background: #e5e7eb;
+    color: #374151;
+}
+
 .tenant-status.suspended {
     background: #fee2e2;
     color: #991b1b;
+}
+
+.tenant-status.unknown {
+    background: #e0e7ff;
+    color: #3730a3;
 }
 
 .tenant-actions-cell {
