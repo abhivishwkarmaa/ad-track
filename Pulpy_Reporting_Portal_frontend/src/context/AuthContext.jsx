@@ -9,7 +9,7 @@ export function AuthProvider({ children }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
     const isLoggingOutRef = useRef(false);
-    const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+    const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours) of inactivity before logout
 
     useEffect(() => {
         startActivityTracking();
