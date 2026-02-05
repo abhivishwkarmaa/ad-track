@@ -1,9 +1,43 @@
 import dashboardService from '../services/dashboardService.js';
+import dashboardUnifiedService from '../services/dashboardUnifiedService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
 export class DashboardController {
+  async getUnifiedDashboard(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const data = await dashboardUnifiedService.getDashboard({
+        tenantId,
+        dateFrom: request.query.date_from,
+        dateTo: request.query.date_to,
+      });
+
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getUnifiedDashboard error:', error);
+      if (error?.message?.includes('Invalid date format')) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: error.message,
+        });
+      }
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
   async getDashboard(request, reply) {
     try {
       const tenantId = getTenantIdFromRequest(request);
@@ -18,12 +52,17 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        limit: request.query.limit,
+        group_by: request.query.group_by,
+        metric: request.query.metric,
       };
 
-      const stats = await dashboardService.getDashboardStats(filters, tenantId);
+      // ✅ Use Aggregated Service for single-roundtrip performance
+      const data = await dashboardService.getAggregatedDashboard(filters, tenantId);
+
       return reply.send({
         success: true,
-        data: stats,
+        data: data,
       });
     } catch (error) {
       logger.error('DashboardController.getDashboard error:', error);

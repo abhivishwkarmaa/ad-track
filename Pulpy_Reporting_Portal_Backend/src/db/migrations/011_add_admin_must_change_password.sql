@@ -1,2 +1,0 @@
-ALTER TABLE admin_users
-  ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0;

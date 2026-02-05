@@ -23,6 +23,7 @@ import reportRoutes from './routes/reports.js';
 import contactRoutes from './routes/contact.js';
 import testPostbackRoutes from './routes/testPostback.js';
 import subscriptionRoutes from './routes/subscription.js';
+import dashboardRoutes from './routes/dashboard.js';
 
 const fastify = Fastify({
   logger: logger,
@@ -105,6 +106,7 @@ async function initializeServer() {
   await fastify.register(trackingRoutes);
   await fastify.register(postbackRoutes);
   await fastify.register(reportRoutes, { prefix: '/api/admin/reports' });
+  await fastify.register(dashboardRoutes, { prefix: '/api' });
   await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
   await fastify.register(contactRoutes, { prefix: '/api' }); // Contact form endpoint
   await fastify.register(subscriptionRoutes, { prefix: '/api' }); // Subscription management

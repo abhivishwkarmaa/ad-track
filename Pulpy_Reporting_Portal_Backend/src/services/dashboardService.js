@@ -2,6 +2,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
+import reportService from './reportService.js';
 
 export class DashboardService {
   /**
@@ -756,8 +757,8 @@ export class DashboardService {
           public_offer_id as id,
           name,
           category,
-          thumbnail_url,
-          payout,
+          NULL as thumbnail_url,
+          affiliate_amount as payout,
           created_at
         FROM offers
         WHERE status = 'live' AND tenant_id = ?
@@ -782,10 +783,9 @@ export class DashboardService {
           c.id as click_id,
           c.created_at,
           o.name as offer_name,
-          o.thumbnail_url as offer_thumbnail,
+          NULL as offer_thumbnail,
           p.company_name as publisher_name,
           p.first_name,
-          p.last_name,
           conv.status as conversion_status,
           COALESCE(conv.amount, 0) as revenue
         FROM clicks c
@@ -805,7 +805,7 @@ export class DashboardService {
           name: row.offer_name,
           thumbnail: row.offer_thumbnail
         },
-        publisher: row.publisher_name || `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unknown',
+        publisher: row.publisher_name || row.first_name || 'Unknown',
         clicks: 1, // Individual log entry represents 1 click
         converted: !!row.conversion_status,
         conversion_status: row.conversion_status || 'No',
@@ -891,6 +891,55 @@ export class DashboardService {
       });
     } catch (error) {
       logger.error('DashboardService.getOfferStatistics error:', error);
+      throw error;
+    }
+  }
+
+  async getAggregatedDashboard(filters = {}, tenantId) {
+    if (!tenantId) throw new Error('Tenant ID required');
+
+    try {
+      const {
+        date_from,
+        date_to,
+        limit = 10,
+        group_by = 'hour'
+      } = filters;
+
+      // Execute all sub-queries in parallel
+      const [
+        cards,
+        performanceChart,
+        topOffers,
+        topAffiliates,
+        summary,
+        liveOffers,
+        recentActivity,
+        offerStatistics
+      ] = await Promise.all([
+        this.getDashboardCards({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
+        this.getPerformanceChart({ date_from, date_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
+        this.getTopOffers({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top offers:', err); return []; }),
+        this.getTopAffiliates({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top affiliates:', err); return { data: [] }; }),
+        reportService.getSummary({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; }),
+        this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
+        this.getRecentActivity(10, tenantId).catch(err => { logger.error('Error fetching recent activity:', err); return []; }),
+        this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; })
+      ]);
+
+      return {
+        cards,
+        performanceChart,
+        topOffers,
+        topAffiliates,
+        summary,
+        liveOffers,
+        recentActivity,
+        offerStatistics
+      };
+
+    } catch (error) {
+      logger.error('DashboardService.getAggregatedDashboard error:', error);
       throw error;
     }
   }

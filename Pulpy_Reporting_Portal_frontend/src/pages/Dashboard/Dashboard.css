@@ -890,45 +890,96 @@
 }
 
 /* Responsive adjustments for new cards - Auto-adjusting */
-.summary-reports-card,
-.recent-activity-card {
-    grid-column: span 1;
-}
+/* Desktop large screens (1200px+) - Strict 4-column grid for alignment */
+@media (min-width: 1200px) {
+    .dashboard-content {
+        grid-template-columns: repeat(4, 1fr);
+    }
 
-/* Desktop large screens */
-@media (min-width: 1025px) {
+    .quick-actions-card {
+        grid-column: span 1;
+        height: 400px; /* Match chart height nicely */
+    }
 
-    .summary-reports-card,
-    .recent-activity-card,
-    .publisher-performance-card {
+    /* Chart takes remaining 3 columns */
+    .chart-card {
+        grid-column: span 3;
+        height: 400px;
+    }
+
+    /* Full width rows */
+    .offer-stats-card,
+    .offer-statistics-card {
+        grid-column: span 4;
+        height: 500px;
+    }
+
+    /* Row 3: 1 + 1 + 2 = 4 */
+    .recent-offers-card {
+        grid-column: span 1;
+        height: 500px;
+    }
+
+    .affiliates-card {
+        grid-column: span 1;
+        height: 500px;
+    }
+
+    .summary-reports-card {
+        grid-column: span 2;
+        height: 500px;
+    }
+
+    /* Row 4: Full width activity */
+    .recent-activity-card {
+        grid-column: span 4;
+        height: 500px;
+    }
+    
+    .top-countries-card {
+        grid-column: span 2;
         height: 500px;
     }
 }
 
-/* Tablet (768px - 1024px) */
-@media (min-width: 769px) and (max-width: 1024px) {
-    .stats-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-    }
-
+/* Laptop/Tablet (768px - 1199px) - 2-column grid */
+@media (min-width: 769px) and (max-width: 1199px) {
     .dashboard-content {
         grid-template-columns: repeat(2, 1fr);
         gap: 18px;
     }
 
-    .summary-grid {
-        grid-template-columns: repeat(4, 1fr);
+    .quick-actions-card {
+        grid-column: span 1;
     }
 
-    .quick-actions-grid {
-        grid-template-columns: repeat(4, 1fr);
+    .chart-card {
+        grid-column: span 1;
     }
 
-    .summary-reports-card,
-    .recent-activity-card,
-    .publisher-performance-card {
-        height: 450px;
+    .offer-stats-card,
+    .offer-statistics-card {
+        grid-column: span 2;
+    }
+
+    .recent-offers-card {
+        grid-column: span 1;
+    }
+
+    .affiliates-card {
+        grid-column: span 1;
+    }
+
+    .summary-reports-card {
+        grid-column: span 2;
+    }
+
+    .recent-activity-card {
+        grid-column: span 2;
+    }
+    
+    .top-countries-card {
+        grid-column: span 2;
     }
 }
 
@@ -977,7 +1028,13 @@
 
     .dashboard-content {
         grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
         gap: 16px;
+    }
+    
+    .dashboard-card {
+        width: 100%;
     }
 
     .summary-grid {
@@ -995,6 +1052,10 @@
     .action-btn {
         padding: 12px 8px;
     }
+    
+    .chart-card {
+        height: 350px;
+    }
 
     .table-header,
     .table-row {
@@ -1002,10 +1063,6 @@
         gap: 8px;
         padding: 10px 12px;
         font-size: 11px;
-    }
-
-    .publisher-stats {
-        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
     }
 
     .card-header {
@@ -1026,8 +1083,12 @@
 
     .summary-reports-card,
     .recent-activity-card,
-    .publisher-performance-card {
-        height: 400px;
+    .publisher-performance-card,
+    .offer-stats-card,
+    .offer-statistics-card,
+    .top-countries-card {
+        height: auto;
+        max-height: 500px;
     }
 
     .offer-row,
@@ -1036,346 +1097,15 @@
         flex-wrap: wrap;
         gap: 8px;
     }
-
-    .offer-meta {
-        flex-wrap: wrap;
-        gap: 6px;
-    }
 }
 
 @media (max-width: 480px) {
-    .dashboard-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
-        padding-bottom: 12px;
-    }
-
     .dashboard-header-left h1 {
         font-size: 22px;
         margin-bottom: 4px;
     }
-
-    .dashboard-date {
-        font-size: 12px;
-    }
-
-    .welcome-text {
-        font-size: 12px;
-    }
-
+    
     .stats-grid {
         grid-template-columns: 1fr;
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-
-    .stat-card {
-        padding: 14px;
-    }
-
-    .stat-info {
-        padding-right: 60px;
-    }
-
-    .stat-value {
-        font-size: 20px;
-    }
-
-    .stat-label {
-        font-size: 10px;
-    }
-
-    .stat-icon {
-        width: 32px;
-        height: 32px;
-    }
-
-    .stat-icon svg {
-        width: 16px;
-        height: 16px;
-    }
-
-    .dashboard-content {
-        gap: 12px;
-    }
-
-    .summary-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-        padding: 12px;
-    }
-
-    .summary-item {
-        padding: 10px;
-    }
-
-    .summary-value {
-        font-size: 14px;
-    }
-
-    .summary-label {
-        font-size: 10px;
-    }
-
-    .quick-actions-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-        padding: 12px;
-    }
-
-    .action-btn {
-        padding: 12px 8px;
-        min-height: 80px;
-    }
-
-    .action-icon {
-        width: 32px;
-        height: 32px;
-    }
-
-    .action-btn span {
-        font-size: 11px;
-    }
-
-    .card-header h3 {
-        font-size: 14px;
-    }
-
-    .table-header,
-    .table-row {
-        grid-template-columns: 1fr;
-        gap: 4px;
-        padding: 10px;
-        font-size: 12px;
-    }
-
-    .table-header span,
-    .table-row>div {
-        padding: 6px 0;
-        border-bottom: 1px solid var(--border-light);
-    }
-
-    .table-header span:last-child,
-    .table-row>div:last-child {
-        border-bottom: none;
-    }
-
-    .publisher-stats {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-    }
-
-    .offer-row,
-    .affiliate-row {
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 12px;
-        gap: 8px;
-    }
-
-    .offer-meta {
-        width: 100%;
-        justify-content: flex-start;
-        flex-wrap: wrap;
-    }
-
-    .offers-list,
-    .affiliates-list {
-        max-height: 250px;
-    }
-
-    .summary-reports-card,
-    .recent-activity-card,
-    .publisher-performance-card {
-        height: 350px;
-    }
-}
-
-/* Offer Statistics Table */
-.offer-statistics-card {
-    grid-column: 1 / -1;
-    height: 500px;
-    display: flex;
-    flex-direction: column;
-}
-
-.offer-stats-table-wrapper {
-    overflow-x: auto;
-    overflow-y: auto;
-    flex: 1;
-    /* Premium Scrollbar */
-    scrollbar-width: thin;
-    scrollbar-color: var(--primary-color) transparent;
-    border-radius: 0 0 var(--radius-md) var(--radius-md);
-}
-
-.offer-stats-table-wrapper::-webkit-scrollbar {
-    height: 6px;
-    width: 6px;
-}
-
-.offer-stats-table-wrapper::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.offer-stats-table-wrapper::-webkit-scrollbar-thumb {
-    background-color: var(--border-light);
-    border-radius: 20px;
-}
-
-.offer-stats-table-wrapper::-webkit-scrollbar-thumb:hover {
-    background-color: var(--primary-color);
-}
-
-.offer-stats-table {
-    padding: 0;
-}
-
-.stats-table-header {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) 100px 120px 90px 140px 140px 120px;
-    gap: 16px;
-    padding: 14px 16px;
-    background: var(--bg-primary);
-    border-bottom: 1px solid var(--border-light);
-    min-width: 1050px; /* Ensure table maintains structure */
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-.stats-table-header span {
-    text-align: left;
-}
-
-.stats-table-header span:not(:first-child) {
-    text-align: right;
-}
-
-.stats-table-row {
-    display: grid;
-    grid-template-columns: minmax(280px, 1fr) 100px 120px 90px 140px 140px 120px;
-    gap: 16px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border-light);
-    min-width: 1050px; /* Ensure alignment with header */
-    transition: var(--transition-fast);
-    align-items: center;
-}
-
-.stats-table-row:hover {
-    background: rgba(0, 217, 255, 0.05);
-}
-
-.offer-stats-name {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    text-align: left;
-}
-
-.offer-name-text {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: left;
-}
-
-.offer-id-text {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-align: left;
-}
-
-.stats-value {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    text-align: right;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-}
-
-.cr-value {
-    text-align: right;
-}
-
-.positive-cr {
-    color: green;
-    font-weight: 600;
-}
-
-.payout-value {
-    color: #ffb800;
-}
-
-.revenue-value {
-    color: #00d9ff;
-}
-
-.profit-value {
-    text-align: right;
-}
-
-.positive-profit {
-    color: green;
-    font-weight: 600;
-}
-
-.negative-profit {
-    color: #ff4444;
-    font-weight: 600;
-}
-
-/* Responsive for offer stats table */
-/* Top Countries - Restrict Height */
-.top-countries-card {
-    grid-column: span 1;
-    height: 500px;
-    display: flex;
-    flex-direction: column;
-}
-
-@media (min-width: 1025px) {
-
-    .offer-statistics-card,
-    .top-countries-card {
-        height: 500px;
-    }
-}
-
-@media (min-width: 769px) and (max-width: 1024px) {
-
-    .offer-statistics-card,
-    .top-countries-card {
-        height: 450px;
-        grid-column: 1 / -1;
-    }
-}
-
-@media (max-width: 768px) {
-
-    .offer-statistics-card,
-    .top-countries-card {
-        height: 400px;
-        grid-column: 1 / -1;
-    }
-}
-
-@media (max-width: 480px) {
-
-    .offer-statistics-card,
-    .top-countries-card {
-        height: 350px;
     }
 }
