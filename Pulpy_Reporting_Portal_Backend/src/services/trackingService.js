@@ -180,6 +180,7 @@ export class TrackingService {
       // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
       // 🔥 CHANGED: Use publisher.id (internal DB ID) for assignment lookup
       let assignment = await cacheService.getAssignment(publisher.id, offer.id, tenantId);
+      console.log('assignment', assignment);
       // If assignment not found in cache, try direct DB query with tenant_id
       if (!assignment) {
         try {
@@ -226,8 +227,14 @@ export class TrackingService {
       // ============================================
       // 🕵️ TEST POSTBACK INTERCEPTION
       // ============================================
-      // Check Redis for test:postback:{tenantId}:{internal_publisher_id}:{internal_offer_id}
-      // (Session is set by /api/test-postback/start after resolving public offer_id/pub_id from URL to internal IDs)
+      // Check if there is an active test session for this tenant
+      console.log('Checking for test session...');
+      console.log('tenantId:', tenantId);
+      console.log('offer.id:', offer.id);
+      console.log('publisher.id:', publisher.id);
+      console.log('assignment.id:', assignment.id);
+      console.log('query:', query);
+      // console.log('request:', request);
       const testResult = await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
       if (testResult) {
         return testResult; // 🛑 EXIT EARLY: No Production DB Writes
@@ -548,7 +555,7 @@ export class TrackingService {
 
   async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {
     try {
-      // ✅ Key uses INTERNAL IDs (same as set by /api/test-postback/start after resolving public IDs from URL)
+      // ✅ Key Pattern: test:postback:{tenant_id}:{publisher_id}:{offer_id}
       const key = `test:postback:${tenantId}:${publisher.id}:${offer.id}`;
       const sessionRaw = await redis.get(key);
 
