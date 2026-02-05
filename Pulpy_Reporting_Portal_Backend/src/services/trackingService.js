@@ -180,7 +180,7 @@ export class TrackingService {
       // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
       // 🔥 CHANGED: Use publisher.id (internal DB ID) for assignment lookup
       let assignment = await cacheService.getAssignment(publisher.id, offer.id, tenantId);
-
+      console.log('assignment', assignment);
       // If assignment not found in cache, try direct DB query with tenant_id
       if (!assignment) {
         try {

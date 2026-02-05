@@ -607,13 +607,6 @@ export class AdminController {
   }
   async listAssignments(request, reply) {
     try {
-      const filters = {};
-      if (request.query.publisher_id) {
-        filters.publisher_id = parseInt(request.query.publisher_id);
-      }
-      if (request.query.offer_id) {
-        filters.offer_id = parseInt(request.query.offer_id);
-      }
       // ✅ CRITICAL: Get tenant_id from request for tenant isolation
       const tenantId = getTenantIdFromRequest(request);
       if (!tenantId) {
@@ -622,6 +615,19 @@ export class AdminController {
           error: 'Bad Request',
           message: 'Tenant context required',
         });
+      }
+
+      const filters = {};
+      if (request.query.publisher_id) {
+        const pub = await publisherService.findById(request.query.publisher_id, tenantId);
+        filters.publisher_id = pub ? pub.id : request.query.publisher_id;
+      }
+      if (request.query.offer_id) {
+        const offer = await offerService.getOfferById(request.query.offer_id, tenantId);
+        filters.offer_id = offer ? offer.id : request.query.offer_id;
+      }
+      if (request.query.status) {
+        filters.status = request.query.status;
       }
 
       const assignments = await assignmentService.findAll(filters, tenantId);
@@ -716,10 +722,15 @@ export class AdminController {
 
       const format = request.query.format || 'standard'; // 'standard' or 'alternative'
 
+      // ✅ Resolve Public Assignment ID to Internal ID for the service call
+      const assignment = await assignmentService.findById(request.params.id, tenantId);
+      const internalAssignmentId = assignment ? assignment.internal_id : request.params.id;
+
       const trackingURL = await assignmentService.generateTrackingURL(
-        request.params.id,
+        internalAssignmentId,
         baseURL,
-        format
+        format,
+        tenantId
       );
       if (!trackingURL) {
         return reply.code(404).send({

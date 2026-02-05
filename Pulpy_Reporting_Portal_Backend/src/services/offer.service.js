@@ -438,11 +438,12 @@ class OfferService {
     }
   }
 
-  async getOfferById(id, tenantId = null) {
+  async getOfferById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
+    console.log(`[OfferService] getOfferById id=${id}, tenantId=${tenantId}, internalOnly=${internalOnly}`);
 
-    // 1. Try Public ID / Display ID first (as requested: "use public id as primary for navigating")
-    if (tenantId) {
+    // 1. Try Public ID / Display ID first (unless searching strictly by internal ID)
+    if (tenantId && !internalOnly) {
       // Look by public_offer_id OR the sequential display_id
       const publicQuery = `
         SELECT * FROM (

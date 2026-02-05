@@ -94,10 +94,10 @@ export class AssignmentService {
             notes = VALUES(notes),
             status = VALUES(status)`,
           [
-            pubData.publisher_id,
-            offer_id,
-            tenantId, // ✅ CRITICAL: Include tenant_id
-            publicAssignmentId, // 🔥 NEW: Add public_assignment_id
+            publisher.id, // 🔥 Use resolved internal ID
+            offer.id,     // 🔥 Use resolved internal ID
+            tenantId,
+            publicAssignmentId,
             pubData.payout_override || null,
             pubData.conversion_approval_percentage || null,
             cappingBudgetDuration,
@@ -192,10 +192,10 @@ export class AssignmentService {
         notes = VALUES(notes),
         status = VALUES(status)`,
       [
-        data.publisher_id,
-        data.offer_id,
-        tenantId, // ✅ CRITICAL: Include tenant_id
-        publicAssignmentId, // 🔥 NEW: Add public_assignment_id
+        publisher.id, // 🔥 Use resolved internal ID
+        offer.id,     // 🔥 Use resolved internal ID
+        tenantId,
+        publicAssignmentId,
         data.payout_override || null,
         data.cap_override || null,
         callbackUrl,
@@ -216,7 +216,7 @@ export class AssignmentService {
        JOIN offers o ON po.offer_id = o.id
        WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
        LIMIT 1`,
-      [data.publisher_id, data.offer_id, tenantId]
+      [publisher.id, offer.id, tenantId]
     );
 
     const assignment = Array.isArray(rows) ? rows[0] : rows;
@@ -229,10 +229,12 @@ export class AssignmentService {
     return {
       id: assignment.public_assignment_id || assignment.id,
       internal_id: assignment.id,
-      publisher_id: assignment.publisher_id,
-      offer_id: assignment.offer_id,
+      publisher_id: assignment.public_publisher_id || assignment.publisher_id, // 🔥 Public ID
+      internal_publisher_id: assignment.publisher_id,
+      offer_id: assignment.public_offer_id || assignment.offer_id, // 🔥 Public ID
+      internal_offer_id: assignment.offer_id,
       payout_override: assignment.payout_override,
-      cap_override: assignment.cap_override, // Legacy field
+      cap_override: assignment.cap_override,
       conversion_approval_percentage: assignment.conversion_approval_percentage,
       capping_budget: assignment.capping_budget_duration ? {
         duration: assignment.capping_budget_duration,
@@ -247,6 +249,7 @@ export class AssignmentService {
       notes: assignment.notes,
       status: assignment.status,
       assigned_at: assignment.assigned_at,
+      tenant_id: assignment.tenant_id,
       // Related data
       publisher_email: assignment.publisher_email,
       publisher_company: assignment.publisher_company,
@@ -255,35 +258,47 @@ export class AssignmentService {
     };
   }
 
-  async findById(id, tenantId = null) {
-    if (!id) return null;
+  async findById(id, tenantId = null, internalOnly = false) {
+    if (id === undefined || id === null || id === '') return null;
+    // Normalize id (route params can be string; ensure we don't pass path segments like "2/tracking-url")
+    const idStr = String(id).trim();
+    const idNum = Number(idStr);
+    const numericId = Number.isInteger(idNum) ? idNum : idStr;
 
-    // 1. Try Public ID first
-    if (tenantId) {
-      const [publicRows] = await pool.query(
-        `SELECT po.*, 
-                p.email as publisher_email, p.company_name as publisher_company,
-                o.name as offer_name, o.category as offer_category
-         FROM publisher_offers po
-         JOIN publishers p ON po.publisher_id = p.id
-         JOIN offers o ON po.offer_id = o.id
-         WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
-        [id, tenantId]
-      );
-      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
-        return this.formatAssignment(Array.isArray(publicRows) ? publicRows[0] : publicRows);
+    // 1. Try Public ID first (unless strict internal lookup)
+    if (tenantId && !internalOnly) {
+      try {
+        const [publicRows] = await pool.query(
+          `SELECT po.*, 
+                  p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+                  o.name as offer_name, o.category as offer_category, o.public_offer_id
+           FROM publisher_offers po
+           JOIN publishers p ON po.publisher_id = p.id
+           JOIN offers o ON po.offer_id = o.id
+           WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
+          [numericId, tenantId]
+        );
+        if (publicRows && publicRows.length > 0) {
+          return this.formatAssignment(publicRows[0]);
+        }
+      } catch (err) {
+        if (err.code === 'ER_BAD_FIELD_ERROR') {
+          logger.warn('assignmentService.findById: public_assignment_id column missing, using internal id only');
+        } else {
+          throw err;
+        }
       }
     }
 
-    // 2. Fallback to internal ID
+    // 2. Fallback to internal ID (use numeric id for primary key lookup)
     let query = `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company,
-              o.name as offer_name, o.category as offer_category
+              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+              o.name as offer_name, o.category as offer_category, o.public_offer_id
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
        WHERE po.id = ?`;
-    const params = [id];
+    const params = [numericId];
 
     if (tenantId) {
       query += ' AND po.tenant_id = ?';
@@ -291,15 +306,15 @@ export class AssignmentService {
     }
 
     const [rows] = await pool.query(query, params);
-    const assignment = Array.isArray(rows) ? rows[0] : rows;
-    return this.formatAssignment(assignment);
+    const assignment = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    return assignment ? this.formatAssignment(assignment) : null;
   }
 
   async findByPublisherAndOffer(publisherId, offerId, tenantId) {
     const [rows] = await pool.query(
       `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company,
-              o.name as offer_name, o.category as offer_category
+              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+              o.name as offer_name, o.category as offer_category, o.public_offer_id
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
@@ -321,8 +336,8 @@ export class AssignmentService {
 
     let query = `
       SELECT po.*, 
-             p.email as publisher_email, p.company_name as publisher_company,
-             o.name as offer_name, o.category as offer_category
+             p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+             o.name as offer_name, o.category as offer_category, o.public_offer_id
       FROM publisher_offers po
       JOIN publishers p ON po.publisher_id = p.id
       JOIN offers o ON po.offer_id = o.id
@@ -351,37 +366,40 @@ export class AssignmentService {
     return rows.map(row => this.formatAssignment(row));
   }
 
-  async generateTrackingURL(assignmentId, baseURL, format = 'standard') {
-    const assignment = await this.findById(assignmentId);
+  async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null) {
+    const assignment = await this.findById(assignmentId, tenantId);
     if (!assignment) {
       return null;
     }
 
-    // 🔥 CRITICAL: Fetch offer to get public_offer_id for tracking URL
-    const offer = await offerService.getOfferById(assignment.offer_id, assignment.tenant_id || null);
+    // 🔥 CRITICAL: Use internal IDs for DB lookups (assignment from formatAssignment has offer_id/publisher_id as public IDs)
+    const internalOfferId = assignment.internal_offer_id ?? assignment.offer_id;
+    const internalPublisherId = assignment.internal_publisher_id ?? assignment.publisher_id;
+
+    // 🔥 CRITICAL: Fetch offer strictly by Internal ID to avoid Public ID collision
+    const offer = await offerService.getOfferById(internalOfferId, tenantId, true);
     if (!offer) {
       logger.error('Offer not found for assignment', {
         assignment_id: assignmentId,
-        offer_id: assignment.offer_id,
-        tenant_id: assignment.tenant_id
+        internal_offer_id: internalOfferId,
+        tenant_id: tenantId
       });
       return null;
     }
 
-    // 🔥 CRITICAL: Use public_offer_id in tracking URLs (not internal database ID)
-    const publicOfferId = offer.public_offer_id;
+    // 🔥 CRITICAL: Use public_offer_id in tracking URLs (fall back to display_id then internal ID)
+    const publicOfferId = offer.public_offer_id || offer.display_id || offer.id;
     if (!publicOfferId) {
-      logger.error('Offer missing public_offer_id', {
+      logger.error('Offer missing public identity', {
         offer_id: offer.id,
         offer_name: offer.name,
-        tenant_id: offer.tenant_id
+        tenant_id: tenantId
       });
-      // Fallback to internal ID if public_offer_id is missing (shouldn't happen)
       return null;
     }
 
-    // 🔥 CRITICAL: Fetch publisher to get public_publisher_id
-    const publisher = await publisherService.findById(assignment.publisher_id, assignment.tenant_id || null);
+    // 🔥 CRITICAL: Fetch publisher strictly by Internal ID
+    const publisher = await publisherService.findById(internalPublisherId, tenantId, true);
     const publicPublisherId = publisher ? (publisher.public_publisher_id || publisher.id) : assignment.publisher_id;
 
     if (format === 'alternative') {
@@ -411,8 +429,8 @@ export class AssignmentService {
     );
   }
 
-  async getPayout(assignmentId) {
-    const assignment = await this.findById(assignmentId);
+  async getPayout(assignmentId, tenantId = null) {
+    const assignment = await this.findById(assignmentId, tenantId);
     if (!assignment) {
       return null;
     }
@@ -422,7 +440,7 @@ export class AssignmentService {
       return parseFloat(assignment.payout_override);
     }
 
-    const offer = await offerService.getOfferById(assignment.offer_id, assignment.tenant_id || null);
+    const offer = await offerService.getOfferById(assignment.offer_id, tenantId, true);
     return offer ? parseFloat(offer.affiliate_model_cost) : null;
   }
 

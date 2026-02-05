@@ -115,19 +115,20 @@ class OfferPublicIdService {
      */
     async getOfferByPublicId(publicOfferId, tenantId, status = 'live') {
         try {
-            let query = `
-        SELECT * FROM offers 
-        WHERE tenant_id = ? 
-        AND public_offer_id = ?
-      `;
-            const params = [tenantId, publicOfferId];
-
-            if (status) {
-                query += ' AND status = ?';
-                params.push(status);
-            }
-
-            query += ' LIMIT 1';
+            // Use subquery to calculate display_id (sequential ID per tenant)
+            const query = `
+                SELECT * FROM (
+                    SELECT o.*, 
+                    (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+                    FROM offers o 
+                    WHERE o.tenant_id = ?
+                ) t 
+                WHERE (t.public_offer_id = ? OR t.display_id = ?)
+                ${status ? ' AND t.status = ?' : ''}
+                LIMIT 1
+            `;
+            const params = [tenantId, publicOfferId, publicOfferId];
+            if (status) params.push(status);
 
             const [rows] = await pool.query(query, params);
             return rows[0] || null;

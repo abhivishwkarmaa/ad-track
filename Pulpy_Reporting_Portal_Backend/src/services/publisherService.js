@@ -68,13 +68,13 @@ export class PublisherService {
     }
   }
 
-  async findById(id, tenantId = null) {
+  async findById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
 
     const fields = 'id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at';
 
-    // 1. Try Public ID first
-    if (tenantId) {
+    // 1. Try Public ID first (unless strict internal lookup)
+    if (tenantId && !internalOnly) {
       const [publicRows] = await pool.query(
         `SELECT ${fields} FROM publishers WHERE public_publisher_id = ? AND tenant_id = ? LIMIT 1`,
         [id, tenantId]
