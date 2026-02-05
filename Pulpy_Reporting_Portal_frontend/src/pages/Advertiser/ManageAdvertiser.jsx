@@ -303,14 +303,14 @@ function ManageAdvertiser() {
                                             <button
                                                 className="advertiser-action-btn"
                                                 title="View Details"
-                                                onClick={() => navigate(`/advertiser/detail/${advertiser.id}`)}
+                                                onClick={() => navigate(`/advertiser/detail/${advertiser.public_advertiser_id || advertiser.id}`)}
                                             >
                                                 <EyeIcon />
                                             </button>
                                             <button
                                                 className="advertiser-action-btn"
                                                 title="Edit"
-                                                onClick={() => navigate(`/advertiser/edit/${advertiser.id}`)}
+                                                onClick={() => navigate(`/advertiser/edit/${advertiser.public_advertiser_id || advertiser.id}`)}
                                             >
                                                 <EditIcon />
                                             </button>

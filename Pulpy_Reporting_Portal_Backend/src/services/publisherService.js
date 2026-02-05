@@ -69,9 +69,23 @@ export class PublisherService {
   }
 
   async findById(id, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    // ✅ CRITICAL: Include tenant_id in SELECT fields for verification
-    let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ?';
+    if (!id) return null;
+
+    const fields = 'id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at';
+
+    // 1. Try Public ID first
+    if (tenantId) {
+      const [publicRows] = await pool.query(
+        `SELECT ${fields} FROM publishers WHERE public_publisher_id = ? AND tenant_id = ? LIMIT 1`,
+        [id, tenantId]
+      );
+      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
+        return Array.isArray(publicRows) ? publicRows[0] : publicRows;
+      }
+    }
+
+    // 2. Fallback to internal ID
+    let query = `SELECT ${fields} FROM publishers WHERE id = ?`;
     const params = [id];
 
     if (tenantId) {
@@ -82,15 +96,11 @@ export class PublisherService {
     const [rows] = await pool.query(query, params);
     const publisher = Array.isArray(rows) ? rows[0] : rows;
 
-    // Verify publisher belongs to tenant (now that tenant_id is selected)
+    // Verify publisher belongs to tenant
     if (tenantId && publisher && publisher.tenant_id !== tenantId) {
       return null;
     }
 
-    // Remove password_hash from response if present
-    if (publisher && publisher.password_hash) {
-      delete publisher.password_hash;
-    }
     return publisher;
   }
 
@@ -240,7 +250,8 @@ export class PublisherService {
     }
 
     fields.push(`updated_at = UTC_TIMESTAMP()`);
-    params.push(id);
+    const internalId = existing.id;
+    params.push(internalId);
 
     // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
     let query = `UPDATE publishers SET ${fields.join(', ')} WHERE id = ?`;
@@ -275,9 +286,14 @@ export class PublisherService {
   }
 
   async softDelete(id, tenantId = null) {
+    // ✅ CRITICAL: Resolve internal ID first
+    const existing = await this.findById(id, tenantId);
+    if (!existing) return null;
+
+    const internalId = existing.id;
     // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
     let query = `UPDATE publishers SET status = 'suspended', updated_at = UTC_TIMESTAMP() WHERE id = ?`;
-    const params = [id];
+    const params = [internalId];
 
     if (tenantId) {
       query += ' AND tenant_id = ?';

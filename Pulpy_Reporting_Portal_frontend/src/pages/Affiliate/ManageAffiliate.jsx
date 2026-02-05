@@ -295,14 +295,14 @@ function ManageAffiliate() {
                                             <button
                                                 className="affiliate-action-btn"
                                                 title="View Details"
-                                                onClick={() => navigate(`/affiliate/detail/${affiliate.id}`)}
+                                                onClick={() => navigate(`/affiliate/detail/${affiliate.public_publisher_id || affiliate.id}`)}
                                             >
                                                 <EyeIcon />
                                             </button>
                                             <button
                                                 className="affiliate-action-btn"
                                                 title="Edit"
-                                                onClick={() => navigate(`/affiliate/edit/${affiliate.id}`)}
+                                                onClick={() => navigate(`/affiliate/edit/${affiliate.public_publisher_id || affiliate.id}`)}
                                             >
                                                 <EditIcon />
                                             </button>

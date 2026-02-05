@@ -84,6 +84,29 @@ class OfferPublicIdService {
     }
 
     /**
+     * Generate next public_assignment_id for a tenant
+     * @param {number} tenantId - Tenant ID
+     * @returns {Promise<number>} - Next available public_assignment_id
+     */
+    async generatePublicAssignmentId(tenantId) {
+        try {
+            const [rows] = await pool.query(
+                `SELECT COALESCE(MAX(public_assignment_id), 0) + 1 AS next_id 
+         FROM publisher_offers 
+         WHERE tenant_id = ?`,
+                [tenantId]
+            );
+
+            const nextId = rows[0]?.next_id || 1;
+            logger.info(`Generated public_assignment_id ${nextId} for tenant ${tenantId}`);
+            return nextId;
+        } catch (error) {
+            logger.error('Error generating public_assignment_id:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Get offer by public_offer_id and tenant
      * @param {number} publicOfferId - Public offer ID
      * @param {number} tenantId - Tenant ID

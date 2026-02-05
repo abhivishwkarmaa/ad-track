@@ -288,11 +288,11 @@ function OfferDetail() {
                     </button>
                     <div>
                         <h1>{offer.name}</h1>
-                        <p>Offer ID: {offer.public_offer_id || offer.display_id || offer.id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
+                        <p>Offer ID: {offer.public_offer_id || offer.display_id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id || offer.id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
+                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
                         <EditIcon />
                         <span>Edit Offer</span>
                     </Link>

@@ -77,7 +77,7 @@ function AffiliateDetail() {
                 <div className="affiliate-header-actions">
                     <button
                         className="btn btn-primary"
-                        onClick={() => navigate(`/affiliate/edit/${id}`)}
+                        onClick={() => navigate(`/affiliate/edit/${publisher.public_publisher_id || id}`)}
                     >
                         Edit Publisher
                     </button>

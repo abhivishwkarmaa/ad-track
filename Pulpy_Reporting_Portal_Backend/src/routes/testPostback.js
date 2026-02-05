@@ -4,6 +4,7 @@ import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import publisherService from '../services/publisherService.js';
 import offerService from '../services/offer.service.js';
 import offerPublicIdService from '../services/offerPublicIdService.js';
+import assignmentService from '../services/assignmentService.js';
 
 async function testPostbackRoutes(fastify, options) {
     // Start a new test session (Singleton per tenant + publisher + offer)
@@ -11,7 +12,7 @@ async function testPostbackRoutes(fastify, options) {
         try {
             const { affiliate_id, offer_id, tracking_url } = request.body;
             const tenantId = getTenantIdFromRequest(request);
-            console.log("scbkjsbcjksbckjsdbkjv==========")
+      
 
             if (!tenantId) {
                 return reply.code(400).send({ success: false, error: 'Tenant context required' });
@@ -58,7 +59,11 @@ async function testPostbackRoutes(fastify, options) {
                 tenant_id: tenantId
             });
 
-            // 3. Resolve Postback URL
+            // 3. 🔥 NEW: Resolve Public Assignment ID
+            const assignment = await assignmentService.findByPublisherAndOffer(internalPublisherId, internalOfferId, tenantId);
+            const publicAssignmentId = assignment ? assignment.id : null;
+
+            // 4. Resolve Postback URL
             const postbackUrl = publisher.global_postback_url;
             if (!postbackUrl) {
                 return reply.code(400).send({ success: false, error: 'Publisher has no global postback URL configured' });
@@ -79,7 +84,9 @@ async function testPostbackRoutes(fastify, options) {
                 public_offer_id: publicOfferId,
                 internal_offer_id: internalOfferId,
                 public_publisher_id: publicPublisherId,
-                internal_publisher_id: internalPublisherId
+                internal_publisher_id: internalPublisherId,
+                public_assignment_id: publicAssignmentId,
+                internal_assignment_id: assignment ? assignment.internal_id : null
             };
 
             // Remove any existing key (overwrite)
@@ -199,12 +206,14 @@ async function testPostbackRoutes(fastify, options) {
                         affiliate_click_id: session.affiliate_click_id,
                         public_offer_id: session.public_offer_id,
                         public_publisher_id: session.public_publisher_id,
+                        public_assignment_id: session.public_assignment_id,
                         postback_fired: session.postback_fired || false,
                         conversion: {
                             status: 'approved',
                             click_id: session.affiliate_click_id,
                             public_offer_id: session.public_offer_id,
                             public_publisher_id: session.public_publisher_id,
+                            public_assignment_id: session.public_assignment_id,
                             postback: session.postback_response || {
                                 url: session.postback_url?.replace('{click_id}', session.affiliate_click_id) || 'Unknown',
                                 status: 200,

@@ -4,6 +4,7 @@ import publisherService from './publisherService.js';
 import offerService from './offer.service.js';
 import { generateTrackingURL, generateAlternativeTrackingURL, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import offerPublicIdService from './offerPublicIdService.js';
 
 export class AssignmentService {
   async create(data, tenantId = null) {
@@ -68,16 +69,19 @@ export class AssignmentService {
         const cappingConversionsDuration = pubData.capping_conversions?.duration || null;
         const cappingConversionsAmount = pubData.capping_conversions?.amount || null;
 
+        // Generate stable public_assignment_id
+        const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
+
         // ✅ CRITICAL: Insert or update assignment with tenant_id
         await pool.query(
           `INSERT INTO publisher_offers (
-            publisher_id, offer_id, tenant_id, payout_override, 
+            publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, 
             conversion_approval_percentage,
             capping_budget_duration, capping_budget_amount,
             capping_conversions_duration, capping_conversions_amount,
             callback_url, destination_url,
             notes, status, assigned_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
           ON DUPLICATE KEY UPDATE 
             payout_override = VALUES(payout_override),
             conversion_approval_percentage = VALUES(conversion_approval_percentage),
@@ -93,6 +97,7 @@ export class AssignmentService {
             pubData.publisher_id,
             offer_id,
             tenantId, // ✅ CRITICAL: Include tenant_id
+            publicAssignmentId, // 🔥 NEW: Add public_assignment_id
             pubData.payout_override || null,
             pubData.conversion_approval_percentage || null,
             cappingBudgetDuration,
@@ -169,13 +174,16 @@ export class AssignmentService {
     const destinationUrl = data.destination_url || data.offer_url || null; // Support legacy field name
     const callbackUrl = data.callback_url || null; // Store only if explicitly provided (override)
     //https://url.promotrking.com/landing/subscribe?partner=Pulp&service=MadFunny-or&clickId=<CLICK_ID>
+    // Generate stable public_assignment_id
+    const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
+
     // ✅ CRITICAL: Insert with tenant_id
     await pool.query(
       `INSERT INTO publisher_offers (
-        publisher_id, offer_id, tenant_id, payout_override, cap_override, 
+        publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, cap_override, 
         callback_url, destination_url,
         notes, status, assigned_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
       ON DUPLICATE KEY UPDATE 
         payout_override = VALUES(payout_override),
         cap_override = VALUES(cap_override),
@@ -187,6 +195,7 @@ export class AssignmentService {
         data.publisher_id,
         data.offer_id,
         tenantId, // ✅ CRITICAL: Include tenant_id
+        publicAssignmentId, // 🔥 NEW: Add public_assignment_id
         data.payout_override || null,
         data.cap_override || null,
         callbackUrl,
@@ -218,7 +227,8 @@ export class AssignmentService {
     if (!assignment) return null;
 
     return {
-      id: assignment.id,
+      id: assignment.public_assignment_id || assignment.id,
+      internal_id: assignment.id,
       publisher_id: assignment.publisher_id,
       offer_id: assignment.offer_id,
       payout_override: assignment.payout_override,
@@ -246,7 +256,26 @@ export class AssignmentService {
   }
 
   async findById(id, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
+    if (!id) return null;
+
+    // 1. Try Public ID first
+    if (tenantId) {
+      const [publicRows] = await pool.query(
+        `SELECT po.*, 
+                p.email as publisher_email, p.company_name as publisher_company,
+                o.name as offer_name, o.category as offer_category
+         FROM publisher_offers po
+         JOIN publishers p ON po.publisher_id = p.id
+         JOIN offers o ON po.offer_id = o.id
+         WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
+        [id, tenantId]
+      );
+      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
+        return this.formatAssignment(Array.isArray(publicRows) ? publicRows[0] : publicRows);
+      }
+    }
+
+    // 2. Fallback to internal ID
     let query = `SELECT po.*, 
               p.email as publisher_email, p.company_name as publisher_company,
               o.name as offer_name, o.category as offer_category
@@ -263,12 +292,22 @@ export class AssignmentService {
 
     const [rows] = await pool.query(query, params);
     const assignment = Array.isArray(rows) ? rows[0] : rows;
+    return this.formatAssignment(assignment);
+  }
 
-    // Verify assignment belongs to tenant
-    if (tenantId && assignment && assignment.tenant_id !== tenantId) {
-      return null;
-    }
-
+  async findByPublisherAndOffer(publisherId, offerId, tenantId) {
+    const [rows] = await pool.query(
+      `SELECT po.*, 
+              p.email as publisher_email, p.company_name as publisher_company,
+              o.name as offer_name, o.category as offer_category
+       FROM publisher_offers po
+       JOIN publishers p ON po.publisher_id = p.id
+       JOIN offers o ON po.offer_id = o.id
+       WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
+       LIMIT 1`,
+      [publisherId, offerId, tenantId]
+    );
+    const assignment = Array.isArray(rows) ? rows[0] : rows;
     return this.formatAssignment(assignment);
   }
 
@@ -459,8 +498,9 @@ export class AssignmentService {
         return existing;
       }
 
-      // Add id and tenant_id to updateValues for WHERE clause
-      updateValues.push(id);
+      // Add internal id and tenant_id to updateValues for WHERE clause
+      const internalId = existing.internal_id || existing.id;
+      updateValues.push(internalId);
 
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let updateQuery = `UPDATE publisher_offers SET ${updateFields.join(', ')} WHERE id = ?`;
@@ -498,8 +538,9 @@ export class AssignmentService {
 
     // Hard delete: remove from database
     // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
+    const internalId = existing.internal_id || existing.id;
     let query = `DELETE FROM publisher_offers WHERE id = ?`;
-    const params = [id];
+    const params = [internalId];
 
     if (tenantId) {
       query += ' AND tenant_id = ?';

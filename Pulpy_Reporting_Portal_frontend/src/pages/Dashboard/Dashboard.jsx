@@ -419,9 +419,9 @@ function Dashboard() {
                             </div>
                             {offerStatistics.map((stat, index) => (
                                 <div key={stat.offer_id || index} className="table-row" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
-                                    <span className="offer-name-cell" title={stat.offer_name}>
+                                    <Link to={`/offer/detail/${stat.display_id || stat.offer_id}`} className="offer-name-cell" title={stat.offer_name}>
                                         <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
-                                    </span>
+                                    </Link>
                                     <span>{formatNumber(stat.clicks)}</span>
                                     <span>{formatNumber(stat.conversions)}</span>
                                     <span>{stat.conversion_ratio}%</span>
@@ -444,7 +444,7 @@ function Dashboard() {
                     {liveOffers && liveOffers.length > 0 ? (
                         <div className="offers-list">
                             {liveOffers.slice(0, 5).map(offer => (
-                                <div key={offer.id} className="offer-row">
+                                <Link to={`/offer/detail/${offer.id}`} key={offer.id} className="offer-row" style={{ textDecoration: 'none', color: 'inherit', display: 'flex' }}>
                                     <div className="offer-info">
                                         <span className="offer-name">{offer.name}</span>
                                         <span className="offer-id">ID: {offer.display_id || offer.id}</span>
@@ -452,7 +452,7 @@ function Dashboard() {
                                     <div className="offer-meta">
                                         <span className="offer-payout">${offer.payout}</span>
                                     </div>
-                                </div>
+                                </Link>
                             ))}
                         </div>
                     ) : <div className="no-data">No live offers</div>}
@@ -543,7 +543,11 @@ function Dashboard() {
                             {recentActivity.map((item, index) => (
                                 <div key={item.id || index} className="table-row">
                                     <span>{new Date(item.time).toLocaleTimeString()}</span>
-                                    <span>{item.offer?.name}</span>
+                                    <span>
+                                        <Link to={`/offer/detail/${item.offer?.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                                            {item.offer?.name}
+                                        </Link>
+                                    </span>
                                     <span>{item.publisher}</span>
                                     <span className={`status-pill ${item.conversion_status.toLowerCase()}`}>{item.conversion_status}</span>
                                     <span>${item.revenue}</span>

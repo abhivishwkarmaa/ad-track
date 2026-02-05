@@ -349,12 +349,12 @@ function PostbackTest() {
                                     <div className="postback-preview-box">
                                         <div className="preview-label">Suggested Tracking URL:</div>
                                         <div className="preview-url" style={{ color: '#0066cc', marginBottom: '12px' }}>
-                                            {window.location.origin.replace('5173', '3000')}/click?offer_id={formData.offerId || '...'}&pub_id={formData.affiliateId || '...'}&click_id={'{click_id}'}
+                                            {`${window.location.origin.replace('5173', '3000')}/click?offer_id=${formData.offerId || '...'}&pub_id=${formData.affiliateId || '...'}&click_id={click_id}`}
                                         </div>
                                         <div className="preview-label">Configured Global Postback:</div>
                                         <div className="preview-url">{postbackUrl}</div>
                                         <div className="preview-macros">
-                                            Supported: {'{rcid}'}, {'{payout}'}, {'{status}'}, {'{txid}'}
+                                            Supported: {'{rcid}, {payout}, {status}, {txid}'}
                                         </div>
                                     </div>
                                 )}
@@ -471,6 +471,10 @@ function PostbackTest() {
                                                         <div className="detail-row">
                                                             <span className="detail-label">Public Publisher ID:</span>
                                                             <span className="detail-value">{result.conversion.public_publisher_id || 'N/A'}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Public Assignment ID:</span>
+                                                            <span className="detail-value">{result.conversion.public_assignment_id || 'N/A'}</span>
                                                         </div>
                                                         <div className="detail-row">
                                                             <span className="detail-label">Payout:</span>

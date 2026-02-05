@@ -258,7 +258,7 @@ export class DashboardService {
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
-          o.public_offer_id as display_id,
+          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
           o.name as offer_name,
           COUNT(DISTINCT conv.id) as conversions
         FROM offers o
@@ -754,13 +754,13 @@ export class DashboardService {
     try {
       const [rows] = await pool.query(
         `SELECT 
-          public_offer_id as id,
-          name,
-          category,
+          COALESCE(o.public_offer_id, (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id)) as id,
+          o.name,
+          o.category,
           NULL as thumbnail_url,
-          affiliate_amount as payout,
-          created_at
-        FROM offers
+          o.affiliate_amount as payout,
+          o.created_at
+        FROM offers o
         WHERE status = 'live' AND tenant_id = ?
         ORDER BY created_at DESC
         LIMIT ?`,
@@ -783,6 +783,7 @@ export class DashboardService {
           c.id as click_id,
           c.created_at,
           o.name as offer_name,
+          COALESCE(o.public_offer_id, (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id)) as public_offer_id,
           NULL as offer_thumbnail,
           p.company_name as publisher_name,
           p.first_name,
@@ -803,7 +804,8 @@ export class DashboardService {
         time: row.created_at,
         offer: {
           name: row.offer_name,
-          thumbnail: row.offer_thumbnail
+          thumbnail: row.offer_thumbnail,
+          id: row.public_offer_id
         },
         publisher: row.publisher_name || row.first_name || 'Unknown',
         clicks: 1, // Individual log entry represents 1 click
@@ -834,7 +836,7 @@ export class DashboardService {
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
-          o.public_offer_id as display_id,
+          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
           o.name as offer_name,
           COALESCE(c.total_clicks, 0) as clicks,
           COALESCE(conv.total_conversions, 0) as conversions,

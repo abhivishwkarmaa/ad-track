@@ -367,6 +367,7 @@ function ManageAssignment() {
                                 <tr key={assignment.id}>
                                     <td>
                                         <div className="assignment-name">{assignment.offer_name || `Offer #${assignment.offer_id}`}</div>
+                                        <div className="assignment-id" style={{ fontSize: '12px', color: '#888' }}>ID: {assignment.id}</div>
                                         <div className="assignment-category">{assignment.offer_category || '-'}</div>
                                     </td>
                                     <td>

@@ -439,37 +439,42 @@ class OfferService {
   }
 
   async getOfferById(id, tenantId = null) {
-    // 1. Try internal ID first
+    if (!id) return null;
+
+    // 1. Try Public ID / Display ID first (as requested: "use public id as primary for navigating")
+    if (tenantId) {
+      // Look by public_offer_id OR the sequential display_id
+      const publicQuery = `
+        SELECT * FROM (
+          SELECT o.*, 
+          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+          FROM offers o 
+          WHERE o.tenant_id = ?
+        ) t 
+        WHERE t.public_offer_id = ? OR t.display_id = ?
+        LIMIT 1
+      `;
+      const [publicRows] = await pool.query(publicQuery, [tenantId, id, id]);
+      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
+        return Array.isArray(publicRows) ? publicRows[0] : publicRows;
+      }
+    }
+
+    // 2. Fallback to internal ID
     let query = `
       SELECT o.*,
       (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
       FROM offers o WHERE o.id = ?
     `;
     const params = [id];
-
     if (tenantId) {
       query += ' AND o.tenant_id = ?';
       params.push(tenantId);
     }
-
     query += ' LIMIT 1';
 
     const [rows] = await pool.query(query, params);
-    let offer = Array.isArray(rows) ? rows[0] : rows;
-
-    // 2. If not found by internal ID, try public_offer_id
-    if (!offer && tenantId) {
-      logger.info(`Offer not found by internal ID ${id}, trying public_offer_id for tenant ${tenantId}`);
-      let publicQuery = `
-        SELECT o.*,
-        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
-        FROM offers o WHERE o.public_offer_id = ? AND o.tenant_id = ? LIMIT 1
-      `;
-      const [publicRows] = await pool.query(publicQuery, [id, tenantId]);
-      offer = Array.isArray(publicRows) ? publicRows[0] : publicRows;
-    }
-
-    return offer;
+    return Array.isArray(rows) ? rows[0] : rows;
   }
 
   async getOfferByIdWithDetails(id, timezone = '+05:30', tenantId = null) {

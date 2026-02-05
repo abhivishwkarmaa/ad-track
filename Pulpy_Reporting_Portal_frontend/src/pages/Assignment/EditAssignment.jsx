@@ -157,7 +157,7 @@ function EditAssignment() {
         <div className="assignment-page">
             <div className="assignment-form-container">
                 <div className="assignment-form-header">
-                    <h2>Edit Assignment</h2>
+                    <h2>Edit Assignment {assignment?.public_assignment_id || assignment?.id ? `(ID: ${assignment.public_assignment_id || assignment.id})` : ''}</h2>
                     <p>Update assignment details</p>
                 </div>
 

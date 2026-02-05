@@ -117,7 +117,7 @@ function AdvertiserDetail() {
                 <div className="advertiser-header-actions">
                     <button
                         className="btn btn-primary"
-                        onClick={() => navigate(`/advertiser/edit/${id}`)}
+                        onClick={() => navigate(`/advertiser/edit/${advertiser.public_advertiser_id || id}`)}
                     >
                         Edit Advertiser
                     </button>

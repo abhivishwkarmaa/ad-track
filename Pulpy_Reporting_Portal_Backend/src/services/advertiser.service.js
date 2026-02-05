@@ -110,7 +110,8 @@ class AdvertiserService {
       }
 
       fields.push('updated_at = UTC_TIMESTAMP()');
-      params.push(id);
+      const internalId = existing.id;
+      params.push(internalId);
 
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let sql = `UPDATE advertisers SET ${fields.join(', ')} WHERE id = ?`;
@@ -132,15 +133,26 @@ class AdvertiserService {
   }
 
   async getAdvertiserById(id, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
+    if (!id) return null;
+
+    // 1. Try Public ID first
+    if (tenantId) {
+      const [publicRows] = await pool.query(
+        'SELECT * FROM advertisers WHERE public_advertiser_id = ? AND tenant_id = ? LIMIT 1',
+        [id, tenantId]
+      );
+      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
+        return Array.isArray(publicRows) ? publicRows[0] : publicRows;
+      }
+    }
+
+    // 2. Fallback to internal ID
     let query = 'SELECT * FROM advertisers WHERE id = ?';
     const params = [id];
-
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-
     query += ' LIMIT 1';
 
     const [rows] = await pool.query(query, params);
@@ -225,8 +237,9 @@ class AdvertiserService {
       }
 
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
+      const internalId = existing.id;
       let sql = `DELETE FROM advertisers WHERE id = ?`;
-      const params = [id];
+      const params = [internalId];
 
       if (tenantId) {
         sql += ' AND tenant_id = ?';
