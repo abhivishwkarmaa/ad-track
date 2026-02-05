@@ -81,7 +81,10 @@ function PostbackTest() {
         setFormData(prev => ({ ...prev, affiliateId: id }));
 
         if (id) {
-            const affiliate = affiliates.find(a => a.id === parseInt(id));
+            const affiliate = affiliates.find(a =>
+                (a.public_publisher_id && a.public_publisher_id.toString() === id) ||
+                (a.id && a.id.toString() === id)
+            );
             setSelectedAffiliate(affiliate || null);
         } else {
             setSelectedAffiliate(null);
@@ -335,8 +338,8 @@ function PostbackTest() {
                                             {loadingAffiliates ? 'Loading publishers...' : 'Select Publisher'}
                                         </option>
                                         {affiliates.map(affiliate => (
-                                            <option key={affiliate.id} value={affiliate.id}>
-                                                {affiliate.companyName || affiliate.fullName || affiliate.company_name} ({affiliate.id})
+                                            <option key={affiliate.id} value={affiliate.public_publisher_id || affiliate.id}>
+                                                {affiliate.companyName || affiliate.fullName || affiliate.company_name} (ID: {affiliate.public_publisher_id || affiliate.id})
                                             </option>
                                         ))}
                                     </select>
@@ -344,6 +347,10 @@ function PostbackTest() {
 
                                 {selectedAffiliate && (
                                     <div className="postback-preview-box">
+                                        <div className="preview-label">Suggested Tracking URL:</div>
+                                        <div className="preview-url" style={{ color: '#0066cc', marginBottom: '12px' }}>
+                                            {window.location.origin.replace('5173', '3000')}/click?offer_id={formData.offerId || '...'}&pub_id={formData.affiliateId || '...'}&click_id={'{click_id}'}
+                                        </div>
                                         <div className="preview-label">Configured Global Postback:</div>
                                         <div className="preview-url">{postbackUrl}</div>
                                         <div className="preview-macros">
@@ -450,12 +457,20 @@ function PostbackTest() {
                                                         </div>
                                                         <div className="detail-row">
                                                             <span className="detail-label">Status:</span>
-                                                            <span className="detail-value status-approved">
+                                                            <span className={`detail-value status-approved`}>
                                                                 {result.conversion.status}
                                                                 {(result.conversion.is_test || (parseFloat(result.conversion.payout || 0) === 0 && parseFloat(result.conversion.amount || 0) === 0)) && (
                                                                     <span className="badge test" style={{ marginLeft: '6px', background: '#fef3c7', color: '#92400e', fontSize: '10px', padding: '2px 6px', borderRadius: '4px' }}>TEST</span>
                                                                 )}
                                                             </span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Public Offer ID:</span>
+                                                            <span className="detail-value">{result.conversion.public_offer_id || 'N/A'}</span>
+                                                        </div>
+                                                        <div className="detail-row">
+                                                            <span className="detail-label">Public Publisher ID:</span>
+                                                            <span className="detail-value">{result.conversion.public_publisher_id || 'N/A'}</span>
                                                         </div>
                                                         <div className="detail-row">
                                                             <span className="detail-label">Payout:</span>

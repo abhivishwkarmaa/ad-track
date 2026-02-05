@@ -640,34 +640,89 @@
 
 .summary-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
+    /* Force 2x2 grid */
     gap: 16px;
-    padding: 16px;
+    padding: 20px;
+    height: 100%;
 }
 
 .summary-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
-    padding: 12px;
+    padding: 20px;
     background: var(--bg-primary);
-    border-radius: var(--radius-sm);
+    /* Slightly different bg if needed, or keep primary */
+    border-radius: var(--radius-md);
     border: 1px solid var(--border-light);
+    transition: var(--transition-fast);
+    gap: 12px;
 }
 
-.summary-label {
-    display: block;
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    font-weight: 500;
+.summary-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+    border-color: var(--primary-color);
+}
+
+.summary-icon-container {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    /* Circle */
+    display: flex;
+    align-items: center;
+    justify-content: center;
     margin-bottom: 4px;
 }
 
+.summary-icon-container.blue {
+    background: rgba(0, 217, 255, 0.1);
+    color: #00d9ff;
+}
+
+.summary-icon-container.teal {
+    background: rgba(0, 188, 212, 0.1);
+    color: #00BCD4;
+}
+
+.summary-icon-container.purple {
+    background: rgba(156, 39, 176, 0.1);
+    color: #9C27B0;
+}
+
+.summary-icon-container.green {
+    background: rgba(0, 255, 136, 0.1);
+    color: green;
+}
+
+.summary-icon-container svg {
+    width: 24px;
+    height: 24px;
+}
+
+.summary-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.summary-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
 .summary-value {
-    display: block;
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 800;
     color: var(--text-primary);
+    line-height: 1.2;
 }
 
 .summary-value.profit {
@@ -898,7 +953,8 @@
 
     .quick-actions-card {
         grid-column: span 1;
-        height: 400px; /* Match chart height nicely */
+        height: 400px;
+        /* Match chart height nicely */
     }
 
     /* Chart takes remaining 3 columns */
@@ -935,7 +991,7 @@
         grid-column: span 4;
         height: 500px;
     }
-    
+
     .top-countries-card {
         grid-column: span 2;
         height: 500px;
@@ -977,7 +1033,7 @@
     .recent-activity-card {
         grid-column: span 2;
     }
-    
+
     .top-countries-card {
         grid-column: span 2;
     }
@@ -1032,7 +1088,7 @@
         flex-direction: column;
         gap: 16px;
     }
-    
+
     .dashboard-card {
         width: 100%;
     }
@@ -1052,7 +1108,7 @@
     .action-btn {
         padding: 12px 8px;
     }
-    
+
     .chart-card {
         height: 350px;
     }
@@ -1104,7 +1160,7 @@
         font-size: 22px;
         margin-bottom: 4px;
     }
-    
+
     .stats-grid {
         grid-template-columns: 1fr;
     }

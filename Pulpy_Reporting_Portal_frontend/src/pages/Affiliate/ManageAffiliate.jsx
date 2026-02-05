@@ -116,7 +116,9 @@ function ManageAffiliate() {
         const matchesSearch =
             affiliate.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             affiliate.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            affiliate.company_name?.toLowerCase().includes(searchTerm.toLowerCase());
+            affiliate.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (affiliate.public_publisher_id && affiliate.public_publisher_id.toString().includes(searchTerm)) ||
+            (affiliate.id && affiliate.id.toString().includes(searchTerm));
         const matchesStatus = statusFilter === 'all' || affiliate.status?.toLowerCase() === statusFilter.toLowerCase();
         return matchesSearch && matchesStatus;
     });
@@ -265,6 +267,7 @@ function ManageAffiliate() {
                                 <tr key={affiliate.id}>
                                     <td>
                                         <div className="affiliate-name">{affiliate.first_name}</div>
+                                        <div className="affiliate-id" style={{ fontSize: '12px', color: '#888' }}>ID: {affiliate.public_publisher_id || affiliate.id}</div>
                                         <div className="affiliate-email">{affiliate.email}</div>
                                     </td>
                                     <td>{affiliate.company_name || '-'}</td>

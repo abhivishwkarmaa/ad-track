@@ -487,20 +487,40 @@ function Dashboard() {
                     </div>
                     <div className="summary-grid">
                         <div className="summary-item">
-                            <span className="summary-label">Clicks</span>
-                            <span className="summary-value">{formatNumber(summary.unique_clicks)}</span>
+                            <div className="summary-icon-container blue">
+                                <ClickIcon />
+                            </div>
+                            <div className="summary-content">
+                                <span className="summary-value">{formatNumber(summary.unique_clicks)}</span>
+                                <span className="summary-label">Unique Clicks</span>
+                            </div>
                         </div>
                         <div className="summary-item">
-                            <span className="summary-label">Conversions</span>
-                            <span className="summary-value">{formatNumber(summary.conversions)}</span>
+                            <div className="summary-icon-container teal">
+                                <ConversionIcon />
+                            </div>
+                            <div className="summary-content">
+                                <span className="summary-value">{formatNumber(summary.conversions)}</span>
+                                <span className="summary-label">Conversions</span>
+                            </div>
                         </div>
                         <div className="summary-item">
-                            <span className="summary-label">Revenue</span>
-                            <span className="summary-value">{formatCurrency(summary.revenue)}</span>
+                            <div className="summary-icon-container purple">
+                                <RevenueIcon />
+                            </div>
+                            <div className="summary-content">
+                                <span className="summary-value">{formatCurrency(summary.revenue)}</span>
+                                <span className="summary-label">Total Revenue</span>
+                            </div>
                         </div>
                         <div className="summary-item">
-                            <span className="summary-label">Profit</span>
-                            <span className="summary-value profit">{formatCurrency(summary.profit)}</span>
+                            <div className="summary-icon-container green">
+                                <OfferIcon />
+                            </div>
+                            <div className="summary-content">
+                                <span className="summary-value profit">{formatCurrency(summary.profit)}</span>
+                                <span className="summary-label">Total Profit</span>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -116,7 +116,9 @@ function ManageAdvertiser() {
         const matchesSearch =
             advertiser.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             advertiser.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            advertiser.company_name?.toLowerCase().includes(searchTerm.toLowerCase());
+            advertiser.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (advertiser.public_advertiser_id && advertiser.public_advertiser_id.toString().includes(searchTerm)) ||
+            (advertiser.id && advertiser.id.toString().includes(searchTerm));
         const matchesStatus = statusFilter === 'all' || advertiser.status?.toLowerCase() === statusFilter.toLowerCase();
         return matchesSearch && matchesStatus;
     });
@@ -266,6 +268,7 @@ function ManageAdvertiser() {
                                 <tr key={advertiser.id}>
                                     <td>
                                         <div className="advertiser-name">{advertiser.name}</div>
+                                        <div className="advertiser-id" style={{ fontSize: '12px', color: '#888' }}>ID: {advertiser.public_advertiser_id || advertiser.id}</div>
                                         <div className="advertiser-email">{advertiser.email}</div>
                                     </td>
                                     <td>{advertiser.company_name || '-'}</td>

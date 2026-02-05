@@ -89,6 +89,7 @@ function OfferList() {
     const filteredOffers = offers.filter(offer => {
         const matchesSearch = offer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (offer.advertiser_id && offer.advertiser_id.toString().includes(searchTerm)) ||
+            (offer.public_offer_id && offer.public_offer_id.toString().includes(searchTerm)) ||
             (offer.display_id && offer.display_id.toString().includes(searchTerm)) ||
             (offer.id && offer.id.toString().includes(searchTerm));
         const matchesStatus = statusFilter === 'all' || offer.status.toLowerCase() === statusFilter.toLowerCase();
@@ -244,9 +245,14 @@ function OfferList() {
                                 <tr key={offer.id}>
                                     <td>
                                         <div className="offer-name">{offer.name}</div>
-                                        <div className="offer-id">ID: {offer.display_id || offer.id}</div>
+                                        <div className="offer-id">ID: {offer.public_offer_id || offer.display_id || offer.id}</div>
                                     </td>
-                                    <td>Advertiser {offer.advertiser_id || '-'}</td>
+                                    <td>
+                                        <div className="advertiser-name">{offer.advertiser_name || '-'}</div>
+                                        <div className="advertiser-id" style={{ fontSize: '12px', color: '#666' }}>
+                                            ID: {offer.public_advertiser_id || offer.advertiser_id || '-'}
+                                        </div>
+                                    </td>
                                     <td>{offer.category || '-'}</td>
                                     <td>{offer.country || '-'}</td>
                                     <td>{offer.offer_currency} {offer.advertiser_amount || '0.00'}</td>
@@ -283,7 +289,7 @@ function OfferList() {
                                             <button
                                                 className="offer-action-btn"
                                                 title="View Details"
-                                                onClick={() => navigate(`/offer/detail/${offer.id}`)}
+                                                onClick={() => navigate(`/offer/detail/${offer.public_offer_id || offer.display_id || offer.id}`)}
                                             >
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
                                                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -293,7 +299,7 @@ function OfferList() {
                                             <button
                                                 className="offer-action-btn"
                                                 title="Edit"
-                                                onClick={() => navigate(`/offer/edit/${offer.id}`)}
+                                                onClick={() => navigate(`/offer/edit/${offer.public_offer_id || offer.display_id || offer.id}`)}
                                             >
                                                 <EditIcon />
                                             </button>

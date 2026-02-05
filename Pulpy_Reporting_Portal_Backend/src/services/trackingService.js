@@ -95,7 +95,9 @@ export class TrackingService {
       // 🔥 CHANGED: Use public_offer_id instead of internal ID
       const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
       const offer = await offerPublicIdService.getOfferByPublicId(publicOfferId, tenantId, null);
-      const publisher = await cacheService.getPublisher(publisherId, tenantId);
+
+      // 🔥 CHANGED: Use public_publisher_id to resolve publisher
+      const publisher = await offerPublicIdService.getPublisherByPublicId(publisherId, tenantId);
 
       // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
       if (!offer) {
@@ -108,7 +110,7 @@ export class TrackingService {
 
       if (!publisher) {
         logger.error('❌ Publisher not found or does not belong to tenant', {
-          publisher_id: publisherId,
+          public_publisher_id: publisherId,
           tenant_id: tenantId
         });
         throw new Error(`Publisher ${publisherId} not found or does not belong to tenant ${tenantId}`);
@@ -176,14 +178,15 @@ export class TrackingService {
 
       // ✅ CRITICAL: Get assignment WITH tenant filtering (tenant already resolved)
       // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
-      let assignment = await cacheService.getAssignment(publisherId, offer.id, tenantId);
+      // 🔥 CHANGED: Use publisher.id (internal DB ID) for assignment lookup
+      let assignment = await cacheService.getAssignment(publisher.id, offer.id, tenantId);
 
       // If assignment not found in cache, try direct DB query with tenant_id
       if (!assignment) {
         try {
           const [assignmentRows] = await pool.query(
             'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ? AND tenant_id = ? LIMIT 1',
-            [publisherId, offer.id, 'active', tenantId]
+            [publisher.id, offer.id, 'active', tenantId]
           );
           assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
 
@@ -262,8 +265,8 @@ export class TrackingService {
 
       // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
       // This ensures unique click identity across publishers and tenants
-      // 🔥 CHANGED: Use offer.id (internal DB ID) for click UUID generation
-      const clickUuid = generateClickId(tenantId, offer.id, publisherId, 36);
+      // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for click UUID generation
+      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
 
       // Check Global Offer Caps (Daily/Total Conversions)
       // We READ the current counter from Redis. We do NOT increment here (only on conversion).
@@ -336,7 +339,8 @@ export class TrackingService {
         click_uuid: clickUuid,
         offer_id: String(offer.id),
         public_offer_id: String(publicOfferId),
-        publisher_id: String(publisherId),
+        publisher_id: String(publisher.id), // 🔥 Use Internal ID
+        public_publisher_id: String(publisherId), // 🔥 NEW: Store Public ID for reference
         publisher_offer_id: assignment.id ? String(assignment.id) : '',
         tenant_id: finalTenantId ? String(finalTenantId) : '', // ✅ CRITICAL: Store as string (should never be empty in strict multi-tenant)
         ip: ip || '',
@@ -375,8 +379,8 @@ export class TrackingService {
       try {
         // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
         // This ensures clicks from different publishers on same offer are isolated
-        // 🔥 CHANGED: Use offer.id (internal DB ID) for Redis key
-        const redisKey = `click:${finalTenantId}:${offer.id}:${publisherId}:${clickUuid}`;
+        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for Redis key
+        const redisKey = `click:${finalTenantId}:${offer.id}:${publisher.id}:${clickUuid}`;
 
         // ✅ CRITICAL: Log click received
         logger.info('[CLICK] Click received', {
@@ -406,12 +410,11 @@ export class TrackingService {
           throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
         }
 
-        // ✅ CRITICAL: Add to stream - if XADD fails, DO NOT drop the click (log but continue)
-        // 🔥 CHANGED: Use offer.id (internal DB ID) for stream
+        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for stream
         pipeline.xadd('stream:clicks', '*',
           'tenant_id', tenantIdStr,
           'offer_id', String(offer.id),
-          'publisher_id', String(publisherId),
+          'publisher_id', String(publisher.id),
           'click_id', clickUuid
         );
 

@@ -211,29 +211,29 @@ function OfferDetail() {
     if (loading) {
         return (
             <div
-  className="offer-page"
-  style={{
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '50vh'
-  }}
->
-  <div className="loading-spinner" style={{ textAlign: 'center' }}>
-    <div
-      style={{
-        width: '40px',
-        height: '40px',
-        border: '4px solid #f3f3f3',
-        borderTop: '4px solid #2196F3',
-        borderRadius: '50%',
-        animation: 'spin 1s linear infinite',
-        margin: '0 auto 20px'
-      }}
-    />
-    <p>Loading offer details...</p>
-  </div>
-</div>
+                className="offer-page"
+                style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    minHeight: '50vh'
+                }}
+            >
+                <div className="loading-spinner" style={{ textAlign: 'center' }}>
+                    <div
+                        style={{
+                            width: '40px',
+                            height: '40px',
+                            border: '4px solid #f3f3f3',
+                            borderTop: '4px solid #2196F3',
+                            borderRadius: '50%',
+                            animation: 'spin 1s linear infinite',
+                            margin: '0 auto 20px'
+                        }}
+                    />
+                    <p>Loading offer details...</p>
+                </div>
+            </div>
 
         );
     }
@@ -288,11 +288,11 @@ function OfferDetail() {
                     </button>
                     <div>
                         <h1>{offer.name}</h1>
-                        <p>Offer ID: {offer.display_id || offer.id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
+                        <p>Offer ID: {offer.public_offer_id || offer.display_id || offer.id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                    <Link to={`/offer/edit/${offer.id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
+                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id || offer.id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
                         <EditIcon />
                         <span>Edit Offer</span>
                     </Link>

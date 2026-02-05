@@ -12,7 +12,7 @@ async function testPostbackRoutes(fastify, options) {
             const { affiliate_id, offer_id, tracking_url } = request.body;
             const tenantId = getTenantIdFromRequest(request);
             console.log("scbkjsbcjksbckjsdbkjv==========")
-            
+
             if (!tenantId) {
                 return reply.code(400).send({ success: false, error: 'Tenant context required' });
             }
@@ -21,11 +21,15 @@ async function testPostbackRoutes(fastify, options) {
                 return reply.code(400).send({ success: false, error: 'Affiliate ID and Offer ID are required' });
             }
 
-            // 1. Verify Publisher
-            const publisher = await publisherService.findById(affiliate_id, tenantId);
+            // 1. 🔥 CRITICAL FIX: Resolve Public Publisher ID to Internal ID
+            // The affiliate_id from the UI may be a PUBLIC ID
+            const publicPublisherId = parseInt(affiliate_id);
+            const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
             if (!publisher) {
                 return reply.code(404).send({ success: false, error: 'Publisher not found' });
             }
+
+            const internalPublisherId = publisher.id;
 
             // 2. 🔥 CRITICAL FIX: Resolve Public Offer ID to Internal Offer ID
             // The offer_id from the tracking URL is a PUBLIC ID (external-facing)
@@ -60,9 +64,9 @@ async function testPostbackRoutes(fastify, options) {
                 return reply.code(400).send({ success: false, error: 'Publisher has no global postback URL configured' });
             }
 
-            // ✅ CRITICAL: Use INTERNAL offer ID for Redis key
+            // ✅ CRITICAL: Use INTERNAL IDs for Redis key
             // This MUST match the key that trackClick will look up
-            const key = `test:postback:${tenantId}:${affiliate_id}:${internalOfferId}`;
+            const key = `test:postback:${tenantId}:${internalPublisherId}:${internalOfferId}`;
             console.log(key, "key")
             const sessionData = {
                 status: 'pending', // pending | click_received | completed | failed
@@ -72,8 +76,10 @@ async function testPostbackRoutes(fastify, options) {
                 postback_fired: false,
                 postback_response: null,
                 completed_at: null,
-                public_offer_id: publicOfferId, // Store for reference
-                internal_offer_id: internalOfferId // Store for reference
+                public_offer_id: publicOfferId,
+                internal_offer_id: internalOfferId,
+                public_publisher_id: publicPublisherId,
+                internal_publisher_id: internalPublisherId
             };
 
             // Remove any existing key (overwrite)
@@ -84,7 +90,8 @@ async function testPostbackRoutes(fastify, options) {
 
             logger.info('Test Postback Session Started [Redis]', {
                 tenant_id: tenantId,
-                affiliate_id,
+                public_publisher_id: publicPublisherId,
+                internal_publisher_id: internalPublisherId,
                 public_offer_id: publicOfferId,
                 internal_offer_id: internalOfferId,
                 key
@@ -141,8 +148,16 @@ async function testPostbackRoutes(fastify, options) {
                 tenant_id: tenantId
             });
 
-            // ✅ CRITICAL: Use INTERNAL offer ID for Redis key lookup
-            const key = `test:postback:${tenantId}:${affiliate_id}:${internalOfferId}`;
+            // 🔥 CRITICAL FIX: Resolve Public Publisher ID to Internal ID
+            const publicPublisherId = parseInt(affiliate_id);
+            const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+            if (!publisher) {
+                return reply.code(404).send({ success: false, error: 'Publisher not found' });
+            }
+            const internalPublisherId = publisher.id;
+
+            // ✅ CRITICAL: Use INTERNAL IDs for Redis key lookup
+            const key = `test:postback:${tenantId}:${internalPublisherId}:${internalOfferId}`;
             const data = await redis.get(key);
 
             // Session expired or never existed
@@ -182,10 +197,14 @@ async function testPostbackRoutes(fastify, options) {
                     result: {
                         click_id: session.affiliate_click_id,
                         affiliate_click_id: session.affiliate_click_id,
+                        public_offer_id: session.public_offer_id,
+                        public_publisher_id: session.public_publisher_id,
                         postback_fired: session.postback_fired || false,
                         conversion: {
                             status: 'approved',
                             click_id: session.affiliate_click_id,
+                            public_offer_id: session.public_offer_id,
+                            public_publisher_id: session.public_publisher_id,
                             postback: session.postback_response || {
                                 url: session.postback_url?.replace('{click_id}', session.affiliate_click_id) || 'Unknown',
                                 status: 200,

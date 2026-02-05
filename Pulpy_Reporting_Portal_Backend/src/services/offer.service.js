@@ -324,6 +324,7 @@ class OfferService {
         err.statusCode = 404;
         throw err;
       }
+      const internalId = existingOffer.id;
 
       // ✅ CRITICAL: Verify offer belongs to tenant
       if (tenantId && existingOffer.tenant_id !== tenantId) {
@@ -412,11 +413,11 @@ class OfferService {
       });
 
       if (!fields.length) {
-        return this.getOfferById(id);
+        return this.getOfferById(internalId);
       }
 
       fields.push('updated_at = UTC_TIMESTAMP()');
-      params.push(id);
+      params.push(internalId);
 
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let sql = `UPDATE offers SET ${fields.join(', ')} WHERE id = ?`;
@@ -430,7 +431,7 @@ class OfferService {
         return null;
       }
 
-      return this.getOfferById(id, tenantId);
+      return this.getOfferById(internalId, tenantId);
     } catch (error) {
       logger.error('OfferService.updateOffer error:', error);
       throw error;
@@ -438,27 +439,34 @@ class OfferService {
   }
 
   async getOfferById(id, tenantId = null) {
-    // If tenantId provided, enforce tenant isolation
+    // 1. Try internal ID first
     let query = `
-      SELECT *,
-      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = offers.tenant_id AND o2.id <= offers.id) as display_id
-      FROM offers WHERE id = ?
+      SELECT o.*,
+      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+      FROM offers o WHERE o.id = ?
     `;
     const params = [id];
 
     if (tenantId) {
-      query += ' AND tenant_id = ?';
+      query += ' AND o.tenant_id = ?';
       params.push(tenantId);
     }
 
     query += ' LIMIT 1';
 
     const [rows] = await pool.query(query, params);
-    const offer = Array.isArray(rows) ? rows[0] : rows;
+    let offer = Array.isArray(rows) ? rows[0] : rows;
 
-    // If tenantId was provided and offer doesn't match, return null
-    if (tenantId && offer && offer.tenant_id !== tenantId) {
-      return null;
+    // 2. If not found by internal ID, try public_offer_id
+    if (!offer && tenantId) {
+      logger.info(`Offer not found by internal ID ${id}, trying public_offer_id for tenant ${tenantId}`);
+      let publicQuery = `
+        SELECT o.*,
+        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+        FROM offers o WHERE o.public_offer_id = ? AND o.tenant_id = ? LIMIT 1
+      `;
+      const [publicRows] = await pool.query(publicQuery, [id, tenantId]);
+      offer = Array.isArray(publicRows) ? publicRows[0] : publicRows;
     }
 
     return offer;
@@ -521,6 +529,11 @@ class OfferService {
 
   async getOfferAssignments(id, tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) return [];
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT po.*, 
                 p.id as publisher_id,
@@ -532,7 +545,7 @@ class OfferService {
          FROM publisher_offers po
          JOIN publishers p ON po.publisher_id = p.id
          WHERE po.offer_id = ?`;
-      const params = [id];
+      const params = [internalId];
 
       if (tenantId) {
         query += ' AND po.tenant_id = ?';
@@ -577,13 +590,32 @@ class OfferService {
 
   async getOfferStats(id, tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) {
+        return {
+          total_clicks: 0,
+          unique_publishers: 0,
+          total_impressions: 0,
+          total_conversions: 0,
+          approved_conversions: 0,
+          pending_conversions: 0,
+          rejected_conversions: 0,
+          total_revenue: 0,
+          total_payout: 0,
+          total_profit: 0,
+          conversion_rate: 0
+        };
+      }
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering to all subqueries for tenant isolation
       const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
 
       // Fix: Ensure correct number of params for all 10 subqueries + 2 main query params (id, tenant_id)
       const params = tenantId
-        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, id, tenantId]
-        : [id];
+        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
+        : [internalId];
 
       const [statsRows] = await pool.query(
         `SELECT 
@@ -628,6 +660,11 @@ class OfferService {
 
   async getOfferRecentClicks(id, tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) return [];
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT c.*, 
                 p.email as publisher_email,
@@ -635,7 +672,7 @@ class OfferService {
          FROM clicks c
          LEFT JOIN publishers p ON c.publisher_id = p.id
          WHERE c.offer_id = ?`;
-      const params = [id];
+      const params = [internalId];
 
       if (tenantId) {
         query += ' AND c.tenant_id = ?';
@@ -654,6 +691,11 @@ class OfferService {
 
   async getOfferRecentConversions(id, tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) return [];
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT conv.*,
                 p.email as publisher_email,
@@ -663,7 +705,7 @@ class OfferService {
          LEFT JOIN publishers p ON conv.publisher_id = p.id
          LEFT JOIN clicks c ON conv.click_uuid = c.click_uuid
          WHERE conv.offer_id = ?`;
-      const params = [id];
+      const params = [internalId];
 
       if (tenantId) {
         query += ' AND conv.tenant_id = ?';
@@ -682,6 +724,11 @@ class OfferService {
 
   async getOfferPublisherStats(id, tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) return [];
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT 
           c.publisher_id,
@@ -695,7 +742,7 @@ class OfferService {
         LEFT JOIN publishers p ON c.publisher_id = p.id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
         WHERE c.offer_id = ?`;
-      const params = [id];
+      const params = [internalId];
 
       if (tenantId) {
         query += ' AND c.tenant_id = ?';
@@ -714,6 +761,11 @@ class OfferService {
 
   async getOfferDailyStats(id, timezone = '+05:30', tenantId = null) {
     try {
+      // 1. Resolve internal ID
+      const offer = await this.getOfferById(id, tenantId);
+      if (!offer) return [];
+      const internalId = offer.id;
+
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
 
@@ -736,7 +788,7 @@ class OfferService {
       }
 
       // Params only for WHERE clause now
-      const params = [id];
+      const params = [internalId];
       if (tenantId) params.push(tenantId);
 
       const [dailyClicksRows] = await pool.query(
@@ -833,13 +885,16 @@ class OfferService {
     const limit = Number(filters.limit) > 0 ? Number(filters.limit) : 20;
     const offset = (page - 1) * limit;
 
-    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = conditions.length ? `WHERE ${conditions.map(c => `o.${c}`).join(' AND ')}` : '';
     const listSql = `
-      SELECT *,
-      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = offers.tenant_id AND o2.id <= offers.id) as display_id
-      FROM offers
+      SELECT o.*,
+      a.name as advertiser_name,
+      a.public_advertiser_id,
+      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+      FROM offers o
+      LEFT JOIN advertisers a ON o.advertiser_id = a.id
       ${whereClause}
-      ORDER BY created_at DESC
+      ORDER BY o.created_at DESC
       LIMIT ? OFFSET ?
     `;
 
@@ -847,7 +902,7 @@ class OfferService {
 
     const countSql = `
       SELECT COUNT(*) AS total
-      FROM offers
+      FROM offers o
       ${whereClause}
     `;
     const [countRows] = await pool.query(countSql, params);
@@ -875,10 +930,11 @@ class OfferService {
       if (!offer) {
         return null;
       }
+      const internalId = offer.id;
 
       // Archive the offer
       let query = 'UPDATE offers SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?';
-      const params = ['archived', id];
+      const params = ['archived', internalId];
 
       if (tenantId) {
         query += ' AND tenant_id = ?';
@@ -889,7 +945,7 @@ class OfferService {
       if (!result.affectedRows) {
         return null;
       }
-      return { id, deleted: true };
+      return { id: internalId, public_id: offer.public_offer_id, deleted: true };
     } catch (error) {
       logger.error('OfferService.deleteOffer error:', error);
       throw error;
@@ -905,6 +961,7 @@ class OfferService {
         err.statusCode = 404;
         throw err;
       }
+      const internalId = existingOffer.id;
 
       // ✅ CRITICAL: Verify offer belongs to tenant
       if (tenantId && existingOffer.tenant_id !== tenantId) {
@@ -925,7 +982,7 @@ class OfferService {
 
       // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let query = 'UPDATE offers SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?';
-      const params = [status, id];
+      const params = [status, internalId];
 
       if (tenantId) {
         query += ' AND tenant_id = ?';
@@ -936,7 +993,7 @@ class OfferService {
       if (!result.affectedRows) {
         return null;
       }
-      return this.getOfferById(id, tenantId);
+      return this.getOfferById(internalId, tenantId);
     } catch (error) {
       logger.error('OfferService.changeStatus error:', error);
       throw error;
@@ -1052,32 +1109,7 @@ class OfferService {
     };
   }
   async geteditOffer(id, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = `SELECT *
-       FROM offers
-       WHERE id = ?`;
-    const params = [id];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    query += ' LIMIT 1';
-
-    const [rows] = await pool.query(query, params);
-    if (!rows || rows.length === 0) {
-      return null;
-    }
-
-    const offer = rows[0];
-
-    // Verify offer belongs to tenant
-    if (tenantId && offer.tenant_id !== tenantId) {
-      return null;
-    }
-
-    return offer;
+    return this.getOfferById(id, tenantId);
   }
 }
 

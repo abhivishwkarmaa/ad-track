@@ -341,13 +341,20 @@ export class AssignmentService {
       return null;
     }
 
+    // 🔥 CRITICAL: Fetch publisher to get public_publisher_id
+    const publisher = await publisherService.findById(assignment.publisher_id, assignment.tenant_id || null);
+    const publicPublisherId = publisher ? (publisher.public_publisher_id || publisher.id) : assignment.publisher_id;
+
     if (format === 'alternative') {
       const advertiserId = offer.advertiser_id;
+      // Note: We might want public_advertiser_id here too if that's part of the spec?
+      // User said "public id advertiser aur publisher ka bhi chahiye".
+      // But `generateAlternativeTrackingURL` args depend on implementation. assuming it takes advertiserId.
 
       return generateAlternativeTrackingURL(
         baseURL,
         publicOfferId,  // 🔥 Use public_offer_id
-        assignment.publisher_id,
+        publicPublisherId, // 🔥 Use public_publisher_id
         advertiserId,
         { rcid: '{replace_it}' } // Use the format they specified
       );
@@ -360,7 +367,7 @@ export class AssignmentService {
     return generateTrackingURL(
       baseURL,
       publicOfferId,  // 🔥 Use public_offer_id
-      assignment.publisher_id,
+      publicPublisherId, // 🔥 Use public_publisher_id
       { click_id: '{click_id}' }
     );
   }

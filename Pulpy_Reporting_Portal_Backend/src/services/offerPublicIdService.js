@@ -38,6 +38,52 @@ class OfferPublicIdService {
     }
 
     /**
+     * Generate next public_advertiser_id for a tenant
+     * @param {number} tenantId - Tenant ID
+     * @returns {Promise<number>} - Next available public_advertiser_id
+     */
+    async generatePublicAdvertiserId(tenantId) {
+        try {
+            const [rows] = await pool.query(
+                `SELECT COALESCE(MAX(public_advertiser_id), 0) + 1 AS next_id 
+         FROM advertisers 
+         WHERE tenant_id = ?`,
+                [tenantId]
+            );
+
+            const nextId = rows[0]?.next_id || 1;
+            logger.info(`Generated public_advertiser_id ${nextId} for tenant ${tenantId}`);
+            return nextId;
+        } catch (error) {
+            logger.error('Error generating public_advertiser_id:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Generate next public_publisher_id for a tenant
+     * @param {number} tenantId - Tenant ID
+     * @returns {Promise<number>} - Next available public_publisher_id
+     */
+    async generatePublicPublisherId(tenantId) {
+        try {
+            const [rows] = await pool.query(
+                `SELECT COALESCE(MAX(public_publisher_id), 0) + 1 AS next_id 
+         FROM publishers 
+         WHERE tenant_id = ?`,
+                [tenantId]
+            );
+
+            const nextId = rows[0]?.next_id || 1;
+            logger.info(`Generated public_publisher_id ${nextId} for tenant ${tenantId}`);
+            return nextId;
+        } catch (error) {
+            logger.error('Error generating public_publisher_id:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Get offer by public_offer_id and tenant
      * @param {number} publicOfferId - Public offer ID
      * @param {number} tenantId - Tenant ID
@@ -82,6 +128,38 @@ class OfferPublicIdService {
             }
 
             logger.error('Error fetching offer by public_offer_id:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get advertiser by public_advertiser_id and tenant
+     */
+    async getAdvertiserByPublicId(publicAdvertiserId, tenantId) {
+        try {
+            const [rows] = await pool.query(
+                'SELECT * FROM advertisers WHERE tenant_id = ? AND public_advertiser_id = ? LIMIT 1',
+                [tenantId, publicAdvertiserId]
+            );
+            return rows[0] || null;
+        } catch (error) {
+            if (error.code === 'ER_BAD_FIELD_ERROR') return null;
+            throw error;
+        }
+    }
+
+    /**
+     * Get publisher by public_publisher_id and tenant
+     */
+    async getPublisherByPublicId(publicPublisherId, tenantId) {
+        try {
+            const [rows] = await pool.query(
+                'SELECT * FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
+                [tenantId, publicPublisherId]
+            );
+            return rows[0] || null;
+        } catch (error) {
+            if (error.code === 'ER_BAD_FIELD_ERROR') return null;
             throw error;
         }
     }

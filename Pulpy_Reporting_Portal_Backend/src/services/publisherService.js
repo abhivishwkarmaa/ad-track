@@ -3,6 +3,8 @@ import logger from '../utils/logger.js';
 import bcrypt from 'bcrypt';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
+import offerPublicIdService from './offerPublicIdService.js';
+
 export class PublisherService {
   async create(data, tenantId = null) {
     try {
@@ -12,7 +14,7 @@ export class PublisherService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // ✅ CRITICAL: Check for duplicate email within tenant (prevents false 409 conflicts)
       const existing = await this.findByEmail(data.email, tenantId);
       if (existing) {
@@ -21,18 +23,21 @@ export class PublisherService {
         err.code = 'ER_DUP_ENTRY';
         throw err;
       }
-      
+
       // Hash password if provided
       let passwordHash = null;
       if (data.password) {
         passwordHash = await bcrypt.hash(data.password, 10);
       }
 
+      // Generate public_publisher_id
+      const publicPublisherId = await offerPublicIdService.generatePublicPublisherId(tenantId);
+
       // ✅ CRITICAL: Include tenant_id in INSERT
       const [result] = await pool.query(
         `INSERT INTO publishers (
-          email, first_name, company_name, country, password_hash, global_postback_url, status, tenant_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+          email, first_name, company_name, country, password_hash, global_postback_url, status, tenant_id, public_publisher_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
         [
           data.email,
           data.first_name || null,
@@ -41,6 +46,7 @@ export class PublisherService {
           passwordHash,
           data.global_postback_url || null,
           tenantId, // Add tenant_id
+          publicPublisherId
         ]
       );
 
@@ -65,7 +71,7 @@ export class PublisherService {
   async findById(id, tenantId = null) {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     // ✅ CRITICAL: Include tenant_id in SELECT fields for verification
-    let query = 'SELECT id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ?';
+    let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ?';
     const params = [id];
 
     if (tenantId) {
@@ -90,22 +96,22 @@ export class PublisherService {
 
   async findByEmail(email, tenantId = null) {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation (prevents duplicate email conflicts across tenants)
-    let query = 'SELECT id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at FROM publishers WHERE email = ?';
+    let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at FROM publishers WHERE email = ?';
     const params = [email];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [rows] = await pool.query(query, params);
     const publisher = Array.isArray(rows) ? rows[0] : rows;
-    
+
     // Verify publisher belongs to tenant if tenant_id is set
     if (tenantId && publisher && publisher.tenant_id !== tenantId) {
       return null;
     }
-    
+
     // Remove password_hash from response if present
     if (publisher && publisher.password_hash) {
       delete publisher.password_hash;
@@ -119,20 +125,20 @@ export class PublisherService {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     let query = 'SELECT * FROM publishers WHERE email = ?';
     const params = [email];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [rows] = await pool.query(query, params);
     const publisher = Array.isArray(rows) ? rows[0] : rows;
-    
+
     // Verify publisher belongs to tenant if tenant_id is set
     if (tenantId && publisher && publisher.tenant_id !== tenantId) {
       return null;
     }
-    
+
     return publisher;
   }
 
@@ -167,7 +173,7 @@ export class PublisherService {
     const offset = (page - 1) * limit;
 
     const dataQuery = `
-      SELECT id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at
+      SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at
       FROM publishers
       ${where}
       ORDER BY created_at DESC
@@ -203,13 +209,13 @@ export class PublisherService {
       err.statusCode = 404;
       throw err;
     }
-    
+
     if (tenantId && existing.tenant_id !== tenantId) {
       const err = new Error('Publisher does not belong to this tenant');
       err.statusCode = 403;
       throw err;
     }
-    
+
     const fields = [];
     const params = [];
 
@@ -242,7 +248,7 @@ export class PublisherService {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     await pool.query(query, params);
     // Return publisher without password_hash
     return this.findById(id, tenantId);
@@ -258,12 +264,12 @@ export class PublisherService {
         SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) as suspended
       FROM publishers`;
     const params = [];
-    
+
     if (tenantId) {
       query += ' WHERE tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [rows] = await pool.query(query, params);
     return Array.isArray(rows) ? rows[0] : rows;
   }
@@ -272,12 +278,12 @@ export class PublisherService {
     // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
     let query = `UPDATE publishers SET status = 'suspended', updated_at = UTC_TIMESTAMP() WHERE id = ?`;
     const params = [id];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [result] = await pool.query(query, params);
     if ((result.affectedRows || result.affectedRows === 0) && result.affectedRows === 0) {
       return null;

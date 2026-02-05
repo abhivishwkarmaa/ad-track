@@ -2,6 +2,8 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
+import offerPublicIdService from './offerPublicIdService.js';
+
 class AdvertiserService {
   async createAdvertiser(data, tenantId = null) {
     try {
@@ -26,6 +28,9 @@ class AdvertiserService {
         throw err;
       }
 
+      // Generate stable public_advertiser_id
+      const publicAdvertiserId = await offerPublicIdService.generatePublicAdvertiserId(tenantId);
+
       // ✅ CRITICAL: Include tenant_id in INSERT
       const sql = `
         INSERT INTO advertisers (
@@ -36,8 +41,9 @@ class AdvertiserService {
           website,
           notes,
           status,
-          tenant_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          tenant_id,
+          public_advertiser_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       const params = [
@@ -49,6 +55,7 @@ class AdvertiserService {
         data.notes || null,
         data.status || 'active',
         tenantId, // Add tenant_id
+        publicAdvertiserId
       ];
 
       const [result] = await pool.query(sql, params);
