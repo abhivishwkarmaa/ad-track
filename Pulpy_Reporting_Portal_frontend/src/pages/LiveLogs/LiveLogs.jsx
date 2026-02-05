@@ -245,9 +245,8 @@ const LiveLogs = () => {
                                         <td>
                                             <span className={`badge ${row.status}`}>{row.status}</span>
                                             {/* Show TEST badge if is_test flag is set OR if amount/payout are 0 */}
-                                            {(row.is_test === 1 || (parseFloat(row.amount || 0) === 0 && parseFloat(row.payout || 0) === 0)) && (
-                                                <span className="badge test" style={{ marginLeft: '4px', background: '#fef3c7', color: '#92400e', fontSize: '10px', fontWeight: '700' }}>TEST</span>
-                                            )}
+                                           
+                                            
                                         </td>
                                         <td>{row.ip}</td>
                                     </>
