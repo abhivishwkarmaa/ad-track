@@ -13,8 +13,8 @@ import subscriptionService from '../services/subscriptionService.js';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
 const ACCESS_TOKEN_TTL = '5m';
-const REFRESH_TTL_SECONDS = 15 * 60;
-const SESSION_TTL_MS = 15 * 60 * 1000;
+const REFRESH_TTL_SECONDS = 180 * 60; // 180 minutes (3 hours)
+const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
 const REFRESH_COOKIE_NAME = 'refresh_token';
 
 const generateRefreshToken = () => {
@@ -326,16 +326,16 @@ export class AuthController {
         if (request.tenant) {
           const normalizedStatus = String(request.tenant.status || '').toUpperCase();
           if (normalizedStatus === 'SUSPENDED') {
-          logger.warn('[LOGIN] Suspended tenant login attempt', {
-            email: admin.email,
-            tenantId: requestTenantId,
-            tenantSlug: request.tenant.slug
-          });
-          return reply.code(403).send({
-            success: false,
-            error: 'Tenant Suspended',
-            message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
-          });
+            logger.warn('[LOGIN] Suspended tenant login attempt', {
+              email: admin.email,
+              tenantId: requestTenantId,
+              tenantSlug: request.tenant.slug
+            });
+            return reply.code(403).send({
+              success: false,
+              error: 'Tenant Suspended',
+              message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+            });
           }
         }
 
@@ -584,11 +584,11 @@ export class AuthController {
         if (request.tenant) {
           const normalizedStatus = String(request.tenant.status || '').toUpperCase();
           if (normalizedStatus === 'SUSPENDED') {
-          return reply.code(403).send({
-            success: false,
-            error: 'Tenant Suspended',
-            message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
-          });
+            return reply.code(403).send({
+              success: false,
+              error: 'Tenant Suspended',
+              message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+            });
           }
         }
       }

@@ -8,7 +8,7 @@ import redis from '../config/redis.js';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
 const REFRESH_COOKIE_NAME = 'refresh_token';
-const SESSION_TTL_MS = 15 * 60 * 1000;
+const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
 
 /**
  * JWT authentication middleware
@@ -17,7 +17,7 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 export async function authenticateAdmin(request, reply) {
   try {
     const authHeader = request.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return reply.code(401).send({
         success: false,
@@ -25,9 +25,9 @@ export async function authenticateAdmin(request, reply) {
         message: 'Missing or invalid authorization header. Please provide a Bearer token.',
       });
     }
-    
+
     const token = authHeader.split(' ')[1];
-    
+
     if (!token) {
       return reply.code(401).send({
         success: false,
@@ -35,12 +35,12 @@ export async function authenticateAdmin(request, reply) {
         message: 'Token is required',
       });
     }
-    
+
     // Verify JWT token - try both admin and tenant secrets
     // This allows backward compatibility during migration
     let decoded;
     let isAdminToken = false;
-    
+
     try {
       // Try admin secret first (for super admins)
       decoded = jwt.verify(token, ADMIN_JWT_SECRET);
@@ -61,7 +61,7 @@ export async function authenticateAdmin(request, reply) {
         }
       }
     }
-    
+
     const refreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
 
     if (!refreshToken) {
@@ -151,7 +151,7 @@ export async function authenticateAdmin(request, reply) {
         throw error;
       }
     }
-    
+
     if (!rows || rows.length === 0) {
       return reply.code(401).send({
         success: false,
@@ -159,9 +159,9 @@ export async function authenticateAdmin(request, reply) {
         message: 'Invalid token or user not found',
       });
     }
-    
+
     const admin = rows[0];
-    
+
     // Get tenant_id (may be undefined if column doesn't exist)
     const tenantId = admin.tenant_id !== undefined ? admin.tenant_id : null;
     const sessionTenantId = session?.tenant_id !== undefined ? session?.tenant_id : null;
@@ -181,7 +181,7 @@ export async function authenticateAdmin(request, reply) {
         message: 'Session tenant mismatch',
       });
     }
-    
+
     // 🔒 STRICT TENANT ISOLATION ENFORCEMENT
     // Rule 1: Super admins (tenant_id = NULL) can ONLY access via admin subdomain
     if (!tenantId) {
@@ -193,11 +193,11 @@ export async function authenticateAdmin(request, reply) {
         });
       }
     }
-    
+
     // Rule 2: Tenant admins MUST have matching tenant context
     if (tenantId) {
       const requestTenantId = getTenantId(request);
-      
+
       // 🔒 STRICT: Tenant admin MUST have matching tenant subdomain
       // This should never happen if login validation worked correctly, but defense-in-depth
       if (!requestTenantId) {
@@ -215,7 +215,7 @@ export async function authenticateAdmin(request, reply) {
           message: 'Tenant admin access requires tenant subdomain. Please access via your tenant subdomain.',
         });
       }
-      
+
       // 🔒 STRICT: JWT tenant_id MUST match request tenant_id (from subdomain)
       if (parseInt(requestTenantId) !== parseInt(tenantId)) {
         logger.error('[AUTH] Tenant mismatch detected - REJECTED', {
@@ -231,7 +231,7 @@ export async function authenticateAdmin(request, reply) {
           message: 'JWT tenant_id does not match request tenant. Access denied.',
         });
       }
-      
+
       // Rule 3: Verify tenant is not suspended
       if (request.tenant) {
         const normalizedStatus = String(request.tenant.status || '').toUpperCase();
@@ -262,10 +262,10 @@ export async function authenticateAdmin(request, reply) {
         });
       }
     }
-    
+
     // Super admin check (no tenant_id = super admin)
     const isSuperAdmin = !tenantId;
-    
+
     // Attach admin info to request
     request.admin = {
       id: admin.id,
@@ -283,7 +283,7 @@ export async function authenticateAdmin(request, reply) {
         message: 'Invalid token',
       });
     }
-    
+
     if (error.name === 'TokenExpiredError') {
       return reply.code(401).send({
         success: false,
@@ -291,7 +291,7 @@ export async function authenticateAdmin(request, reply) {
         message: 'Token has expired. Please login again.',
       });
     }
-    
+
     logger.error('Auth error:', error);
     logger.error('Auth error stack:', error.stack);
     return reply.code(500).send({

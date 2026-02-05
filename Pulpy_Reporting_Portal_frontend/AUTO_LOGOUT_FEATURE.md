@@ -251,19 +251,33 @@ or
 
 ## JWT Token Expiry Configuration
 
-**Backend File**: `.env`
+**Backend Files**: 
+- `src/controllers/authController.js`
+- `src/middleware/auth.js`
 
-```bash
-# JWT token expiry time
-JWT_EXPIRY=24h  # Token expires after 24 hours
+```javascript
+// Access token expires every 5 minutes (short-lived for security)
+const ACCESS_TOKEN_TTL = '5m';
+
+// Refresh token and session valid for 180 minutes (3 hours)
+const REFRESH_TTL_SECONDS = 180 * 60;
+const SESSION_TTL_MS = 180 * 60 * 1000;
 ```
 
-**Common Values**:
-- `15m` - 15 minutes
-- `1h` - 1 hour
-- `24h` - 24 hours (recommended)
-- `7d` - 7 days
-- `30d` - 30 days
+**Frontend File**: `src/services/api.js`
+
+```javascript
+// Idle timeout matches backend session timeout
+const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
+```
+
+**How It Works**:
+- **Access Token**: Expires every 5 minutes for security
+- **Refresh Token**: Valid for 180 minutes (3 hours) from last activity
+- **Session**: Valid for 180 minutes (3 hours) from last activity
+- **Activity Tracking**: Each user action updates `last_activity` timestamp
+- **Continuous Use**: If user is actively using the app, session extends indefinitely
+- **Idle Timeout**: After 180 minutes of inactivity, user must login again
 
 ---
 

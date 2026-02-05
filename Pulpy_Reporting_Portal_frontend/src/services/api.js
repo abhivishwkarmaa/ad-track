@@ -15,7 +15,7 @@ if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
 }
 
 const BASE_URL = '';
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
 
 let accessToken = null;
 
