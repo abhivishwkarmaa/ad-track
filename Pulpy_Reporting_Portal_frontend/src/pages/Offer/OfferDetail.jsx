@@ -155,22 +155,21 @@ function OfferDetail() {
         fetchPublishers();
     }, [toast, refreshKey]);
 
-    // Fetch assignments
+    // Fetch assignments for this offer only (use offer-specific endpoint so we only get this offer's assignments and correct tracking URLs)
     useEffect(() => {
         const fetchAssignments = async () => {
             if (!id) return;
             try {
                 setLoadingAssignments(true);
-                const response = await assignmentsAPI.getAssignments({ offer_id: id });
+                const response = await offersAPI.getOfferAssignments(id);
                 if (response.success && response.data) {
                     setAssignments(response.data);
-                    // Initialize publisher assignments from existing assignments
                     const initialAssignments = await Promise.all(
                         response.data.map(async (assignment) => {
                             let trackingUrl = '';
                             if (assignment.id) {
                                 try {
-                                    const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id);
+                                    const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
                                     if (trackingResponse.success) {
                                         trackingUrl = trackingResponse.data.tracking_url;
                                     }
@@ -186,7 +185,7 @@ function OfferDetail() {
                                 capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
                                 capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
                                 callback_url: assignment.callback_url || '',
-                                offer_url: assignment.offer_url || '',
+                                offer_url: assignment.destination_url || assignment.offer_url || '',
                                 notes: assignment.notes || '',
                                 status: assignment.status || 'active',
                                 assignment_id: assignment.id,
@@ -767,7 +766,7 @@ function OfferDetail() {
                                                     onClick={async () => {
                                                         try {
                                                             setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: true }));
-                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id);
+                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id, { for_offer_public_id: id });
                                                             if (trackingResponse.success && trackingResponse.data) {
                                                                 const updated = [...publisherAssignments];
                                                                 updated[index].tracking_url = trackingResponse.data.tracking_url;
@@ -848,8 +847,8 @@ function OfferDetail() {
                                     toast.success('Assignments saved successfully!');
                                     setEditingAssignmentIndex(null);
 
-                                    // Reload assignments and fetch tracking URLs
-                                    const response = await assignmentsAPI.getAssignments({ offer_id: id });
+                                    // Reload assignments for this offer only (same endpoint as initial load)
+                                    const response = await offersAPI.getOfferAssignments(id);
                                     if (response.success && response.data) {
                                         setAssignments(response.data);
                                         const updatedAssignments = await Promise.all(
@@ -857,7 +856,7 @@ function OfferDetail() {
                                                 let trackingUrl = '';
                                                 if (assignment.id) {
                                                     try {
-                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id);
+                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.public_assignment_id,);
                                                         if (trackingResponse.success) {
                                                             trackingUrl = trackingResponse.data.tracking_url;
                                                         }
@@ -873,7 +872,7 @@ function OfferDetail() {
                                                     capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
                                                     capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
                                                     callback_url: assignment.callback_url || '',
-                                                    offer_url: assignment.offer_url || '',
+                                                    offer_url: assignment.destination_url || assignment.offer_url || '',
                                                     notes: assignment.notes || '',
                                                     status: assignment.status || 'active',
                                                     assignment_id: assignment.id,

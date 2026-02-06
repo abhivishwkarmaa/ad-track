@@ -621,9 +621,13 @@ export class AdminController {
         const pub = await publisherService.findById(request.query.publisher_id, tenantId);
         filters.publisher_id = pub ? pub.id : request.query.publisher_id;
       }
+      // Resolve offer_id by public_offer_id only so detail page (URL = /offer/detail/5) shows assignments for that offer and tracking URLs use offer_id=5
       if (request.query.offer_id) {
-        const offer = await offerService.getOfferById(request.query.offer_id, tenantId);
-        filters.offer_id = offer ? offer.id : request.query.offer_id;
+        const internalOfferId = await offerService.getInternalOfferIdByPublicId(
+          Number(request.query.offer_id) || request.query.offer_id,
+          tenantId
+        );
+        filters.offer_id = internalOfferId ?? -1; // -1 so no rows match if offer not found
       }
       if (request.query.status) {
         filters.status = request.query.status;
@@ -720,6 +724,7 @@ export class AdminController {
       });
 
       const format = request.query.format || 'standard'; // 'standard' or 'alternative'
+      const forOfferPublicId = request.query.for_offer_public_id ? Number(request.query.for_offer_public_id) : null;
 
       // ✅ Resolve Public Assignment ID to Internal ID for the service call
       const assignment = await assignmentService.findById(request.params.id, tenantId);
@@ -729,7 +734,8 @@ export class AdminController {
         internalAssignmentId,
         baseURL,
         format,
-        tenantId
+        tenantId,
+        forOfferPublicId
       );
       if (!trackingURL) {
         return reply.code(404).send({

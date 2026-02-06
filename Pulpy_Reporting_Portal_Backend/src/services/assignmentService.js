@@ -365,7 +365,7 @@ export class AssignmentService {
     return rows.map(row => this.formatAssignment(row));
   }
 
-  async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null) {
+  async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null, overridePublicOfferId = null) {
     const assignment = await this.findById(assignmentId, tenantId);
     if (!assignment) {
       return null;
@@ -386,8 +386,10 @@ export class AssignmentService {
       return null;
     }
 
-    // 🔥 CRITICAL: Use public_offer_id in tracking URLs (fall back to display_id then internal ID)
-    const publicOfferId = offer.public_offer_id || offer.display_id || offer.id;
+    // When called from offer detail page, use page's offer public id so tracking URL always shows correct offer_id
+    const publicOfferId = overridePublicOfferId != null
+      ? overridePublicOfferId
+      : (offer.public_offer_id || offer.display_id || offer.id);
     if (!publicOfferId) {
       logger.error('Offer missing public identity', {
         offer_id: offer.id,

@@ -24,9 +24,11 @@ export class TrackingService {
     // if (isOverloaded()) ... (Redis handles this better, skip for now or keep)
 
     try {
-      // 🔥 CHANGED: offer_id in URL is now public_offer_id
+      // ============================================
+      // STEP 1: PARSE — UI se public ids aate hain (offer_id, pub_id)
+      // ============================================
       const publicOfferId = parseInt(query.offer_id || query.oid);
-      const publisherId = parseInt(query.pub_id || query.a);
+      const publicPublisherId = parseInt(query.pub_id || query.a);
 
       // ============================================
       // 1. TENANT RESOLUTION (NO DEDUPLICATION)
@@ -44,7 +46,7 @@ export class TrackingService {
           host: request.headers.host,
           url: request.url,
           public_offer_id: publicOfferId,
-          pub_id: publisherId
+          public_publisher_id: publicPublisherId
         });
         // ✅ Use secure error class - error handler will create minimal response
         const { TenantRequiredError } = await import('../utils/secureErrors.js');
@@ -88,18 +90,24 @@ export class TrackingService {
         host: request.headers.host,
         tenant_id: tenantId,
         public_offer_id: publicOfferId,
-        pub_id: publisherId
+        public_publisher_id: publicPublisherId
       });
 
-      // ✅ STEP 2: Fetch offer by public_offer_id and publisher WITH tenant filtering
-      // 🔥 CHANGED: Use public_offer_id instead of internal ID
+      // ============================================
+      // STEP 2: RESOLVE — Public ID → Internal ID (sirf iske baad DB me internal id use karo)
+      // ============================================
+      const internalOfferId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
       const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
-      const offer = await offerPublicIdService.getOfferByPublicId(publicOfferId, tenantId, null);
+      const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+      const internalPublisherId = publisher ? publisher.id : null;
 
-      // 🔥 CHANGED: Use public_publisher_id to resolve publisher
-      const publisher = await offerPublicIdService.getPublisherByPublicId(publisherId, tenantId);
+      const offer = internalOfferId
+        ? await offerService.getOfferById(internalOfferId, tenantId, true)
+        : null;
 
-      // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
+      // ============================================
+      // STEP 3: Validate — Offer & publisher mile, tenant match kare
+      // ============================================
       if (!offer) {
         logger.error('❌ Offer not found or does not belong to tenant', {
           public_offer_id: publicOfferId,
@@ -110,10 +118,10 @@ export class TrackingService {
 
       if (!publisher) {
         logger.error('❌ Publisher not found or does not belong to tenant', {
-          public_publisher_id: publisherId,
+          public_publisher_id: publicPublisherId,
           tenant_id: tenantId
         });
-        throw new Error(`Publisher ${publisherId} not found or does not belong to tenant ${tenantId}`);
+        throw new Error(`Publisher ${publicPublisherId} not found or does not belong to tenant ${tenantId}`);
       }
 
       if (publisher.status !== 'active') {
@@ -126,39 +134,42 @@ export class TrackingService {
       // Check if offer has tenant_id set (should always be set in multi-tenant system)
       if (offer.tenant_id === null || offer.tenant_id === undefined) {
         logger.error('❌ CRITICAL: Offer has no tenant_id - data integrity issue', {
-          offer_id: offerId,
+          offer_id: offer.id,
+          public_offer_id: publicOfferId,
           resolved_tenant_id: tenantId
         });
-        throw new Error(`Data integrity error: Offer ${offerId} has no tenant_id assigned. All offers must belong to a tenant.`);
+        throw new Error(`Data integrity error: Offer ${offer.id} has no tenant_id assigned. All offers must belong to a tenant.`);
       }
 
       if (parseInt(offer.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ HARD FAILURE: Offer tenant mismatch', {
-          offer_id: offerId,
+          offer_id: offer.id,
+          public_offer_id: publicOfferId,
           offer_tenant_id: offer.tenant_id,
           resolved_tenant_id: tenantId,
           host: request.headers.host
         });
-        throw new Error(`Security violation: Offer ${offerId} belongs to tenant ${offer.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+        throw new Error(`Security violation: Offer ${offer.id} belongs to tenant ${offer.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
 
-      // Check if publisher has tenant_id set
       if (publisher.tenant_id === null || publisher.tenant_id === undefined) {
         logger.error('❌ CRITICAL: Publisher has no tenant_id - data integrity issue', {
-          publisher_id: publisherId,
+          publisher_id: publisher.id,
+          public_publisher_id: publicPublisherId,
           resolved_tenant_id: tenantId
         });
-        throw new Error(`Data integrity error: Publisher ${publisherId} has no tenant_id assigned. All publishers must belong to a tenant.`);
+        throw new Error(`Data integrity error: Publisher ${publisher.id} has no tenant_id assigned. All publishers must belong to a tenant.`);
       }
 
       if (parseInt(publisher.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ HARD FAILURE: Publisher tenant mismatch', {
-          publisher_id: publisherId,
+          internal_publisher_id: publisher.id,
+          public_publisher_id: publicPublisherId,
           publisher_tenant_id: publisher.tenant_id,
           resolved_tenant_id: tenantId,
           host: request.headers.host
         });
-        throw new Error(`Security violation: Publisher ${publisherId} belongs to tenant ${publisher.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+        throw new Error(`Security violation: Publisher ${publisher.id} belongs to tenant ${publisher.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
 
       // ✅ STEP 5: Verify tenant exists in database (for foreign key integrity)
@@ -176,41 +187,65 @@ export class TrackingService {
         logger.warn(`⚠️ Could not verify tenant existence: ${err.message}`);
       }
 
-      // ✅ CRITICAL: Get assignment WITH tenant filtering (tenant already resolved)
-      // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
-      // 🔥 CHANGED: Use publisher.id (internal DB ID) for assignment lookup
-      let assignment = await cacheService.getAssignment(publisher.id, offer.id, tenantId);
-      // If assignment not found in cache, try direct DB query with tenant_id
+      // ============================================
+      // STEP 4: Assignment nikalna — pehle internal ids, na mile to public publisher_id (legacy fallback)
+      // ============================================
+      let assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
       if (!assignment) {
-        try {
-          const [assignmentRows] = await pool.query(
-            'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ? AND tenant_id = ? LIMIT 1',
-            [publisher.id, offer.id, 'active', tenantId]
-          );
-          assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
+        let [assignmentRows] = await pool.query(
+          'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+          [internalPublisherId, offer.id, tenantId]
+        );
+        assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
 
-          // ✅ Validate assignment belongs to resolved tenant
-          if (assignment && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
-            logger.error('❌ HARD FAILURE: Assignment tenant mismatch', {
-              assignment_id: assignment.id,
-              assignment_tenant_id: assignment.tenant_id,
-              resolved_tenant_id: tenantId
+        // Fallback: kuch purani rows me publisher_id column me public id store ho sakta hai
+        if (!assignment && publicPublisherId !== internalPublisherId) {
+          const [fallbackRows] = await pool.query(
+            'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+            [publicPublisherId, offer.id, tenantId]
+          );
+          assignment = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
+          if (assignment) {
+            logger.warn('⚠️ Assignment found by public publisher_id (legacy row). Prefer storing internal publisher_id in publisher_offers.', {
+              public_publisher_id: publicPublisherId,
+              internal_offer_id: offer.id,
+              tenant_id: tenantId
             });
-            throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
           }
-        } catch (e) {
-          // If query fails, fall through to error
+        }
+
+        if (assignment && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
+          logger.error('❌ HARD FAILURE: Assignment tenant mismatch', {
+            assignment_id: assignment.id,
+            assignment_tenant_id: assignment.tenant_id,
+            resolved_tenant_id: tenantId
+          });
+          throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+        }
+
+        if (assignment && assignment.status !== 'active') {
+          logger.error('❌ Assignment exists but is not active', {
+            assignment_id: assignment.id,
+            status: assignment.status,
+            internal_publisher_id: internalPublisherId,
+            internal_offer_id: offer.id,
+            public_offer_id: publicOfferId,
+            public_publisher_id: publicPublisherId,
+            tenant_id: tenantId
+          });
+          throw new Error(`Assignment exists but status is '${assignment.status}'. Set it to 'active' to accept clicks.`);
         }
       }
 
       if (!assignment) {
-        logger.error('❌ Assignment not found', {
-          publisher_id: publisherId,
-          offer_id: offer.id,
+        logger.error('❌ Assignment not found (no row in publisher_offers)', {
           public_offer_id: publicOfferId,
+          public_publisher_id: publicPublisherId,
+          internal_offer_id: offer.id,
+          internal_publisher_id: internalPublisherId,
           tenant_id: tenantId
         });
-        throw new Error(`Assignment not found for publisher ${publisherId} and offer ${offer.id} (public ID: ${publicOfferId}) in tenant ${tenantId}`);
+        throw new Error(`Assignment not found for publisher ${publicPublisherId} (internal ${internalPublisherId}) and offer ${publicOfferId} (internal ${offer.id}) in tenant ${tenantId}. Create the assignment on the offer detail page.`);
       }
 
       // ✅ CRITICAL: HARD VALIDATION - Assignment must belong to resolved tenant
@@ -332,7 +367,7 @@ export class TrackingService {
         offer_id: String(offer.id),
         public_offer_id: String(publicOfferId),
         publisher_id: String(publisher.id), // 🔥 Use Internal ID
-        public_publisher_id: String(publisherId), // 🔥 NEW: Store Public ID for reference
+        public_publisher_id: String(publicPublisherId), // 🔥 Store Public ID (from URL) for reference
         publisher_offer_id: assignment.id ? String(assignment.id) : '',
         tenant_id: finalTenantId ? String(finalTenantId) : '', // ✅ CRITICAL: Store as string (should never be empty in strict multi-tenant)
         ip: ip || '',
@@ -379,7 +414,8 @@ export class TrackingService {
           tenant_id: finalTenantId,
           offer_id: offer.id,
           public_offer_id: publicOfferId,
-          publisher_id: publisherId,
+          publisher_id: publisher.id,
+          public_publisher_id: publicPublisherId,
           click_id: clickUuid,
           redis_key: redisKey
         });
@@ -397,7 +433,7 @@ export class TrackingService {
             click_uuid: clickUuid,
             offer_id: offer.id,
             public_offer_id: publicOfferId,
-            publisher_id: publisherId
+            publisher_id: publisher.id
           });
           throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
         }
@@ -456,7 +492,7 @@ export class TrackingService {
             tenant_id: finalTenantId,
             offer_id: offer.id,
             public_offer_id: publicOfferId,
-            publisher_id: publisherId
+            publisher_id: publisher.id
           });
         }
 
@@ -468,7 +504,7 @@ export class TrackingService {
             tenant_id: finalTenantId,
             offer_id: offer.id,
             public_offer_id: publicOfferId,
-            publisher_id: publisherId
+            publisher_id: publisher.id
           });
         } else if (streamWriteError) {
           logger.warn('[CLICK] Stream enqueue failed - click will be backfilled', {

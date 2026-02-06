@@ -495,8 +495,9 @@ export const assignmentsAPI = {
             body: JSON.stringify(data),
         });
     },
-    getTrackingUrl: async (id) => {
-        return apiRequest(`/api/admin/assignments/${id}/tracking-url`);
+    getTrackingUrl: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/assignments/${id}/tracking-url${queryString ? `?${queryString}` : ''}`);
     },
     deleteAssignment: async (id) => {
         return apiRequest(`/api/admin/assignments/${id}`, {

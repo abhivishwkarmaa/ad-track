@@ -438,6 +438,19 @@ class OfferService {
     }
   }
 
+  /**
+   * Resolve public_offer_id to internal offer id only (no display_id fallback).
+   * Use when filtering assignments by offer from detail page URL (public id).
+   */
+  async getInternalOfferIdByPublicId(publicOfferId, tenantId) {
+    if (publicOfferId == null || !tenantId) return null;
+    const [rows] = await pool.query(
+      'SELECT id FROM offers WHERE tenant_id = ? AND public_offer_id = ? LIMIT 1',
+      [tenantId, publicOfferId]
+    );
+    return rows?.[0]?.id ?? null;
+  }
+
   async getOfferById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
 
@@ -534,14 +547,18 @@ class OfferService {
 
   async getOfferAssignments(id, tenantId = null) {
     try {
-      // 1. Resolve internal ID
-      const offer = await this.getOfferById(id, tenantId);
-      if (!offer) return [];
-      const internalId = offer.id;
+      // 1. Resolve by public_offer_id only (same as detail page URL) so we don't mix in other offers
+      const internalId = await this.getInternalOfferIdByPublicId(
+        id != null ? Number(id) : null,
+        tenantId
+      );
+      if (!internalId) return [];
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT po.*, 
+                po.public_assignment_id,
                 p.id as publisher_id,
+                p.public_publisher_id,
                 p.email as publisher_email,
                 p.first_name as publisher_first_name,
                 p.company_name as publisher_company,
@@ -562,9 +579,10 @@ class OfferService {
       const [assignmentsRows] = await pool.query(query, params);
       const assignments = Array.isArray(assignmentsRows) ? assignmentsRows : [];
 
+      // Return public_assignment_id as id so getTrackingUrl(id) finds the correct assignment by public id (avoids wrong offer_id in tracking URL)
       return assignments.map(assignment => ({
-        id: assignment.id,
-        publisher_id: assignment.publisher_id,
+        id: assignment.public_assignment_id ?? assignment.id,
+        publisher_id: assignment.public_publisher_id ?? assignment.publisher_id,
         publisher_email: assignment.publisher_email,
         publisher_first_name: assignment.publisher_first_name,
         publisher_company: assignment.publisher_company,
