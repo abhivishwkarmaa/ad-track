@@ -138,7 +138,7 @@ const LiveLogs = () => {
                         <select value={selectedPublisher} onChange={(e) => setSelectedPublisher(e.target.value)}>
                             <option value="">All Publishers</option>
                             {publishers.map(p => (
-                                <option key={p.id} value={p.id}>{p.company_name || p.email} ({p.id})</option>
+                                <option key={p.id} value={p.id}>{p.company_name || p.email} ({p.public_publisher_id ?? p.id})</option>
                             ))}
                         </select>
                     </div>
@@ -227,7 +227,7 @@ const LiveLogs = () => {
                                         <td>{formatDate(row.click_created_at || row.created_at)}</td>
                                         <td className="monospace">{row.click_uuid}</td>
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
-                                        <td>{row.publisher_company || row.publisher_email} - ({row.publisher_id})</td>
+                                        <td>{row.publisher_company || row.publisher_email} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>{row.ip}</td>
                                         <td>{[row.city, row.region, row.country].filter(Boolean).join(', ') || '-'}</td>
                                         <td>{row.device_type} / {row.os}</td>
@@ -240,7 +240,7 @@ const LiveLogs = () => {
                                         <td className="monospace">{row.conversion_uuid}</td>
                                         <td className="monospace">{row.click_uuid}</td>
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
-                                        <td>{row.publisher_name} - ({row.publisher_id})</td>
+                                        <td>{row.publisher_name} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
                                         <td>
                                             <span className={`badge ${row.status}`}>{row.status}</span>
