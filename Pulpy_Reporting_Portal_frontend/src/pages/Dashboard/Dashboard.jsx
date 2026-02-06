@@ -117,8 +117,8 @@ function Dashboard() {
     const [error, setError] = useState(null);
     const [dateFilter, setDateFilter] = useState('today');
 
-    // Date range calculator
-    const dateRange = useMemo(() => {
+    // Date range calculator (current period + previous period for comparison)
+    const { dateRange, previousRange, periodLabels } = useMemo(() => {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const formatDate = (d) => {
@@ -151,7 +151,56 @@ function Dashboard() {
             })()
         };
 
-        return ranges[dateFilter] || ranges.today;
+        // Previous period ranges for comparison (today vs yesterday, this week vs previous week, etc.)
+        const prevRanges = {
+            today: (() => {
+                const d = new Date(today);
+                d.setDate(d.getDate() - 1);
+                return { from: formatDate(d), to: formatDate(d) };
+            })(),
+            yesterday: (() => {
+                const d = new Date(today);
+                d.setDate(d.getDate() - 2);
+                return { from: formatDate(d), to: formatDate(d) };
+            })(),
+            this_week: (() => {
+                const weekStart = new Date(today);
+                weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+                const prevEnd = new Date(weekStart);
+                prevEnd.setDate(prevEnd.getDate() - 1);
+                const prevStart = new Date(prevEnd);
+                prevStart.setDate(prevStart.getDate() - 6);
+                return { from: formatDate(prevStart), to: formatDate(prevEnd) };
+            })(),
+            this_month: (() => {
+                const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                const end = new Date(today.getFullYear(), today.getMonth(), 0);
+                return { from: formatDate(start), to: formatDate(end) };
+            })(),
+            last_month: (() => {
+                const start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+                const end = new Date(today.getFullYear(), today.getMonth() - 1, 0);
+                return { from: formatDate(start), to: formatDate(end) };
+            })()
+        };
+
+        const labels = {
+            today: { current: 'Today', previous: 'Yesterday' },
+            yesterday: { current: 'Yesterday', previous: 'Day before' },
+            this_week: { current: 'This Week', previous: 'Previous Week' },
+            this_month: { current: 'This Month', previous: 'Previous Month' },
+            last_month: { current: 'Last Month', previous: 'Month before' }
+        };
+
+        const current = ranges[dateFilter] || ranges.today;
+        const previous = prevRanges[dateFilter] || null;
+        const labelsForPeriod = labels[dateFilter] || { current: dateFilter.replace('_', ' '), previous: 'Previous' };
+
+        return {
+            dateRange: current,
+            previousRange: previous,
+            periodLabels: labelsForPeriod
+        };
     }, [dateFilter]);
 
     // ✅ SINGLE API CALL
@@ -163,13 +212,18 @@ function Dashboard() {
                 setLoading(true);
                 setError(null);
 
-                // One call to get EVERYTHING
-                const response = await dashboardAPI.getDashboard({
+                // One call to get EVERYTHING (include previous period for Performance Summary comparison)
+                const params = {
                     date_from: dateRange.from,
                     date_to: dateRange.to,
                     group_by: (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day',
                     limit: 10
-                });
+                };
+                if (previousRange) {
+                    params.previous_from = previousRange.from;
+                    params.previous_to = previousRange.to;
+                }
+                const response = await dashboardAPI.getDashboard(params);
 
                 if (isMounted) {
                     if (response.success && response.data) {
@@ -222,6 +276,7 @@ function Dashboard() {
         performanceChart = [],
         topAffiliates = {},
         summary = {},
+        summary_previous = null, // Previous period summary for comparison
         liveOffers = [], // Live offers list
         recentActivity = [], // Detailed activity
         offerStatistics = [] // Offer stats table
@@ -479,11 +534,11 @@ function Dashboard() {
                     ) : <div className="no-data">No active publishers</div>}
                 </div>
 
-                {/* Summary */}
+                {/* Summary — current period vs previous period */}
                 <div className="dashboard-card summary-reports-card">
                     <div className="card-header">
                         <h3>Performance Summary</h3>
-                        <span className="period-indicator">{dateFilter.replace('_', ' ')}</span>
+                        <span className="period-indicator">{periodLabels.current} vs {periodLabels.previous}</span>
                     </div>
                     <div className="summary-grid">
                         <div className="summary-item">
@@ -492,7 +547,12 @@ function Dashboard() {
                             </div>
                             <div className="summary-content">
                                 <span className="summary-value">{formatNumber(summary.unique_clicks)}</span>
-                                <span className="summary-label">Unique Clicks</span>
+                                <span className="summary-label">{periodLabels.current} · Unique Clicks</span>
+                                {summary_previous != null && (
+                                    <div className="summary-previous">
+                                        {periodLabels.previous}: {formatNumber(summary_previous.unique_clicks)}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="summary-item">
@@ -501,7 +561,12 @@ function Dashboard() {
                             </div>
                             <div className="summary-content">
                                 <span className="summary-value">{formatNumber(summary.conversions)}</span>
-                                <span className="summary-label">Conversions</span>
+                                <span className="summary-label">{periodLabels.current} · Conversions</span>
+                                {summary_previous != null && (
+                                    <div className="summary-previous">
+                                        {periodLabels.previous}: {formatNumber(summary_previous.conversions)}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="summary-item">
@@ -510,7 +575,12 @@ function Dashboard() {
                             </div>
                             <div className="summary-content">
                                 <span className="summary-value">{formatCurrency(summary.revenue)}</span>
-                                <span className="summary-label">Total Revenue</span>
+                                <span className="summary-label">{periodLabels.current} · Total Revenue</span>
+                                {summary_previous != null && (
+                                    <div className="summary-previous">
+                                        {periodLabels.previous}: {formatCurrency(summary_previous.revenue)}
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="summary-item">
@@ -519,7 +589,12 @@ function Dashboard() {
                             </div>
                             <div className="summary-content">
                                 <span className="summary-value profit">{formatCurrency(summary.profit)}</span>
-                                <span className="summary-label">Total Profit</span>
+                                <span className="summary-label">{periodLabels.current} · Total Profit</span>
+                                {summary_previous != null && (
+                                    <div className="summary-previous">
+                                        {periodLabels.previous}: {formatCurrency(summary_previous.profit)}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

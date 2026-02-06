@@ -593,6 +593,18 @@ export class AuthController {
         }
       }
 
+      // Extend session on refresh so 3h inactivity applies from last activity
+      await redis.set(
+        sessionKey,
+        JSON.stringify({
+          ...session,
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
       const token = jwt.sign(

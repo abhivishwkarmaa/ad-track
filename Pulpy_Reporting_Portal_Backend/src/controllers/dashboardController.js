@@ -52,6 +52,8 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        previous_from: request.query.previous_from,
+        previous_to: request.query.previous_to,
         limit: request.query.limit,
         group_by: request.query.group_by,
         metric: request.query.metric,

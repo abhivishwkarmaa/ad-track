@@ -8,7 +8,8 @@ import redis from '../config/redis.js';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
 const REFRESH_COOKIE_NAME = 'refresh_token';
-const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
+const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours) inactivity
+const REFRESH_TTL_SECONDS = 180 * 60;   // Redis key TTL: 3 hours (extend on activity)
 
 /**
  * JWT authentication middleware
@@ -117,7 +118,7 @@ export async function authenticateAdmin(request, reply) {
       });
     }
 
-    // Activity tracking: update last_activity only for user-initiated requests
+    // Activity tracking: update last_activity and extend session TTL on user-initiated requests
     const isUserActivity = request.headers['x-user-activity'] === '1';
     if (isUserActivity) {
       await redis.set(
@@ -126,7 +127,8 @@ export async function authenticateAdmin(request, reply) {
           ...session,
           last_activity: Date.now(),
         }),
-        'KEEPTTL'
+        'EX',
+        REFRESH_TTL_SECONDS
       );
     }
 

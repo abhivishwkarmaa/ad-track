@@ -180,7 +180,6 @@ export class TrackingService {
       // 🔥 CHANGED: Use offer.id (internal DB ID) for assignment lookup
       // 🔥 CHANGED: Use publisher.id (internal DB ID) for assignment lookup
       let assignment = await cacheService.getAssignment(publisher.id, offer.id, tenantId);
-      console.log('assignment', assignment);
       // If assignment not found in cache, try direct DB query with tenant_id
       if (!assignment) {
         try {
@@ -228,13 +227,6 @@ export class TrackingService {
       // 🕵️ TEST POSTBACK INTERCEPTION
       // ============================================
       // Check if there is an active test session for this tenant
-      console.log('Checking for test session...');
-      console.log('tenantId:', tenantId);
-      console.log('offer.id:', offer.id);
-      console.log('publisher.id:', publisher.id);
-      console.log('assignment.id:', assignment.id);
-      console.log('query:', query);
-      // console.log('request:', request);
       const testResult = await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
       if (testResult) {
         return testResult; // 🛑 EXIT EARLY: No Production DB Writes

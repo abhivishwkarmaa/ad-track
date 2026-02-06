@@ -440,7 +440,6 @@ class OfferService {
 
   async getOfferById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
-    console.log(`[OfferService] getOfferById id=${id}, tenantId=${tenantId}, internalOnly=${internalOnly}`);
 
     // 1. Try Public ID / Display ID first (unless searching strictly by internal ID)
     if (tenantId && !internalOnly) {
@@ -839,7 +838,6 @@ class OfferService {
         }
         dailyStatsMap.get(dateStr).conversions = row.count;
       });
-      console.log('DAILY STATS MAP:', dailyStatsMap);
       return Array.from(dailyStatsMap.values())
         .sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
@@ -853,7 +851,6 @@ class OfferService {
   async listOffers(filters = {}, tenantId = null) {
     const conditions = [];
     const params = [];
-    console.log('FILTERS RECEIVED:', filters);
 
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     if (tenantId) {

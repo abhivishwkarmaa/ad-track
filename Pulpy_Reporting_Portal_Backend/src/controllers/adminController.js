@@ -445,7 +445,6 @@ export class AdminController {
   async createAssignment(request, reply) {
     try {
       // Validate request body
-      console.log(request.body);
       const { error, value } = createAssignmentSchema.validate(request.body, {
         abortEarly: false,
         stripUnknown: true,

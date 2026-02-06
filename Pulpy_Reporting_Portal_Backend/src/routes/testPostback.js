@@ -52,7 +52,6 @@ async function testPostbackRoutes(fastify, options) {
 
             // ✅ Now we have the INTERNAL offer ID (offer.id)
             const internalOfferId = offer.id;
-            console.log(affiliate_id, offer_id, tracking_url, internalOfferId)
             logger.info('✅ Resolved Public Offer ID to Internal ID', {
                 public_offer_id: publicOfferId,
                 internal_offer_id: internalOfferId,
@@ -72,7 +71,6 @@ async function testPostbackRoutes(fastify, options) {
             // ✅ CRITICAL: Use INTERNAL IDs for Redis key
             // This MUST match the key that trackClick will look up
             const key = `test:postback:${tenantId}:${internalPublisherId}:${internalOfferId}`;
-            console.log(key, "key")
             const sessionData = {
                 status: 'pending', // pending | click_received | completed | failed
                 started_at: Date.now(),

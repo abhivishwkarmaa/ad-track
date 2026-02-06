@@ -904,9 +904,16 @@ export class DashboardService {
       const {
         date_from,
         date_to,
+        previous_from,
+        previous_to,
         limit = 10,
         group_by = 'hour'
       } = filters;
+
+      const summaryPromise = reportService.getSummary({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
+      const summaryPreviousPromise = (previous_from && previous_to)
+        ? reportService.getSummary({ date_from: previous_from, date_to: previous_to }, tenantId).catch(err => { logger.error('Error fetching summary_previous:', err); return null; })
+        : Promise.resolve(null);
 
       // Execute all sub-queries in parallel
       const [
@@ -915,6 +922,7 @@ export class DashboardService {
         topOffers,
         topAffiliates,
         summary,
+        summaryPrevious,
         liveOffers,
         recentActivity,
         offerStatistics
@@ -923,13 +931,14 @@ export class DashboardService {
         this.getPerformanceChart({ date_from, date_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
         this.getTopOffers({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top offers:', err); return []; }),
         this.getTopAffiliates({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top affiliates:', err); return { data: [] }; }),
-        reportService.getSummary({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; }),
+        summaryPromise,
+        summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
         this.getRecentActivity(10, tenantId).catch(err => { logger.error('Error fetching recent activity:', err); return []; }),
         this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; })
       ]);
 
-      return {
+      const result = {
         cards,
         performanceChart,
         topOffers,
@@ -939,6 +948,10 @@ export class DashboardService {
         recentActivity,
         offerStatistics
       };
+      if (summaryPrevious != null) {
+        result.summary_previous = summaryPrevious;
+      }
+      return result;
 
     } catch (error) {
       logger.error('DashboardService.getAggregatedDashboard error:', error);

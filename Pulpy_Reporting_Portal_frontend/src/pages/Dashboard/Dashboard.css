@@ -729,6 +729,24 @@
     color: green;
 }
 
+.summary-previous {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.summary-previous .stat-trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+}
+
 /* Recent Activity */
 .recent-activity-card {
     grid-column: span 2;

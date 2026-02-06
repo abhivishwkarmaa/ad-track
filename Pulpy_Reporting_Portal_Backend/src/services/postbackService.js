@@ -147,7 +147,6 @@ export class PostbackService {
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
-          console.log('conversionAmount', conversionAmount);
 
           // 4. Status Determination
           let finalStatus = status;
@@ -269,7 +268,6 @@ export class PostbackService {
           }
         }
 
-        console.log(click)
         if (!click) {
           // ✅ Click not found after retries - log and throw clear error
           logger.warn('Click not found in database', {
@@ -585,7 +583,6 @@ export class PostbackService {
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
       // Send postback to publisher's callback URL if available
-      console.log(callbackUrl);
       let postbackResult = null;
       if (callbackUrl && conversion) {
         postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);

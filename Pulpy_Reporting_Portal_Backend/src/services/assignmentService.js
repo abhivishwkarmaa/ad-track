@@ -204,7 +204,6 @@ export class AssignmentService {
         data.status || 'active',
       ]
     );
-    console.log('assignment created', tenantId);
 
     // ✅ CRITICAL: Fetch with tenant_id filtering
     const [rows] = await pool.query(
