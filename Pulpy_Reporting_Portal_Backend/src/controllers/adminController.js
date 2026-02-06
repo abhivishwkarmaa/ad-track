@@ -510,7 +510,9 @@ export class AdminController {
         });
       }
 
-      const assignment = await assignmentService.findById(request.params.id, tenantId);
+      // UI se public id → tenant + public id se internal resolve, phir internal se fetch (response me public id dikhane ke liye formatAssignment use hota hai)
+      const internalId = await assignmentService.getInternalAssignmentIdByPublicId(request.params.id, tenantId) ?? request.params.id;
+      const assignment = await assignmentService.findById(internalId, tenantId, true);
       if (!assignment) {
         return reply.code(404).send({
           success: false,
@@ -723,12 +725,19 @@ export class AdminController {
         tenantSubdomain: request.tenant.slug
       });
 
-      const format = request.query.format || 'standard'; // 'standard' or 'alternative'
+      const format = request.query.format || 'standard';
       const forOfferPublicId = request.query.for_offer_public_id ? Number(request.query.for_offer_public_id) : null;
 
-      // ✅ Resolve Public Assignment ID to Internal ID for the service call
-      const assignment = await assignmentService.findById(request.params.id, tenantId);
-      const internalAssignmentId = assignment ? assignment.internal_id : request.params.id;
+      // UI se public id aata hai → tenant + public id se internal id resolve, phir sab internal se
+      const internalAssignmentId = await assignmentService.getInternalAssignmentIdByPublicId(request.params.id, tenantId) ?? request.params.id;
+      const assignment = await assignmentService.findById(internalAssignmentId, tenantId, true);
+      if (!assignment) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Assignment not found',
+        });
+      }
 
       const trackingURL = await assignmentService.generateTrackingURL(
         internalAssignmentId,

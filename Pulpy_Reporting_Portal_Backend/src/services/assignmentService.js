@@ -257,6 +257,24 @@ export class AssignmentService {
     };
   }
 
+  /**
+   * Resolve public_assignment_id (from UI) to internal DB id using tenant + public id.
+   * Backend receives public id; use this before any DB write/lookup by id.
+   */
+  async getInternalAssignmentIdByPublicId(publicAssignmentId, tenantId) {
+    if (publicAssignmentId == null || !tenantId) return null;
+    try {
+      const [rows] = await pool.query(
+        'SELECT id FROM publisher_offers WHERE tenant_id = ? AND public_assignment_id = ? LIMIT 1',
+        [tenantId, publicAssignmentId]
+      );
+      return rows?.[0]?.id ?? null;
+    } catch (e) {
+      if (e.code === 'ER_BAD_FIELD_ERROR') return null;
+      throw e;
+    }
+  }
+
   async findById(id, tenantId = null, internalOnly = false) {
     if (id === undefined || id === null || id === '') return null;
     // Normalize id (route params can be string; ensure we don't pass path segments like "2/tracking-url")
@@ -447,20 +465,19 @@ export class AssignmentService {
 
   async update(id, data, tenantId = null) {
     try {
-      // ✅ CRITICAL: Require tenant_id for updates
       if (!tenantId) {
         const err = new Error('Tenant context required to update assignment');
         err.statusCode = 400;
         throw err;
       }
 
-      // First check if assignment exists and belongs to tenant
-      const existing = await this.findById(id, tenantId);
+      // UI se public id aata hai → tenant + public id se internal id resolve karo, phir sab internal se
+      const internalId = await this.getInternalAssignmentIdByPublicId(id, tenantId) ?? id;
+      const existing = await this.findById(internalId, tenantId, true);
       if (!existing) {
         return null;
       }
 
-      // ✅ CRITICAL: Verify ownership
       if (existing.tenant_id !== tenantId) {
         const err = new Error('Assignment does not belong to this tenant');
         err.statusCode = 403;
@@ -513,28 +530,24 @@ export class AssignmentService {
       }
 
       if (updateFields.length === 0) {
-        // No fields to update, return existing assignment
         return existing;
       }
 
-      // Add internal id and tenant_id to updateValues for WHERE clause
-      const internalId = existing.internal_id || existing.id;
-      updateValues.push(internalId);
+      // DB me hamesha internal id se update (id = publisher_offers.id)
+      const dbId = existing.internal_id ?? internalId;
+      updateValues.push(dbId);
 
-      // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
       let updateQuery = `UPDATE publisher_offers SET ${updateFields.join(', ')} WHERE id = ?`;
       if (tenantId) {
         updateQuery += ' AND tenant_id = ?';
         updateValues.push(tenantId);
       }
 
-      // Execute update
       await pool.query(updateQuery, updateValues);
 
-      logger.info(`Updated assignment ${id} status to ${data.status}`);
+      logger.info(`Updated assignment (public id ${id}, internal ${dbId})`);
 
-      // Return updated assignment (with tenant_id filtering)
-      return await this.findById(id, tenantId);
+      return await this.findById(dbId, tenantId, true);
     } catch (error) {
       logger.error('AssignmentService.update error:', error);
       throw error;
@@ -542,24 +555,28 @@ export class AssignmentService {
   }
 
   async delete(id, tenantId = null) {
-    // ✅ CRITICAL: Verify assignment exists and belongs to tenant first
-    const existing = await this.findById(id, tenantId);
+    if (!tenantId) {
+      const err = new Error('Tenant context required to delete assignment');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // UI se public id → tenant + public id se internal id resolve, phir delete internal se
+    const internalId = await this.getInternalAssignmentIdByPublicId(id, tenantId) ?? id;
+    const existing = await this.findById(internalId, tenantId, true);
     if (!existing) {
       return null;
     }
 
-    // ✅ CRITICAL: Verify ownership if tenant_id is set
-    if (tenantId && existing.tenant_id && existing.tenant_id !== tenantId) {
+    if (existing.tenant_id !== tenantId) {
       const err = new Error('Assignment does not belong to this tenant');
       err.statusCode = 403;
       throw err;
     }
 
-    // Hard delete: remove from database
-    // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-    const internalId = existing.internal_id || existing.id;
+    const dbId = existing.internal_id ?? internalId;
     let query = `DELETE FROM publisher_offers WHERE id = ?`;
-    const params = [internalId];
+    const params = [dbId];
 
     if (tenantId) {
       query += ' AND tenant_id = ?';
