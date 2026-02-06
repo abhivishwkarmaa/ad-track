@@ -272,6 +272,9 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-sm);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .card-header {
@@ -307,12 +310,18 @@
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
     gap: 10px;
     padding: 14px;
+    flex: 1;
+    /* Fill remaining height */
+    align-content: stretch;
+    /* Stretch rows */
 }
 
 .action-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
+    /* Center content vertically */
     gap: 8px;
     padding: 14px 10px;
     background: var(--bg-primary);
@@ -321,6 +330,8 @@
     color: var(--text-primary);
     transition: var(--transition-fast);
     border: 1px solid transparent;
+    height: 100%;
+    /* Fill grid cell */
 }
 
 .action-btn:hover {
@@ -372,6 +383,10 @@
     padding: 8px 0;
     max-height: 400px;
     overflow-y: auto;
+    flex: 1;
+    /* Fill remaining height */
+    display: flex;
+    flex-direction: column;
 }
 
 .offer-row {
@@ -381,6 +396,12 @@
     padding: 10px 16px;
     transition: var(--transition-fast);
     cursor: pointer;
+    flex: 1;
+    /* Grow to fill space */
+    min-height: 60px;
+    /* Minimum substantial height */
+    max-height: 90px;
+    /* Prevent being too huge */
 }
 
 .offer-row:hover {
@@ -461,6 +482,10 @@
 /* Affiliates List */
 .affiliates-list {
     padding: 8px 0;
+    flex: 1;
+    /* Fill remaining height */
+    display: flex;
+    flex-direction: column;
 }
 
 .affiliate-row {
@@ -469,6 +494,12 @@
     gap: 10px;
     padding: 10px 14px;
     transition: var(--transition-fast);
+    flex: 1;
+    /* Grow to fill space */
+    min-height: 60px;
+    /* Minimum substantial height */
+    max-height: 90px;
+    /* Prevent being too huge */
 }
 
 .affiliate-row:hover {

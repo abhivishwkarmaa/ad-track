@@ -247,6 +247,39 @@ function Dashboard() {
         return () => { isMounted = false; };
     }, [dateRange, refreshKey]);
 
+    // Safely extract data parts with defaults
+    const {
+        cards = {},
+        topOffers = [],
+        performanceChart = [],
+        topAffiliates = {},
+        summary = {},
+        summary_previous = null, // Previous period summary for comparison
+        liveOffers = [], // Live offers list
+        recentActivity = [], // Detailed activity
+        offerStatistics = [], // Offer stats table
+        performanceComparison = [] // Comparison chart data
+    } = dashboardData || {};
+
+    const processChartData = (data) => {
+        if (!data || data.length === 0) return [];
+        if (data.length === 1) {
+            // Duplicate the single point to create a flat line across the chart
+            // We append a space to the label to ensure uniqueness for Recharts while keeping it visually similar
+            return [
+                { ...data[0], label: data[0].label || data[0].date },
+                { ...data[0], label: (data[0].label || data[0].date) + ' ' }
+            ];
+        }
+        return data;
+    };
+
+    const processedPerformanceChart = useMemo(() => processChartData(performanceChart), [performanceChart]);
+    const processedComparisonChart = useMemo(() => processChartData(performanceComparison), [performanceComparison]);
+
+    // For Top Publishers list (Handle different structure if any)
+    const publisherList = topAffiliates.data || [];
+
     if (loading && !dashboardData) {
         return (
             <div className="dashboard">
@@ -269,21 +302,7 @@ function Dashboard() {
         );
     }
 
-    // Safely extract data parts with defaults
-    const {
-        cards = {},
-        topOffers = [],
-        performanceChart = [],
-        topAffiliates = {},
-        summary = {},
-        summary_previous = null, // Previous period summary for comparison
-        liveOffers = [], // Live offers list
-        recentActivity = [], // Detailed activity
-        offerStatistics = [] // Offer stats table
-    } = dashboardData || {};
 
-    // For Top Publishers list (Handle different structure if any)
-    const publisherList = topAffiliates.data || [];
 
     const todayStr = new Date().toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -431,10 +450,11 @@ function Dashboard() {
                 <div className="dashboard-card chart-card">
                     <div className="card-header">
                         <h3>Performance Chart</h3>
+                        <span className="period-indicator">{periodLabels.current}</span>
                     </div>
-                    <div style={{ width: '100%', height: 300 }}>
-                        <ResponsiveContainer>
-                            <AreaChart data={performanceChart}>
+                    <div style={{ width: '100%', height: 300, minHeight: 300 }}> {/* Ensure explicit minHeight */}
+                        <ResponsiveContainer debounce={300}>
+                            <AreaChart data={processedPerformanceChart}>
                                 <defs>
                                     <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8} />
@@ -449,46 +469,14 @@ function Dashboard() {
                                 <XAxis dataKey="date" />
                                 <YAxis />
                                 <Tooltip />
-                                <Area type="monotone" dataKey="clicks" stroke="#8884d8" fillOpacity={1} fill="url(#colorClicks)" />
-                                <Area type="monotone" dataKey="conversions" stroke="#82ca9d" fillOpacity={1} fill="url(#colorConversions)" />
+                                <Area type="monotone" dataKey="clicks" stroke="#8884d8" strokeWidth={3} fillOpacity={1} fill="url(#colorClicks)" animationDuration={1000} animationEasing="ease-out" />
+                                <Area type="monotone" dataKey="conversions" stroke="#82ca9d" strokeWidth={3} fillOpacity={1} fill="url(#colorConversions)" animationDuration={1000} animationEasing="ease-out" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* Offer Statistics */}
-                <div className="dashboard-card offer-stats-card" style={{ gridColumn: '1 / -1' }}>
-                    <div className="card-header">
-                        <h3>Offer Statistics</h3>
-                        <Link to="/reports" className="view-all">View Full Report</Link>
-                    </div>
-                    {offerStatistics && offerStatistics.length > 0 ? (
-                        <div className="activity-table">
-                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
-                                <span>Offer</span>
-                                <span>Clicks</span>
-                                <span>Conv</span>
-                                <span>CR</span>
-                                <span>Payout</span>
-                                <span>Profit</span>
-                            </div>
-                            {offerStatistics.map((stat, index) => (
-                                <div key={stat.offer_id || index} className="table-row" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
-                                    <Link to={`/offer/detail/${stat.display_id || stat.offer_id}`} className="offer-name-cell" title={stat.offer_name}>
-                                        <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
-                                    </Link>
-                                    <span>{formatNumber(stat.clicks)}</span>
-                                    <span>{formatNumber(stat.conversions)}</span>
-                                    <span>{stat.conversion_ratio}%</span>
-                                    <span>{formatCurrency(stat.affiliate_payout)}</span>
-                                    <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
-                                        {formatCurrency(stat.profit)}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    ) : <div className="no-data">No offer statistics available</div>}
-                </div>
+
 
                 {/* Live Offers */}
                 <div className="dashboard-card recent-offers-card">
@@ -535,69 +523,160 @@ function Dashboard() {
                 </div>
 
                 {/* Summary — current period vs previous period */}
-                <div className="dashboard-card summary-reports-card">
+                <div className="dashboard-card summary-reports-card" style={{ display: 'flex', flexDirection: 'column' }}>
                     <div className="card-header">
                         <h3>Performance Summary</h3>
                         <span className="period-indicator">{periodLabels.current} vs {periodLabels.previous}</span>
                     </div>
-                    <div className="summary-grid">
-                        <div className="summary-item">
-                            <div className="summary-icon-container blue">
-                                <ClickIcon />
-                            </div>
-                            <div className="summary-content">
-                                <span className="summary-value">{formatNumber(summary.unique_clicks)}</span>
-                                <span className="summary-label">{periodLabels.current} · Unique Clicks</span>
+
+                    {/* Performance Comparison Chart (NOW AT TOP) */}
+                    {performanceComparison && performanceComparison.length > 0 ? (
+                        <div className="chart-container" style={{ marginTop: '0px', marginBottom: '16px', height: '280px', width: '100%', flexShrink: 0, minHeight: 280 }}> {/* explicit minHeight */}
+                            <ResponsiveContainer width="100%" height="100%" debounce={300}>
+                                <AreaChart data={processedComparisonChart} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="colorCurrent" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#0088FE" stopOpacity={0.3} />
+                                            <stop offset="95%" stopColor="#0088FE" stopOpacity={0} />
+                                        </linearGradient>
+                                        <linearGradient id="colorPrevious" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#d1d5db" stopOpacity={0.3} />
+                                            <stop offset="95%" stopColor="#d1d5db" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                    <XAxis
+                                        dataKey="label"
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                                        interval="preserveStartEnd"
+                                        minTickGap={30}
+                                    />
+                                    <YAxis
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={{ fill: '#94a3b8', fontSize: 11 }}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: '#fff',
+                                            borderRadius: '8px',
+                                            border: '1px solid #e2e8f0',
+                                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                                        }}
+                                        labelStyle={{ color: '#1e293b', fontWeight: 600, marginBottom: '4px' }}
+                                        formatter={(value, name) => [value, name === 'clicks_current' ? periodLabels.current : periodLabels.previous]}
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="clicks_current"
+                                        name="clicks_current"
+                                        stroke="#0088FE"
+                                        strokeWidth={3}
+                                        fillOpacity={1}
+                                        fill="url(#colorCurrent)"
+                                        animationDuration={1000}
+                                        animationEasing="ease-out"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="clicks_previous"
+                                        name="clicks_previous"
+                                        stroke="#9ca3af"
+                                        strokeWidth={3}
+                                        strokeDasharray="4 4"
+                                        fillOpacity={1}
+                                        fill="url(#colorPrevious)"
+                                        animationDuration={1000}
+                                        animationEasing="ease-out"
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : <div className="no-data" style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No comparison data available</div>}
+
+                    {/* KPI Stats (BELOW CHART - COMPACT) */}
+                    <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginTop: 'auto' }}>
+                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Clicks</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.unique_clicks)}</span>
                                 {summary_previous != null && (
-                                    <div className="summary-previous">
-                                        {periodLabels.previous}: {formatNumber(summary_previous.unique_clicks)}
-                                    </div>
+                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                        prev: {formatNumber(summary_previous.unique_clicks)}
+                                    </span>
                                 )}
                             </div>
                         </div>
-                        <div className="summary-item">
-                            <div className="summary-icon-container teal">
-                                <ConversionIcon />
-                            </div>
-                            <div className="summary-content">
-                                <span className="summary-value">{formatNumber(summary.conversions)}</span>
-                                <span className="summary-label">{periodLabels.current} · Conversions</span>
+                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Conversions</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.conversions)}</span>
                                 {summary_previous != null && (
-                                    <div className="summary-previous">
-                                        {periodLabels.previous}: {formatNumber(summary_previous.conversions)}
-                                    </div>
+                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                        prev: {formatNumber(summary_previous.conversions)}
+                                    </span>
                                 )}
                             </div>
                         </div>
-                        <div className="summary-item">
-                            <div className="summary-icon-container purple">
-                                <RevenueIcon />
-                            </div>
-                            <div className="summary-content">
-                                <span className="summary-value">{formatCurrency(summary.revenue)}</span>
-                                <span className="summary-label">{periodLabels.current} · Total Revenue</span>
+                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Revenue</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.revenue)}</span>
                                 {summary_previous != null && (
-                                    <div className="summary-previous">
-                                        {periodLabels.previous}: {formatCurrency(summary_previous.revenue)}
-                                    </div>
+                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                        prev: {formatCurrency(summary_previous.revenue)}
+                                    </span>
                                 )}
                             </div>
                         </div>
-                        <div className="summary-item">
-                            <div className="summary-icon-container green">
-                                <OfferIcon />
-                            </div>
-                            <div className="summary-content">
-                                <span className="summary-value profit">{formatCurrency(summary.profit)}</span>
-                                <span className="summary-label">{periodLabels.current} · Total Profit</span>
+                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Profit</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                <span className="summary-value profit" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.profit)}</span>
                                 {summary_previous != null && (
-                                    <div className="summary-previous">
-                                        {periodLabels.previous}: {formatCurrency(summary_previous.profit)}
-                                    </div>
+                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                        prev: {formatCurrency(summary_previous.profit)}
+                                    </span>
                                 )}
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* Offer Statistics (Moved Here) */}
+                <div className="dashboard-card offer-stats-card" style={{ gridColumn: '1 / -1' }}>
+                    <div className="card-header">
+                        <h3>Offer Statistics</h3>
+                        <Link to="/reports" className="view-all">View Full Report</Link>
+                    </div>
+                    {offerStatistics && offerStatistics.length > 0 ? (
+                        <div className="activity-table">
+                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
+                                <span>Offer</span>
+                                <span>Clicks</span>
+                                <span>Conv</span>
+                                <span>CR</span>
+                                <span>Payout</span>
+                                <span>Profit</span>
+                            </div>
+                            {offerStatistics.map((stat, index) => (
+                                <div key={stat.offer_id || index} className="table-row" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
+                                    <Link to={`/offer/detail/${stat.display_id || stat.offer_id}`} className="offer-name-cell" title={stat.offer_name}>
+                                        <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
+                                    </Link>
+                                    <span>{formatNumber(stat.clicks)}</span>
+                                    <span>{formatNumber(stat.conversions)}</span>
+                                    <span>{stat.conversion_ratio}%</span>
+                                    <span>{formatCurrency(stat.affiliate_payout)}</span>
+                                    <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
+                                        {formatCurrency(stat.profit)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    ) : <div className="no-data">No offer statistics available</div>}
                 </div>
 
                 {/* Recent Activity */}
@@ -632,7 +711,7 @@ function Dashboard() {
                     ) : <div className="no-data">No recent activity</div>}
                 </div>
             </div>
-        </div>
+        </div >
     );
 }
 

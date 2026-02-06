@@ -897,6 +897,93 @@ export class DashboardService {
     }
   }
 
+  async getPerformanceComparison(currentFilters, previousFilters, tenantId) {
+    if (!tenantId) throw new Error('Tenant ID required');
+    try {
+      const groupBy = currentFilters.group_by || 'day';
+
+      const [currentData, previousData] = await Promise.all([
+        this.getPerformanceChart(currentFilters, tenantId),
+        this.getPerformanceChart(previousFilters, tenantId)
+      ]);
+
+      const mergedMap = new Map();
+
+      // Helper to generate a normalized key
+      const getNormalizedKey = (dateStr, fromDateStr, type) => {
+        if (type === 'hour') {
+          // Expected format: "YYYY-MM-DD HH:00" -> "HH:00"
+          if (dateStr.length >= 16) return dateStr.substring(11, 16);
+          return dateStr; // Fallback
+        } else {
+          // Day/Week/Month: Use offset from start date
+          // Treat strings as UTC for simple difference calculation to avoid DST issues
+          const date = new Date(dateStr + 'T00:00:00Z');
+          const start = new Date(fromDateStr + 'T00:00:00Z');
+          const diffTime = date - start;
+          const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+          return `Day ${diffDays + 1}`;
+        }
+      };
+
+      // Populate with Current Data
+      currentData.forEach(row => {
+        const key = getNormalizedKey(row.date, currentFilters.date_from, groupBy);
+        mergedMap.set(key, {
+          label: key,
+          original_date_current: row.date,
+          clicks_current: row.clicks,
+          conversions_current: row.conversions,
+          clicks_previous: 0,
+          conversions_previous: 0
+        });
+      });
+
+      // Overlay Previous Data
+      previousData.forEach(row => {
+        const key = getNormalizedKey(row.date, previousFilters.date_from, groupBy);
+        if (mergedMap.has(key)) {
+          const entry = mergedMap.get(key);
+          entry.clicks_previous = row.clicks;
+          entry.conversions_previous = row.conversions;
+          entry.original_date_previous = row.date;
+        } else {
+          // In case previous period has data points that current doesn't (though usually we iterate over a fixed time axis)
+          // For strict alignment, we might want to ignore extra previous points or add them. 
+          // Adding them for completeness.
+          mergedMap.set(key, {
+            label: key,
+            original_date_previous: row.date,
+            clicks_current: 0,
+            conversions_current: 0,
+            clicks_previous: row.clicks,
+            conversions_previous: row.conversions
+          });
+        }
+      });
+
+      // Convert map to sorted array
+      // Sorting based on label might be tricky ("Day 1", "Day 10", "Day 2"). 
+      // Ideally we sort by the implicit index.
+      const sortedData = Array.from(mergedMap.values()).sort((a, b) => {
+        if (groupBy === 'hour') {
+          return a.label.localeCompare(b.label);
+        } else {
+          // Extract number from "Day X"
+          const numA = parseInt(a.label.replace('Day ', '')) || 0;
+          const numB = parseInt(b.label.replace('Day ', '')) || 0;
+          return numA - numB;
+        }
+      });
+
+      return sortedData;
+
+    } catch (error) {
+      logger.error('DashboardService.getPerformanceComparison error:', error);
+      return [];
+    }
+  }
+
   async getAggregatedDashboard(filters = {}, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
 
@@ -915,6 +1002,10 @@ export class DashboardService {
         ? reportService.getSummary({ date_from: previous_from, date_to: previous_to }, tenantId).catch(err => { logger.error('Error fetching summary_previous:', err); return null; })
         : Promise.resolve(null);
 
+      const performanceComparisonPromise = (previous_from && previous_to)
+        ? this.getPerformanceComparison({ date_from, date_to, group_by }, { date_from: previous_from, date_to: previous_to, group_by }, tenantId)
+        : Promise.resolve([]);
+
       // Execute all sub-queries in parallel
       const [
         cards,
@@ -925,7 +1016,8 @@ export class DashboardService {
         summaryPrevious,
         liveOffers,
         recentActivity,
-        offerStatistics
+        offerStatistics,
+        performanceComparison
       ] = await Promise.all([
         this.getDashboardCards({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
         this.getPerformanceChart({ date_from, date_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
@@ -935,7 +1027,8 @@ export class DashboardService {
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
         this.getRecentActivity(10, tenantId).catch(err => { logger.error('Error fetching recent activity:', err); return []; }),
-        this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; })
+        this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
+        performanceComparisonPromise
       ]);
 
       const result = {
@@ -946,7 +1039,8 @@ export class DashboardService {
         summary,
         liveOffers,
         recentActivity,
-        offerStatistics
+        offerStatistics,
+        performanceComparison
       };
       if (summaryPrevious != null) {
         result.summary_previous = summaryPrevious;
