@@ -11,6 +11,7 @@ export class RedisHygieneWorker {
   constructor() {
     this.intervalId = null;
     this.isRunning = false;
+    this.lastRun = null;
   }
 
   /**
@@ -24,7 +25,7 @@ export class RedisHygieneWorker {
     }
 
     logger.info(`Starting Redis hygiene worker (interval: ${intervalMs}ms)`);
-    
+
     // Run immediately on start
     this.runHygieneTasks();
 
@@ -53,6 +54,7 @@ export class RedisHygieneWorker {
    */
   async runHygieneTasks() {
     try {
+      this.lastRun = new Date();
       logger.info('Running Redis hygiene tasks...');
       const results = await redisHygiene.runAllHygieneTasks();
       logger.info('Redis hygiene tasks completed', results);

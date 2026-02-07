@@ -82,11 +82,11 @@ export class RedisHygieneService {
   async trimClickStream(maxLength = 10000) {
     try {
       const streamLength = await redis.xlen('stream:clicks');
-      
+
       if (streamLength > maxLength) {
         const trimCount = streamLength - maxLength;
         const trimmed = await redis.xtrim('stream:clicks', 'MAXLEN', '~', maxLength);
-        
+
         logger.info(`Redis hygiene: Click stream trimmed`, {
           beforeLength: streamLength,
           afterLength: maxLength,
@@ -141,7 +141,7 @@ export class RedisHygieneService {
   async runAllHygieneTasks() {
     try {
       logger.info('Starting Redis hygiene tasks...');
-      
+
       const results = {
         clicks: await this.enforceClickTTLs(),
         conversions: await this.enforceConversionTTLs(),
@@ -158,6 +158,78 @@ export class RedisHygieneService {
   }
 
   /**
+   * Get Redis memory statistics
+   * @returns {Promise<{used: number, max: number, ratio: number}>}
+   */
+  async getMemoryStats() {
+    try {
+      const info = await redis.info('memory');
+      const usedMatch = info.match(/used_memory:(\d+)/);
+      const maxMatch = info.match(/maxmemory:(\d+)/);
+
+      const used = usedMatch ? parseInt(usedMatch[1]) : 0;
+      const max = maxMatch ? parseInt(maxMatch[1]) : 0;
+
+      // If maxmemory is 0 (unlimited), ratio is 0
+      const ratio = max > 0 ? used / max : 0;
+
+      return { used, max, ratio };
+    } catch (error) {
+      logger.error('RedisHygieneService.getMemoryStats error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cleanup flushed click data using Lua script for atomicity and performance
+   * Matches 'click:*' keys and unlinks them if they have 'flushed'=='true'
+   */
+  async cleanupFlushedClicks() {
+    try {
+      const luaScript = `local cursor='0'; local deleted=0; repeat local r=redis.call('SCAN',cursor,'MATCH','click:*','COUNT',500); cursor=r[1]; for _,k in ipairs(r[2]) do if redis.call('HGET',k,'flushed')=='true' then redis.call('UNLINK',k); deleted=deleted+1; end end until cursor=='0'; return deleted`;
+
+      const deletedCount = await redis.eval(luaScript, 0);
+
+      if (deletedCount > 0) {
+        logger.info(`Redis hygiene: Emergency cleanup of flushed clicks completed`, { deletedCount });
+      }
+
+      return deletedCount;
+    } catch (error) {
+      logger.error('RedisHygieneService.cleanupFlushedClicks error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if Redis is nearing capacity and run emergency cleanup if needed
+   * @param {number} threshold - Memory usage ratio threshold (default: 0.8)
+   */
+  async checkCapacityAndCleanup(threshold = 0.8) {
+    try {
+      const stats = await this.getMemoryStats();
+
+      // Only proceed if maxmemory is set
+      if (stats.max > 0) {
+        const usagePercent = (stats.ratio * 100).toFixed(2);
+
+        if (stats.ratio >= threshold) {
+          logger.warn(`🚨 Redis memory warning: Capacity at ${usagePercent}% (Threshold: ${threshold * 100}%)`);
+          const deleted = await this.cleanupFlushedClicks();
+          return { status: 'cleaned', usagePercent, deleted };
+        }
+
+        return { status: 'ok', usagePercent, deleted: 0 };
+      }
+
+      return { status: 'skipped', message: 'maxmemory not set' };
+    } catch (error) {
+      logger.error('RedisHygieneService.checkCapacityAndCleanup error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get Redis queue statistics
    */
   async getQueueStats() {
@@ -166,12 +238,14 @@ export class RedisHygieneService {
       const clickKeys = await redis.keys('click:*');
       const conversionKeys = await redis.keys('conversion:*');
       const dedupeKeys = await redis.keys('dedupe:*');
+      const memory = await this.getMemoryStats();
 
       return {
         click_stream_length: streamLength,
         click_keys_count: clickKeys.length,
         conversion_keys_count: conversionKeys.length,
         dedupe_keys_count: dedupeKeys.length,
+        memory_usage_percent: memory.max > 0 ? (memory.ratio * 100).toFixed(2) : 'N/A',
         timestamp: new Date().toISOString(),
       };
     } catch (error) {

@@ -206,6 +206,17 @@ const start = async () => {
           logger.warn('Failed to start Redis hygiene worker:', error);
         }
       }
+
+      // Start Redis capacity worker (runs every 2 minutes)
+      if (process.env.ENABLE_REDIS_CAPACITY_CHECK !== 'false') {
+        try {
+          const redisCapacityWorker = (await import('./workers/redisCapacityWorker.js')).default;
+          redisCapacityWorker.start(120000); // 2 minutes
+          logger.info('✅ Redis capacity worker started');
+        } catch (error) {
+          logger.warn('Failed to start Redis capacity worker:', error);
+        }
+      }
     } else {
       logger.info('ℹ️ Workers skipped in API process (managed separately)');
     }
