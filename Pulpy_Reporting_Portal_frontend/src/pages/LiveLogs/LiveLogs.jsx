@@ -29,6 +29,7 @@ const LiveLogs = () => {
     const [publishers, setPublishers] = useState([]);
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublisher, setSelectedPublisher] = useState('');
+    const [selectedStatus, setSelectedStatus] = useState('');
 
     // Auto-refresh timer reference
     const [autoRefresh, setAutoRefresh] = useState(false);
@@ -66,7 +67,7 @@ const LiveLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, limit, selectedOffer, selectedPublisher, refreshKey]);
+    }, [activeTab, limit, selectedOffer, selectedPublisher, selectedStatus, refreshKey]);
 
     useEffect(() => {
         let interval;
@@ -74,7 +75,7 @@ const LiveLogs = () => {
             interval = setInterval(() => fetchLogs(true), 5000);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher]);
+    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, selectedStatus]);
 
     const fetchLogs = async (isBackground = false) => {
         setLoading(true);
@@ -93,6 +94,7 @@ const LiveLogs = () => {
                 // For conversions
                 if (selectedOffer) params.offer_id = selectedOffer;
                 if (selectedPublisher) params.publisher_id = selectedPublisher;
+                if (selectedStatus) params.status = selectedStatus;
 
                 const response = await dashboardAPI.getConversions(params, { trackActivity: !isBackground });
                 if (response.success && response.data) {
@@ -142,6 +144,17 @@ const LiveLogs = () => {
                             ))}
                         </select>
                     </div>
+
+                    {activeTab === 'conversions' && (
+                        <div className="control-group">
+                            <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
+                                <option value="">All Statuses</option>
+                                <option value="approved">Approved</option>
+                                <option value="pending">Pending</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                        </div>
+                    )}
 
                     <div className="tab-group">
                         <button
@@ -245,8 +258,8 @@ const LiveLogs = () => {
                                         <td>
                                             <span className={`badge ${row.status}`}>{row.status}</span>
                                             {/* Show TEST badge if is_test flag is set OR if amount/payout are 0 */}
-                                           
-                                            
+
+
                                         </td>
                                         <td>{row.ip}</td>
                                     </>

@@ -150,9 +150,23 @@ export class PostbackService {
 
           // 4. Status Determination
           let finalStatus = status;
-          if (assignment?.conversion_approval_percentage) {
-            const randomValue = Math.random() * 100;
-            finalStatus = (randomValue <= parseFloat(assignment.conversion_approval_percentage)) ? 'approved' : 'pending';
+
+          // 🔥 FIXED: Better truthy check (handles 0%)
+          const approvalPercentageVal = assignment?.conversion_approval_percentage;
+          if (approvalPercentageVal !== null && approvalPercentageVal !== undefined) {
+            const approvalPercentage = parseFloat(approvalPercentageVal);
+
+            // ✅ DETERMINISTIC SCRUBBING: Use Redis counter for exact distribution
+            const scrubCounter = await redis.incr(`scrub_cnt:${assignment.internal_id || assignment.id}`);
+            const scrubMod = scrubCounter % 100;
+
+            // If mod < percentage, it's approved. e.g. 30% means 0-29 are approved.
+            finalStatus = (scrubMod < approvalPercentage) ? 'approved' : 'pending';
+
+            logger.info(`[SCRUB] Deterministic check: counter=${scrubCounter}, mod=${scrubMod}, result=${finalStatus}`, {
+              assignmentId: assignment.id,
+              percentage: approvalPercentage
+            });
           }
 
           // Resolve Callback URL
@@ -420,15 +434,21 @@ export class PostbackService {
 
       // Determine conversion status based on conversion_approval_percentage
       let finalStatus = status;
-      if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
-        const approvalPercentage = parseFloat(assignment.conversion_approval_percentage);
-        // Random percentage check for auto-approval
-        const randomValue = Math.random() * 100;
-        if (randomValue <= approvalPercentage) {
-          finalStatus = 'approved';
-        } else {
-          finalStatus = 'pending';
-        }
+
+      const approvalPercentageVal = assignment?.conversion_approval_percentage;
+      if (approvalPercentageVal !== null && approvalPercentageVal !== undefined) {
+        const approvalPercentage = parseFloat(approvalPercentageVal);
+
+        // ✅ DETERMINISTIC SCRUBBING: Use Redis counter for exact distribution
+        const scrubCounter = await redis.incr(`scrub_cnt:${assignment.internal_id || assignment.id}`);
+        const scrubMod = scrubCounter % 100;
+
+        finalStatus = (scrubMod < approvalPercentage) ? 'approved' : 'pending';
+
+        logger.info(`[SCRUB-DB] Deterministic check: counter=${scrubCounter}, mod=${scrubMod}, result=${finalStatus}`, {
+          assignmentId: assignment.internal_id || assignment.id,
+          percentage: approvalPercentage
+        });
       }
 
       // Extract IP
@@ -565,8 +585,10 @@ export class PostbackService {
       const [convRows] = await pool.query('SELECT * FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
       const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
 
-      // Update daily stats
-      await this.updateDailyStats(offerId, conversionAmount, payout);
+      // ✅ CRITICAL: Only update daily stats if conversion is APPROVED
+      if (finalStatus === 'approved') {
+        await this.updateDailyStats(offerId, conversionAmount, payout);
+      }
 
       // ✅ CRITICAL: Get publisher with tenant_id filtering
       let publisher = null;
@@ -582,9 +604,9 @@ export class PostbackService {
       // Resolve callback URL: assignment.callback_url OR publisher.global_postback_url
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
-      // Send postback to publisher's callback URL if available
+      // Fire Affiliate Postbacks - ONLY FOR APPROVED
       let postbackResult = null;
-      if (callbackUrl && conversion) {
+      if (callbackUrl && conversion && conversion.status === 'approved') {
         postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
       } else {
         postbackResult = {
@@ -734,10 +756,10 @@ export class PostbackService {
       return false;
     }
 
-    // ✅ CRITICAL: Add tenant_id filtering to cap check
+    // ✅ CRITICAL: Add tenant_id filtering and APPROVED filter to cap check
     let query = `SELECT COALESCE(SUM(amount), 0) as total_revenue
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status = 'approved' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {
@@ -776,10 +798,10 @@ export class PostbackService {
       return false;
     }
 
-    // ✅ CRITICAL: Add tenant_id filtering to cap check
+    // ✅ CRITICAL: Add tenant_id filtering and APPROVED filter to cap check
     let query = `SELECT COUNT(*) as conversion_count
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status = 'approved' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {
@@ -1132,9 +1154,9 @@ export class PostbackService {
   }
 
   async isCapExceeded(offer, tenantId = null) {
-    // ✅ CRITICAL: Total cap check with tenant_id filtering
+    // ✅ CRITICAL: Total cap check with tenant_id filtering and APPROVED filter
     if (offer.total_cap && offer.total_cap > 0) {
-      let query = 'SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ?';
+      let query = "SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND status = 'approved'";
       const params = [offer.id];
 
       if (tenantId) {
@@ -1153,7 +1175,7 @@ export class PostbackService {
     const tz = '+05:30';
 
     if (capType === 'daily' && offer.daily_cap && offer.daily_cap > 0) {
-      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND status = 'approved' AND DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
       const params = [offer.id];
 
       if (tenantId) {
@@ -1167,7 +1189,7 @@ export class PostbackService {
     }
 
     if (capType === 'monthly' && offer.monthly_cap && offer.monthly_cap > 0) {
-      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND status = 'approved' AND YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
       const params = [offer.id];
 
       if (tenantId) {
@@ -1181,10 +1203,14 @@ export class PostbackService {
     }
 
     if (capType === 'weekly' && offer.total_cap && offer.total_cap > 0) {
-      const [rows] = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`,
-        [offer.id]
-      );
+      // Weekly cap usually has its own field, but if reusing total_cap as weekly value:
+      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND status = 'approved' AND YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      const params = [offer.id];
+      if (tenantId) {
+        query += ' AND tenant_id = ?';
+        params.push(tenantId);
+      }
+      const [rows] = await pool.query(query, params);
       const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
       if (count >= offer.total_cap) return true;
     }

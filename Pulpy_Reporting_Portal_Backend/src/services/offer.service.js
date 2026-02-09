@@ -81,6 +81,156 @@ class OfferService {
   }
 
   /**
+   * Check if the click request matches offer targeting criteria
+   * @param {Object} offer - Offer object from database
+   * @param {Object} context - Request context { ip, deviceInfo, location, isp }
+   * @returns {Object} - { valid: boolean, message: string, error_type: string }
+   */
+  checkTargeting(offer, context) {
+    const { ip, deviceInfo, location } = context;
+
+    // Helper to parse JSON fields if they are strings
+    const getParsedField = (val) => {
+      if (typeof val === 'string') {
+        try {
+          return JSON.parse(val);
+        } catch (e) {
+          return null;
+        }
+      }
+      return val;
+    };
+
+    // 1. IP Blockage
+    if (offer.ip_action && offer.ip_list) {
+      const ipList = offer.ip_list.split(',').map(i => i.trim());
+      const isIPInList = ipList.includes(ip);
+
+      if ((offer.ip_action === 'block' || offer.ip_action === 'blacklist') && isIPInList) {
+        return {
+          valid: false,
+          message: 'Targeting: Your IP address is blocked for this offer',
+          error_type: 'ip_restricted'
+        };
+      }
+      if ((offer.ip_action === 'allow' || offer.ip_action === 'whitelist') && !isIPInList) {
+        return {
+          valid: false,
+          message: 'Targeting: Your IP address is not allowed for this offer',
+          error_type: 'ip_restricted'
+        };
+      }
+    }
+
+    // 2. Device Targeting
+    if (offer.device_action && offer.device_targeting_json) {
+      const allowedDevices = getParsedField(offer.device_targeting_json);
+      if (Array.isArray(allowedDevices) && allowedDevices.length > 0) {
+        const currentDevice = deviceInfo.deviceType;
+        const isDeviceInList = allowedDevices.some(d => d.toLowerCase() === currentDevice.toLowerCase());
+
+        if (offer.device_action === 'allow' && !isDeviceInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentDevice} devices are not allowed for this offer`,
+            error_type: 'device_restricted'
+          };
+        }
+        if (offer.device_action === 'block' && isDeviceInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentDevice} devices are blocked for this offer`,
+            error_type: 'device_restricted'
+          };
+        }
+      }
+    }
+
+    // 3. OS Targeting
+    if (offer.os_action && offer.os_targeting_json) {
+      const allowedOS = getParsedField(offer.os_targeting_json);
+      if (Array.isArray(allowedOS) && allowedOS.length > 0) {
+        const currentOS = deviceInfo.os;
+        const isOSInList = allowedOS.some(o => o.toLowerCase() === currentOS.toLowerCase());
+
+        if (offer.os_action === 'allow' && !isOSInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentOS} operating system is not allowed`,
+            error_type: 'os_restricted'
+          };
+        }
+        if (offer.os_action === 'block' && isOSInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentOS} operating system is blocked`,
+            error_type: 'os_restricted'
+          };
+        }
+      }
+    }
+
+    // 4. Browser Targeting
+    if (offer.browser_action && offer.browser_targeting_json) {
+      const allowedBrowsers = getParsedField(offer.browser_targeting_json);
+      if (Array.isArray(allowedBrowsers) && allowedBrowsers.length > 0) {
+        const currentBrowser = deviceInfo.browser;
+        const isBrowserInList = allowedBrowsers.some(b => b.toLowerCase() === currentBrowser.toLowerCase());
+
+        if (offer.browser_action === 'allow' && !isBrowserInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentBrowser} browser is not allowed`,
+            error_type: 'browser_restricted'
+          };
+        }
+        if (offer.browser_action === 'block' && isBrowserInList) {
+          return {
+            valid: false,
+            message: `Targeting: ${currentBrowser} browser is blocked`,
+            error_type: 'browser_restricted'
+          };
+        }
+      }
+    }
+
+    // 5. GEO Targeting (Country)
+    if (offer.country && offer.country !== 'Global') {
+      const allowedCountries = offer.country.split(',').map(c => c.trim().toLowerCase());
+      const currentCountryCode = location.country ? location.country.toLowerCase() : '';
+
+      if (currentCountryCode && !allowedCountries.includes(currentCountryCode)) {
+        return {
+          valid: false,
+          message: `Targeting: Traffic from ${location.country} is not accepted for this offer`,
+          error_type: 'geo_restricted'
+        };
+      }
+    }
+
+    // 6. City Targeting
+    if (offer.city_targeting_json) {
+      const allowedCities = getParsedField(offer.city_targeting_json);
+      if (Array.isArray(allowedCities) && allowedCities.length > 0) {
+        const currentCity = location.city ? location.city.toLowerCase() : '';
+        if (currentCity && !allowedCities.map(c => c.toLowerCase()).includes(currentCity)) {
+          return {
+            valid: false,
+            message: `Targeting: Traffic from ${location.city} city is not accepted`,
+            error_type: 'city_restricted'
+          };
+        }
+      }
+    }
+
+    return {
+      valid: true,
+      message: 'Targeting validation passed',
+      error_type: null
+    };
+  }
+
+  /**
    * Validate offer dates and status for create/update operations
    * @param {Object} offerData - Offer data to validate
    * @param {Object} existingOffer - Existing offer (for updates)

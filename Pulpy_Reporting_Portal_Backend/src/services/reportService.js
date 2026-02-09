@@ -4,42 +4,72 @@ import logger from '../utils/logger.js';
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
     try {
-      let query = `
+      // ✅ PERFORMANCE: Use independent queries to avoid Cartesian product (JOIN i ON c)
+      // This is dramatically faster for large datasets.
+
+      // 1. Clicks Summary
+      const clickFilters = this.buildWhereClause(filters, tenantId, 'c');
+      const clickQuery = `
         SELECT 
           COUNT(DISTINCT c.publisher_id) as affiliates,
-          COUNT(DISTINCT c.id) as unique_clicks,
-          COUNT(DISTINCT i.id) as impressions,
-          COUNT(DISTINCT conv.id) as conversions,
+          COUNT(c.id) as total_clicks
+        FROM clicks c
+        ${filters.advertiser_id ? 'LEFT JOIN offers o ON c.offer_id = o.id' : ''}
+        ${filters.status || filters.search ? 'LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid' : ''}
+        WHERE 1=1 ${clickFilters.clause}
+      `;
+
+      // 2. Impressions Summary
+      const impFilters = this.buildWhereClause(filters, tenantId, 'i');
+      const impQuery = `
+        SELECT COUNT(i.id) as impressions
+        FROM impressions i
+        ${filters.advertiser_id ? 'LEFT JOIN offers o ON i.offer_id = o.id' : ''}
+        WHERE 1=1 ${impFilters.clause}
+      `;
+
+      // 3. Conversions Summary
+      // If filtering by click attributes (IP, TID, etc), we must join. Otherwise direct table access is faster.
+      const needsClickJoin = filters.ip || filters.tid || filters.country || filters.device_brand || filters.os || filters.browser || filters.user_agent || filters.source_id || filters.search;
+      const convStatus = filters.status || 'approved'; // Default to approved for revenue/payout stats
+
+      const convFilters = this.buildWhereClause(filters, tenantId, 'conv');
+      const convQuery = `
+        SELECT 
+          COUNT(conv.id) as conversions,
           COALESCE(SUM(conv.amount), 0) as revenue,
           COALESCE(SUM(conv.payout), 0) as payout,
           COALESCE(SUM(conv.amount - conv.payout), 0) as profit
-        FROM clicks c
-        LEFT JOIN impressions i ON i.offer_id = c.offer_id AND i.publisher_id = c.publisher_id
-        LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
-        WHERE 1=1
+        FROM conversions conv
+        ${needsClickJoin ? 'INNER JOIN clicks c ON conv.click_uuid = c.click_uuid' : ''}
+        ${filters.advertiser_id ? 'LEFT JOIN offers o ON conv.offer_id = o.id' : ''}
+        WHERE conv.status = ? ${convFilters.clause}
       `;
 
-      const filtersBuild = this.buildWhereClause(filters, tenantId);
-      query += filtersBuild.clause;
+      // Parallel execution for best performance
+      const [clickRows, impRows, convRows] = await Promise.all([
+        pool.query(clickQuery, clickFilters.params),
+        pool.query(impQuery, impFilters.params),
+        pool.query(convQuery, [convStatus, ...convFilters.params])
+      ]);
 
-      const [rows] = await pool.query(query, filtersBuild.params);
-      const summary = rows[0] || {
-        affiliates: 0,
-        unique_clicks: 0,
-        impressions: 0,
-        conversions: 0,
-        revenue: 0,
-        payout: 0,
-        profit: 0,
-      };
+      const clickStats = clickRows[0][0] || { affiliates: 0, total_clicks: 0 };
+      const impStats = impRows[0][0] || { impressions: 0 };
+      const convStats = convRows[0][0] || { conversions: 0, revenue: 0, payout: 0, profit: 0 };
 
       // Calculate conversion rate
-      const conversionRate = summary.unique_clicks > 0
-        ? (summary.conversions / summary.unique_clicks) * 100
+      const conversionRate = clickStats.total_clicks > 0
+        ? (convStats.conversions / clickStats.total_clicks) * 100
         : 0;
 
       return {
-        ...summary,
+        affiliates: clickStats.affiliates,
+        unique_clicks: clickStats.total_clicks, // In this context total clicks filtered by criteria
+        impressions: impStats.impressions,
+        conversions: convStats.conversions,
+        revenue: parseFloat(convStats.revenue),
+        payout: parseFloat(convStats.payout),
+        profit: parseFloat(convStats.profit),
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
       };
     } catch (error) {
@@ -113,6 +143,8 @@ export class ReportService {
         // Impressions not linked to clicks 1:1, so generally 0 in this join unless we switch to UNION.
         selects.push('0 as impressions');
         selects.push('COUNT(DISTINCT conv.id) as conversions');
+        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'approved\' THEN conv.id END) as approved_conversions');
+        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'pending\' THEN conv.id END) as pending_conversions');
         selects.push('COALESCE(SUM(conv.amount), 0) as revenue'); // Offer Price * Conversions roughly
         selects.push('COALESCE(SUM(conv.payout), 0) as payout');
         selects.push('COALESCE(SUM(conv.amount - conv.payout), 0) as profit');
@@ -251,108 +283,118 @@ export class ReportService {
     }
   }
 
-  buildWhereClause(filters, tenantId = null) {
+  buildWhereClause(filters, tenantId = null, alias = 'c') {
     let clause = '';
     const params = [];
 
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
+    // Table alias prefixing logic
+    const pref = (col) => `${alias}.${col}`;
+
     if (tenantId) {
-      clause += ' AND c.tenant_id = ?';
+      clause += ` AND ${pref('tenant_id')} = ?`;
       params.push(tenantId);
     }
 
     if (filters.date_from) {
-      clause += ' AND DATE(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) >= ?';
+      clause += ` AND DATE(CONVERT_TZ(${pref('created_at')}, '+00:00', '+05:30')) >= ?`;
       params.push(filters.date_from);
     }
 
     if (filters.date_to) {
-      clause += ' AND DATE(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) <= ?';
+      clause += ` AND DATE(CONVERT_TZ(${pref('created_at')}, '+00:00', '+05:30')) <= ?`;
       params.push(filters.date_to);
     }
 
     if (filters.offer_id) {
-      clause += ' AND c.offer_id = ?';
+      clause += ` AND ${pref('offer_id')} = ?`;
       params.push(filters.offer_id);
     }
 
     if (filters.publisher_id) {
-      clause += ' AND c.publisher_id = ?';
+      clause += ` AND ${pref('publisher_id')} = ?`;
       params.push(filters.publisher_id);
     }
 
+    // Add status filter (for conversions)
+    if (filters.status) {
+      const statusAlias = (alias === 'c') ? 'conv' : alias;
+      clause += ` AND ${statusAlias}.status = ?`;
+      params.push(filters.status);
+    }
+
     if (filters.country) {
-      clause += ' AND c.country = ?';
+      clause += ` AND ${pref('country')} = ?`;
       params.push(filters.country);
     }
 
     if (filters.ip) {
-      clause += ' AND c.ip = ?';
+      clause += ` AND ${pref('ip')} = ?`;
       params.push(filters.ip);
     }
 
     if (filters.tid) {
-      clause += ' AND c.tid = ?';
+      clause += ` AND ${pref('tid')} = ?`;
       params.push(filters.tid);
     }
 
     if (filters.rcid) {
-      clause += ' AND (c.rcid = ? OR conv.rcid = ?)';
+      // Cross-check in both click & conversion
+      clause += ` AND (${pref('rcid')} = ? OR conv.rcid = ?)`;
       params.push(filters.rcid, filters.rcid);
     }
 
     if (filters.device_brand) {
-      clause += ' AND c.device_brand = ?';
+      clause += ` AND ${pref('device_brand')} = ?`;
       params.push(filters.device_brand);
     }
 
     if (filters.os) {
-      clause += ' AND c.os = ?';
+      clause += ` AND ${pref('os')} = ?`;
       params.push(filters.os);
     }
 
     if (filters.browser) {
-      clause += ' AND c.browser = ?';
+      clause += ` AND ${pref('browser')} = ?`;
       params.push(filters.browser);
     }
 
     if (filters.referrer) {
-      clause += ' AND c.referrer LIKE ?';
+      clause += ` AND ${pref('referrer')} LIKE ?`;
       params.push(`%${filters.referrer}%`);
     }
 
     if (filters.source_id) {
-      clause += ' AND c.source_id = ?';
+      clause += ` AND ${pref('source_id')} = ?`;
       params.push(filters.source_id);
     }
 
     if (filters.google_id) {
-      clause += ' AND c.google_id = ?';
+      clause += ` AND ${pref('google_id')} = ?`;
       params.push(filters.google_id);
     }
 
     if (filters.android_id) {
-      clause += ' AND c.android_id = ?';
+      clause += ` AND ${pref('android_id')} = ?`;
       params.push(filters.android_id);
     }
 
     if (filters.hour !== undefined) {
-      clause += ' AND HOUR(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) = ?';
+      clause += ` AND HOUR(CONVERT_TZ(${pref('created_at')}, '+00:00', '+05:30')) = ?`;
       params.push(filters.hour);
     }
 
     if (filters.os_version) {
-      clause += ' AND c.os_version = ?';
+      clause += ` AND ${pref('os_version')} = ?`;
       params.push(filters.os_version);
     }
 
     if (filters.device_model) {
-      clause += ' AND c.device_model = ?';
+      clause += ` AND ${pref('device_model')} = ?`;
       params.push(filters.device_model);
     }
 
     if (filters.user_agent) {
-      clause += ' AND c.user_agent LIKE ?';
+      clause += ` AND ${pref('user_agent')} LIKE ?`;
       params.push(`%${filters.user_agent}%`);
     }
 
@@ -362,35 +404,35 @@ export class ReportService {
     }
 
     if (filters.isp) {
-      clause += ' AND c.isp = ?';
+      clause += ` AND ${pref('isp')} = ?`;
       params.push(filters.isp);
     }
 
     if (filters.city) {
-      clause += ' AND c.city = ?';
+      clause += ` AND ${pref('city')} = ?`;
       params.push(filters.city);
     }
 
     if (filters.region) {
-      clause += ' AND c.region = ?';
+      clause += ` AND ${pref('region')} = ?`;
       params.push(filters.region);
     }
 
     if (filters.domain) {
-      clause += ' AND c.domain = ?';
+      clause += ` AND ${pref('domain')} = ?`;
       params.push(filters.domain);
     }
 
     if (filters.search) {
       const term = `%${filters.search}%`;
       clause += ` AND (
-        c.click_uuid LIKE ? OR 
+        ${pref('click_uuid')} LIKE ? OR 
         conv.conversion_uuid LIKE ? OR 
         o.name LIKE ? OR 
         p.email LIKE ? OR 
         p.company_name LIKE ? OR 
-        c.ip LIKE ? OR
-        c.user_agent LIKE ?
+        ${pref('ip')} LIKE ? OR
+        ${pref('user_agent')} LIKE ?
       )`;
       params.push(term, term, term, term, term, term, term);
     }
@@ -440,6 +482,10 @@ export class ReportService {
       }
 
       // Use subqueries to calculate clicks and conversions separately to avoid cartesian product
+      // Inject filters directly into subqueries for dramatic performance improvement
+      const clickFiltersSub = this.buildWhereClause(filters, tenantId, 'clicks');
+      const convFiltersSub = this.buildWhereClause(filters, tenantId, 'conversions');
+
       let query = `
         SELECT 
           p.id as publisher_id,
@@ -469,19 +515,20 @@ export class ReportService {
           SELECT 
             publisher_id,
             offer_id,
-            COUNT(DISTINCT id) as total_clicks
+            COUNT(*) as total_clicks
           FROM clicks
+          WHERE 1=1 ${clickFiltersSub.clause}
           GROUP BY publisher_id, offer_id
         ) click_stats ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
         LEFT JOIN (
           SELECT 
             publisher_id,
             offer_id,
-            COUNT(DISTINCT id) as total_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'approved' THEN id END) as approved_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'pending' THEN id END) as pending_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected' THEN id END) as rejected_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END) as rejected_cap_conversions,
+            COUNT(*) as total_conversions,
+            COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_conversions,
+            COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_conversions,
+            COUNT(CASE WHEN status = 'rejected' THEN 1 END) as rejected_conversions,
+            COUNT(CASE WHEN status = 'rejected_cap' THEN 1 END) as rejected_cap_conversions,
             COALESCE(SUM(amount), 0) as total_revenue,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as approved_revenue,
             COALESCE(SUM(payout), 0) as total_payout,
@@ -489,14 +536,16 @@ export class ReportService {
             COALESCE(SUM(amount - payout), 0) as total_profit,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0) as approved_profit
           FROM conversions
-          WHERE 1=1${conversionDateCondition}
+          WHERE 1=1 ${convFiltersSub.clause}
           GROUP BY publisher_id, offer_id
         ) conv_stats ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
         ${whereConditions}
         ORDER BY conv_stats.total_conversions DESC, conv_stats.approved_conversions DESC
       `;
 
-      const [rows] = await pool.query(query, params);
+      // We need to merge params in order: clickFiltersSub, convFiltersSub, then whereConditions params
+      const execParams = [...clickFiltersSub.params, ...convFiltersSub.params, ...params];
+      const [rows] = await pool.query(query, execParams);
       // Calculate conversion rates
       const stats = rows.map(row => {
         const conversionRate = row.total_clicks > 0

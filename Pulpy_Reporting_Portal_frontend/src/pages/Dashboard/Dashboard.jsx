@@ -116,6 +116,7 @@ function Dashboard() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [dateFilter, setDateFilter] = useState('today');
+    const [statusFilter, setStatusFilter] = useState('all');
 
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
@@ -216,6 +217,7 @@ function Dashboard() {
                 const params = {
                     date_from: dateRange.from,
                     date_to: dateRange.to,
+                    status: statusFilter !== 'all' ? statusFilter : undefined,
                     group_by: (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day',
                     limit: 10
                 };
@@ -245,7 +247,7 @@ function Dashboard() {
         fetchDashboard();
 
         return () => { isMounted = false; };
-    }, [dateRange, refreshKey]);
+    }, [dateRange, statusFilter, refreshKey]);
 
     // Safely extract data parts with defaults
     const {
@@ -355,6 +357,19 @@ function Dashboard() {
                             <option value="last_month">Last Month</option>
                         </select>
                     </div>
+                    <div className="date-filter-container" style={{ marginLeft: '12px' }}>
+                        <label htmlFor="status-filter">Status:</label>
+                        <select
+                            id="status-filter"
+                            className="date-filter-select"
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                        >
+                            <option value="all">All Status</option>
+                            <option value="approved">Approved</option>
+                            <option value="pending">Pending</option>
+                        </select>
+                    </div>
                     <span className="welcome-text">Welcome, <strong>{user?.name || user?.fullName || 'User'}</strong></span>
                 </div>
             </div>
@@ -397,7 +412,9 @@ function Dashboard() {
                     </div>
                     <TrendIndicator current={cards.conversions?.total || 0} previous={cards.conversions?.yesterday || 0} />
                     <div className="stat-badge">
-                        {cards.conversions?.approved || 0} Approved
+                        <span style={{ color: '#82ca9d' }}>{cards.conversions?.approved || 0} Appr</span>
+                        <span style={{ margin: '0 4px', opacity: 0.5 }}>|</span>
+                        <span style={{ color: '#FF9800' }}>{cards.conversions?.pending || 0} Pend</span>
                     </div>
                 </div>
 

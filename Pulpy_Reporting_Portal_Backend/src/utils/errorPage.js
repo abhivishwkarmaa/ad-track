@@ -3,10 +3,10 @@
  */
 
 export function generateOfferErrorPage(errorMessage, errorType) {
-  const title = getErrorTitle(errorType);
-  const description = getErrorDescription(errorType, errorMessage);
+    const title = getErrorTitle(errorType);
+    const description = getErrorDescription(errorType, errorMessage);
 
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -97,23 +97,33 @@ export function generateOfferErrorPage(errorMessage, errorType) {
 }
 
 function getErrorTitle(errorType) {
-  const titles = {
-    'offer_not_found': 'Offer Not Found',
-    'offer_not_live': 'Offer Not Available',
-    'offer_expired': 'Offer Expired',
-    'offer_not_started': 'Offer Not Started',
-    'offer_time_restricted': 'Offer Temporarily Unavailable',
-  };
-  return titles[errorType] || 'Offer Unavailable';
+    const titles = {
+        'offer_not_found': 'Offer Not Found',
+        'offer_not_live': 'Offer Not Available',
+        'offer_expired': 'Offer Expired',
+        'offer_not_started': 'Offer Not Started',
+        'offer_time_restricted': 'Offer Temporarily Unavailable',
+        'geo_restricted': 'Country Restricted',
+        'device_restricted': 'Device Not Allowed',
+        'browser_restricted': 'Browser Not Supported',
+        'os_restricted': 'Operating System Restricted',
+        'ip_restricted': 'Access Denied',
+    };
+    return titles[errorType] || 'Offer Unavailable';
 }
 
 function getErrorDescription(errorType, errorMessage) {
-  const descriptions = {
-    'offer_not_found': 'The offer you are looking for does not exist or has been removed.',
-    'offer_not_live': 'This offer is currently not active. Please check back later or contact support.',
-    'offer_expired': 'This offer has expired and is no longer accepting traffic.',
-    'offer_not_started': 'This offer has not started yet. Please check back later.',
-    'offer_time_restricted': 'This offer is not available at the current time. Please try again during the allowed time window.',
-  };
-  return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
+    const descriptions = {
+        'offer_not_found': 'The offer you are looking for does not exist or has been removed.',
+        'offer_not_live': 'This offer is currently not active. Please check back later or contact support.',
+        'offer_expired': 'This offer has expired and is no longer accepting traffic.',
+        'offer_not_started': 'This offer has not started yet. Please check back later.',
+        'offer_time_restricted': 'This offer is not available at the current time. Please try again during the allowed time window.',
+        'geo_restricted': 'This offer is not available in your country.',
+        'device_restricted': 'This offer is not compatible with your device type.',
+        'browser_restricted': 'This offer does not support your current web browser.',
+        'os_restricted': 'This offer is not available for your operating system.',
+        'ip_restricted': 'Your IP address does not have permission to access this offer.',
+    };
+    return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
 }

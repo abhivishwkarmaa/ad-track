@@ -273,12 +273,16 @@ async function bulkInsertConversions(items) {
         logger.error('❌ Failed to fetch conversion IDs:', idErr);
     }
 
-    // Update Stats
+    // Update Stats - ONLY FOR APPROVED
     const pipeline = redis.pipeline();
     const today = new Date().toISOString().split('T')[0];
+    let statsIncrCount = 0;
 
     items.forEach(item => {
         const c = item.data;
+        if (c.status !== 'approved') return; // ✅ CRITICAL: Do not count pending/scrubbed in stats
+
+        statsIncrCount++;
         const tenantIdVal = c.tenant_id || 0;
         const statsKeyOffer = `stats:offer:${c.offer_id}:${tenantIdVal}:${today}`;
         const statsKeyPub = `stats:pub:${c.publisher_id}:${tenantIdVal}:${today}`;
@@ -292,10 +296,12 @@ async function bulkInsertConversions(items) {
         pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
     });
 
-    await pipeline.exec();
-    logger.info(`✅ Inserted ${items.length} conversions`);
+    if (statsIncrCount > 0) {
+        await pipeline.exec();
+    }
+    logger.info(`✅ Inserted ${items.length} conversions (Stats updated for ${statsIncrCount} approved)`);
 
-    // Fire Affiliate Postbacks
+    // Fire Affiliate Postbacks - ONLY FOR APPROVED
     await fireAffiliatePostbacks(items);
 }
 
@@ -305,7 +311,8 @@ async function bulkInsertConversions(items) {
 async function fireAffiliatePostbacks(items) {
     const promises = items.map(async (item) => {
         const c = item.data;
-        if (c.callback_url) {
+        // ✅ CRITICAL: Only fire postback if conversion is approved
+        if (c.callback_url && c.status === 'approved') {
             try {
                 // Construct fake objects expected by sendPublisherPostback
                 const conversion = {

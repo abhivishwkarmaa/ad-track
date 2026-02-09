@@ -271,13 +271,11 @@ export class TrackingService {
       // 3. LOGIC: VALIDATION & CALCULATIONS (Zero DB)
       // ============================================
 
-      // Fallback Logic
-      let fallbackRedirect = await this.getFallbackRedirect(offer, request);
-      if (!fallbackRedirect) fallbackRedirect = '/error?message=offer_unavailable';
+      // Parse params early for validation and targeting
+      const deviceInfo = parseDevice(userAgent);
+      const location = getLocationFromIP(ip); // { country, region, city }
 
-      let redirectUrl = '';
-
-      // Validation
+      // 1. Basic Validation (Status, Dates)
       const offerValidation = offerService.checkOfferValidity(offer);
       if (!offerValidation.valid) {
         return {
@@ -285,6 +283,48 @@ export class TrackingService {
           clickId: null
         };
       }
+
+      // 2. Targeting Validation (IP, GEO, Device, Browser, OS)
+      const targetingValidation = offerService.checkTargeting(offer, {
+        ip,
+        deviceInfo,
+        location
+      });
+
+      if (!targetingValidation.valid) {
+        logger.warn('[CLICK] Targeting rejected', {
+          tenant_id: tenantId,
+          offer_id: offer.id,
+          reason: targetingValidation.message,
+          ip,
+          country: location?.country,
+          device: deviceInfo?.deviceType
+        });
+
+        // Check if we should redirect to fallback OR show error page
+        let fallbackRedirect = await this.getFallbackRedirect(offer, request);
+
+        if (fallbackRedirect && offer.cap_action === 'fallback') {
+          // If targeting fails AND fallback is configured AND cap_action is fallback, 
+          // we can redirect silently.
+          return {
+            redirect: fallbackRedirect,
+            clickId: 'restricted'
+          };
+        }
+
+        // Default: Show pretty error page for targeting failure
+        return {
+          html: generateOfferErrorPage(targetingValidation.message, targetingValidation.error_type),
+          clickId: null
+        };
+      }
+
+      // Fallback Logic
+      let fallbackRedirect = await this.getFallbackRedirect(offer, request);
+      if (!fallbackRedirect) fallbackRedirect = '/error?message=offer_unavailable';
+
+      let redirectUrl = '';
 
       // ============================================
       // 4. REDIS: CHECK CAPS (Zero DB)
@@ -320,12 +360,10 @@ export class TrackingService {
       // (clickUuid generated above for cap support)
 
       // Parse params
-      const deviceInfo = parseDevice(userAgent);
       const referrer = request.headers.referer || '';
       const domain = extractDomain(referrer);
 
       // Geo & ISP Lookup
-      const location = getLocationFromIP(ip); // { country, region, city }
       // Fallback country from headers if GeoIP missed (e.g. Cloudflare)
       const country_final = location.country || getCountryFromHeaders(request) || '';
 
