@@ -120,7 +120,7 @@ export class PostbackService {
           });
 
           // 2. Validate Offer / Fetch Payout (using existing services with tenant_id)
-          const offer = await offerService.getOfferById(clickData.offer_id, tenantId);
+          const offer = await offerService.getOfferById(clickData.offer_id, tenantId, true);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
@@ -136,11 +136,11 @@ export class PostbackService {
           // 3. Get Assignment & Payout (with tenant_id filtering)
           let assignment = null;
           if (clickData.publisher_offer_id) {
-            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId);
+            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId, true);
           }
 
           // Fetch Publisher to get Global Postback URL
-          const publisher = await publisherService.findById(clickData.publisher_id, tenantId);
+          const publisher = await publisherService.findById(clickData.publisher_id, tenantId, true);
 
           let offerPayout = parseFloat(offer.advertiser_amount);
 
@@ -389,7 +389,7 @@ export class PostbackService {
       }
 
       // ✅ CRITICAL: Get offer with tenant_id filtering
-      const offer = await offerService.getOfferById(offerId, tenantId);
+      const offer = await offerService.getOfferById(offerId, tenantId, true);
       if (!offer) {
         throw new Error('Offer not found or does not belong to this tenant');
       }
@@ -418,7 +418,7 @@ export class PostbackService {
       // ✅ CRITICAL: Get assignment with tenant_id filtering
       let assignment = null;
       if (publisherOfferId) {
-        assignment = await assignmentService.findById(publisherOfferId, tenantId);
+        assignment = await assignmentService.findById(publisherOfferId, tenantId, true);
 
         // ✅ CRITICAL: Verify assignment belongs to tenant
         // if (assignment && assignment.tenant_id !== tenantId) {
@@ -593,7 +593,7 @@ export class PostbackService {
       // ✅ CRITICAL: Get publisher with tenant_id filtering
       let publisher = null;
       if (publisherId) {
-        publisher = await publisherService.findById(publisherId, tenantId);
+        publisher = await publisherService.findById(publisherId, tenantId, true);
 
         // ✅ CRITICAL: Verify publisher belongs to tenant
         if (publisher && publisher.tenant_id !== tenantId) {
