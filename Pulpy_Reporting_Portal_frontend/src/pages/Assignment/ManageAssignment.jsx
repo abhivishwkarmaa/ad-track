@@ -117,10 +117,10 @@ function ManageAssignment() {
                 };
 
                 if (offerFilter !== 'all') {
-                    params.offer_id = offerFilter;
+                    params.public_offer_id = offerFilter;
                 }
                 if (publisherFilter !== 'all') {
-                    params.publisher_id = publisherFilter;
+                    params.public_publisher_id = publisherFilter;
                 }
                 if (statusFilter !== 'all') {
                     params.status = statusFilter;

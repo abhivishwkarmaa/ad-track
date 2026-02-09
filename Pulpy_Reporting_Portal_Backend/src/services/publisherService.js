@@ -104,6 +104,15 @@ export class PublisherService {
     return publisher;
   }
 
+  async getInternalIdByPublicId(publicId, tenantId) {
+    if (publicId == null || !tenantId) return null;
+    const [rows] = await pool.query(
+      'SELECT id FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
+      [tenantId, publicId]
+    );
+    return rows?.[0]?.id ?? null;
+  }
+
   async findByEmail(email, tenantId = null) {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation (prevents duplicate email conflicts across tenants)
     let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at FROM publishers WHERE email = ?';

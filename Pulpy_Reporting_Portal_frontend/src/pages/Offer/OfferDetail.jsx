@@ -499,11 +499,11 @@ function OfferDetail() {
                             value={''}
                             onChange={(e) => {
                                 if (e.target.value) {
-                                    const publisherId = parseInt(e.target.value);
-                                    const publisher = publishers.find(p => p.id === publisherId);
-                                    if (publisher && !publisherAssignments.find(a => a.publisher_id === publisherId)) {
+                                    const publisherId = e.target.value; // Public ID is string/number
+                                    const publisher = publishers.find(p => String(p.public_publisher_id) === String(publisherId));
+                                    if (publisher && !publisherAssignments.find(a => String(a.publisher_id) === String(publisherId))) {
                                         setPublisherAssignments(prev => [...prev, {
-                                            publisher_id: publisherId,
+                                            publisher_id: publisher.public_publisher_id,
                                             publisher_email: publisher.email,
                                             payout_override: '',
                                             conversion_approval_percentage: '',
@@ -526,9 +526,9 @@ function OfferDetail() {
                         >
                             <option value="">Select Publisher to Add</option>
                             {publishers
-                                .filter(p => !publisherAssignments.find(a => a.publisher_id === p.id))
+                                .filter(p => !publisherAssignments.find(a => String(a.publisher_id) === String(p.public_publisher_id)))
                                 .map(p => (
-                                    <option key={p.id} value={p.id}>
+                                    <option key={p.id} value={p.public_publisher_id}>
                                         {p.first_name} ({p.email}) - {p.company_name}
                                     </option>
                                 ))}
@@ -548,7 +548,10 @@ function OfferDetail() {
                         </div>
 
                         {publisherAssignments.map((assignment, index) => {
-                            const publisher = publishers.find(p => p.id === assignment.publisher_id);
+                            const publisher = publishers.find(p =>
+                                String(p.public_publisher_id) === String(assignment.publisher_id) ||
+                                String(p.id) === String(assignment.publisher_id) // Fallback for old/internal ID
+                            );
                             const isEditing = editingAssignmentIndex === index;
                             const assignmentId = assignment.assignment_id || `temp-${index}`;
 

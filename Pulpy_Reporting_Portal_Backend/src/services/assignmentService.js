@@ -8,6 +8,7 @@ import offerPublicIdService from './offerPublicIdService.js';
 
 export class AssignmentService {
   async create(data, tenantId = null) {
+    console.log(data)
     try {
       // ✅ CRITICAL: Require tenant_id for assignment creation
       if (!tenantId) {
@@ -168,6 +169,7 @@ export class AssignmentService {
     if (!offer) {
       throw new Error('Offer not found or does not belong to this tenant');
     }
+    console.log(publisher.id, offer.id);
 
     // Store destination_url only if explicitly provided (override)
     // Do NOT generate tracking URLs - they are dynamic and generated at runtime
@@ -208,8 +210,8 @@ export class AssignmentService {
     // ✅ CRITICAL: Fetch with tenant_id filtering
     const [rows] = await pool.query(
       `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company,
-              o.name as offer_name, o.category as offer_category
+              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+              o.name as offer_name, o.category as offer_category, o.public_offer_id
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
@@ -228,10 +230,10 @@ export class AssignmentService {
     return {
       id: assignment.public_assignment_id || assignment.id,
       internal_id: assignment.id,
-      publisher_id: assignment.public_publisher_id || assignment.publisher_id, // 🔥 Public ID
-      internal_publisher_id: assignment.publisher_id,
-      offer_id: assignment.public_offer_id || assignment.offer_id, // 🔥 Public ID
-      internal_offer_id: assignment.offer_id,
+      publisher_id: assignment.publisher_id, // 🔥 Return Internal ID to match Frontend List (which is keyed by Internal ID)
+      public_publisher_id: assignment.public_publisher_id, // 🔥 Separate Public ID
+      offer_id: assignment.offer_id, // 🔥 Return Internal ID
+      public_offer_id: assignment.public_offer_id, // 🔥 Separate Public ID
       payout_override: assignment.payout_override,
       cap_override: assignment.cap_override,
       conversion_approval_percentage: assignment.conversion_approval_percentage,
@@ -292,7 +294,7 @@ export class AssignmentService {
            FROM publisher_offers po
            JOIN publishers p ON po.publisher_id = p.id
            JOIN offers o ON po.offer_id = o.id
-           WHERE po.id = ? AND po.tenant_id = ? LIMIT 1`,
+           WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
           [numericId, tenantId]
         );
         if (publicRows && publicRows.length > 0) {
@@ -384,13 +386,9 @@ export class AssignmentService {
   }
 
   async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null, overridePublicOfferId = null) {
-    console.log('assignmentId', assignmentId);
-    console.log('baseURL', baseURL);
-    console.log('format', format);
-    console.log('tenantId', tenantId);
-    console.log('overridePublicOfferId', overridePublicOfferId);
+
     const assignment = await this.findById(assignmentId, tenantId);
-    console.log('assignment', assignment);
+
     if (!assignment) {
       return null;
     }
