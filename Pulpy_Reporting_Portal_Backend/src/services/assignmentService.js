@@ -292,7 +292,7 @@ export class AssignmentService {
            FROM publisher_offers po
            JOIN publishers p ON po.publisher_id = p.id
            JOIN offers o ON po.offer_id = o.id
-           WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
+           WHERE po.id = ? AND po.tenant_id = ? LIMIT 1`,
           [numericId, tenantId]
         );
         if (publicRows && publicRows.length > 0) {
@@ -384,7 +384,13 @@ export class AssignmentService {
   }
 
   async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null, overridePublicOfferId = null) {
+    console.log('assignmentId', assignmentId);
+    console.log('baseURL', baseURL);
+    console.log('format', format);
+    console.log('tenantId', tenantId);
+    console.log('overridePublicOfferId', overridePublicOfferId);
     const assignment = await this.findById(assignmentId, tenantId);
+    console.log('assignment', assignment);
     if (!assignment) {
       return null;
     }
