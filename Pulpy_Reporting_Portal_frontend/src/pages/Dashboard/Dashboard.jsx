@@ -662,10 +662,15 @@ function Dashboard() {
                                 <span>Profit</span>
                             </div>
                             {offerStatistics.map((stat, index) => (
-                                <div key={stat.offer_id || index} className="table-row" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
-                                    <Link to={`/offer/detail/${stat.display_id || stat.offer_id}`} className="offer-name-cell" title={stat.offer_name}>
+                                <Link
+                                    to={`/offer/detail/${stat.display_id || stat.offer_id}`}
+                                    key={stat.offer_id || index}
+                                    className="table-row"
+                                    style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr', textDecoration: 'none', color: 'inherit' }}
+                                >
+                                    <div className="offer-name-cell" title={stat.offer_name}>
                                         <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
-                                    </Link>
+                                    </div>
                                     <span>{formatNumber(stat.clicks)}</span>
                                     <span>{formatNumber(stat.conversions)}</span>
                                     <span>{stat.conversion_ratio}%</span>
@@ -673,7 +678,7 @@ function Dashboard() {
                                     <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
                                         {formatCurrency(stat.profit)}
                                     </span>
-                                </div>
+                                </Link>
                             ))}
                         </div>
                     ) : <div className="no-data">No offer statistics available</div>}
