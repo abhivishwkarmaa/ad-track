@@ -244,6 +244,7 @@ function OfferList() {
                             paginatedOffers.map((offer) => (
                                 <tr key={offer.id}>
                                     <td>
+                                        <Link to={`/offer/detail/${offer.public_offer_id || offer.display_id}`} className="offer-row-link" style={{ position: 'absolute', width: '100%', height: '100%', left: 0, top: 0, opacity: 0, zIndex: 1 }}></Link>
                                         <div className="offer-name">{offer.name}</div>
                                         <div className="offer-id">ID: {offer.public_offer_id || offer.display_id}</div>
                                     </td>
@@ -271,6 +272,7 @@ function OfferList() {
                                                     value={offer.status.toLowerCase()}
                                                     onChange={(e) => handleStatusChange(offer.id, e.target.value)}
                                                     disabled={updatingStatus[offer.id]}
+                                                    style={{ position: 'relative', zIndex: 2 }}
                                                 >
                                                     <option value="draft">Draft</option>
                                                     <option value="live">Live</option>
@@ -286,29 +288,31 @@ function OfferList() {
                                     </td>
                                     <td>
                                         <div className="offer-actions">
-                                            <button
+                                            <Link
+                                                to={`/offer/detail/${offer.public_offer_id || offer.display_id}`}
                                                 className="offer-action-btn"
                                                 title="View Details"
-                                                onClick={() => navigate(`/offer/detail/${offer.public_offer_id || offer.display_id}`)}
+                                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', position: 'relative', zIndex: 2 }}
                                             >
                                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
                                                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                                                     <circle cx="12" cy="12" r="3" />
                                                 </svg>
-                                            </button>
-                                            <button
+                                            </Link>
+                                            <Link
+                                                to={`/offer/edit/${offer.public_offer_id || offer.display_id}`}
                                                 className="offer-action-btn"
                                                 title="Edit"
-                                                onClick={() => navigate(`/offer/edit/${offer.public_offer_id || offer.display_id}`)}
+                                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', position: 'relative', zIndex: 2 }}
                                             >
                                                 <EditIcon />
-                                            </button>
+                                            </Link>
                                             <button
                                                 className="offer-action-btn delete"
                                                 title="Archive"
                                                 onClick={() => handleDelete(offer)}
                                                 disabled={offer.status.toLowerCase() === 'archived'}
-                                                style={{ opacity: offer.status.toLowerCase() === 'archived' ? 0.5 : 1 }}
+                                                style={{ opacity: offer.status.toLowerCase() === 'archived' ? 0.5 : 1, position: 'relative', zIndex: 2 }}
                                             >
                                                 <TrashIcon />
                                             </button>

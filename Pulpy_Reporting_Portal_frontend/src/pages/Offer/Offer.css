@@ -110,11 +110,41 @@
 
 .offer-table tbody tr {
     transition: var(--transition-fast);
+    transform: scale(1);
+    /* Hack to make tr a containing block for absolute children */
+    position: relative;
 }
 
-.offer-table tbody tr:hover {
+.offer-row-link {
+    position: static;
+}
+
+/* Stretched link overlay */
+.offer-row-link::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    cursor: pointer;
+}
+
+/* Hover effect for the row link */
+.offer-table tbody tr:hover .offer-row-link::after {
     background: rgba(27, 182, 184, 0.03);
 }
+
+/* Ensure interactive elements are above the row link */
+.offer-actions,
+.offer-status-select,
+.offer-status-badge {
+    position: relative;
+    z-index: 2;
+}
+
+
 
 .offer-table tbody tr:last-child td {
     border-bottom: none;
