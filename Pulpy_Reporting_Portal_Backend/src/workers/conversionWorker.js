@@ -283,13 +283,21 @@ async function bulkInsertConversions(items) {
         const statsKeyOffer = `stats:offer:${c.offer_id}:${tenantIdVal}:${today}`;
         const statsKeyPub = `stats:pub:${c.publisher_id}:${tenantIdVal}:${today}`;
 
-        pipeline.incr(`${statsKeyOffer}:conversions`);
+        // Revenue: ALWAYS increment (Advertiser Revenue) - regardless of status
         pipeline.incrbyfloat(`${statsKeyOffer}:revenue`, c.amount);
-        pipeline.incrbyfloat(`${statsKeyOffer}:payout`, c.payout);
-
-        pipeline.incr(`${statsKeyPub}:conversions`);
         pipeline.incrbyfloat(`${statsKeyPub}:revenue`, c.amount);
-        pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
+
+        // Only increment stats if status is not rejected
+        if (c.status !== 'rejected' && c.status !== 'rejected_cap') {
+            pipeline.incr(`${statsKeyOffer}:conversions`);
+            pipeline.incr(`${statsKeyPub}:conversions`);
+
+            // Payout: ONLY Approved
+            if (c.status === 'approved') {
+                pipeline.incrbyfloat(`${statsKeyOffer}:payout`, c.payout);
+                pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
+            }
+        }
     });
 
     await pipeline.exec();

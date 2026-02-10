@@ -70,7 +70,7 @@ export class TenantMetricsService {
            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
            COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(payout), 0) as payout
+           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
          FROM conversions
          WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`,
         [tenantId, dateTo]
@@ -81,7 +81,7 @@ export class TenantMetricsService {
            COUNT(*) as total,
            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
            COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(payout), 0) as payout
+           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
          FROM conversions
          WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
          AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?`,

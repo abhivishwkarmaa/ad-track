@@ -91,7 +91,7 @@ const dashboardUnifiedService = {
         FROM clicks
         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
         UNION ALL
-        SELECT 'conversions' AS metric, COUNT(*) AS total, COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(payout), 0) AS payout
+        SELECT 'conversions' AS metric, COUNT(*) AS total, COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout
         FROM conversions
         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
         UNION ALL

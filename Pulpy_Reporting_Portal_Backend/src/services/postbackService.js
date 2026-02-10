@@ -566,7 +566,7 @@ export class PostbackService {
       const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
 
       // Update daily stats
-      await this.updateDailyStats(offerId, conversionAmount, payout);
+      await this.updateDailyStats(offerId, conversionAmount, payout, finalStatus);
 
       // ✅ CRITICAL: Get publisher with tenant_id filtering
       let publisher = null;
@@ -685,24 +685,39 @@ export class PostbackService {
     }
   }
 
-  async updateDailyStats(offerId, revenue, payout) {
+  async updateDailyStats(offerId, revenue, payout, status) {
     try {
+      // FINANCIAL SEPARATION RULES:
+      // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
+      // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+      // 3. Profit = Revenue - Payout.
+
+      // Revamped Logic:
+      // - Revenue: Always add (even if rejected)
+      // - Payout: Only add if approved
+      // - Conversions: Only increment if NOT rejected (to keep stats valid)
+
+      const finalRevenue = revenue;
+      const finalPayout = (status === 'approved') ? payout : 0;
+      const conversionInc = (status !== 'rejected' && status !== 'rejected_cap') ? 1 : 0;
+
+      // Profit
+      const profit = finalRevenue - finalPayout;
+
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
       // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
       const today = new Date().toISOString().split('T')[0];
 
-      const profit = revenue - payout;
-
       await pool.query(
         `INSERT INTO daily_offer_stats (offer_id, day, conversions, revenue, payout, profit, created_at, updated_at)
-         VALUES (?, ?, 1, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE
-           conversions = daily_offer_stats.conversions + 1,
+           conversions = daily_offer_stats.conversions + VALUES(conversions),
            revenue = daily_offer_stats.revenue + VALUES(revenue),
            payout = daily_offer_stats.payout + VALUES(payout),
            profit = daily_offer_stats.profit + VALUES(profit),
            updated_at = UTC_TIMESTAMP()`,
-        [offerId, today, revenue, payout, profit]
+        [offerId, today, conversionInc, finalRevenue, finalPayout, profit]
       );
     } catch (error) {
       logger.error('PostbackService.updateDailyStats error:', error);
@@ -735,9 +750,10 @@ export class PostbackService {
     }
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
+    // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COALESCE(SUM(amount), 0) as total_revenue
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {
@@ -777,9 +793,10 @@ export class PostbackService {
     }
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
+    // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COUNT(*) as conversion_count
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {

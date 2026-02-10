@@ -102,6 +102,12 @@ async function flushStats() {
         // UTC ENFORCEMENT: Use UTC timestamp for all DB operations
         // const batchTimestamp = new Date().toISOString(); 
 
+        // FINANCIAL SEPARATION RULES (Enforced in conversionWorker/postbackService):
+        // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status.
+        // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+        // 3. Profit = Revenue - Payout.
+        // This worker aggregates the pre-calculated deltas from Redis.
+
         await Promise.all(updateList.map(async (stat) => {
             const profit = stat.revenue - stat.payout;
             // UTC ENFORCEMENT: Use UTC_TIMESTAMP() for DB timestamps, never pass JS Date objects

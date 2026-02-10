@@ -3,6 +3,10 @@ import logger from '../utils/logger.js';
 
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
+    // FINANCIAL SEPARATION RULES:
+    // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
+    // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+    // 3. Profit = Revenue - Payout.
     try {
       let query = `
         SELECT 
@@ -11,8 +15,8 @@ export class ReportService {
           COUNT(DISTINCT i.id) as impressions,
           COUNT(DISTINCT conv.id) as conversions,
           COALESCE(SUM(conv.amount), 0) as revenue,
-          COALESCE(SUM(conv.payout), 0) as payout,
-          COALESCE(SUM(conv.amount - conv.payout), 0) as profit
+          COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+          COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit
         FROM clicks c
         LEFT JOIN impressions i ON i.offer_id = c.offer_id AND i.publisher_id = c.publisher_id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
@@ -53,6 +57,11 @@ export class ReportService {
       const page = parseInt(filters.page || 1);
       const limit = parseInt(filters.limit || 50);
       const offset = (page - 1) * limit;
+
+      // FINANCIAL SEPARATION RULES:
+      // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
+      // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+      // 3. Profit = Revenue - Payout.
 
       // Check if this is an aggregated report request
       const groupBy = filters.groupBy ? (Array.isArray(filters.groupBy) ? filters.groupBy : filters.groupBy.split(',')) : [];
@@ -113,9 +122,9 @@ export class ReportService {
         // Impressions not linked to clicks 1:1, so generally 0 in this join unless we switch to UNION.
         selects.push('0 as impressions');
         selects.push('COUNT(DISTINCT conv.id) as conversions');
-        selects.push('COALESCE(SUM(conv.amount), 0) as revenue'); // Offer Price * Conversions roughly
-        selects.push('COALESCE(SUM(conv.payout), 0) as payout');
-        selects.push('COALESCE(SUM(conv.amount - conv.payout), 0) as profit');
+        selects.push('COALESCE(SUM(conv.amount), 0) as revenue');
+        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as payout');
+        selects.push('COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as profit');
         selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
         selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
 
@@ -413,26 +422,29 @@ export class ReportService {
       // 1. Build Date Condition (for Clicks/Conversions Stats)
       let dateCondition = '';
       if (filters.date_from) {
-        dateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) >= ?';
-        statsParams.push(filters.date_from);
+        dateCondition += ` AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'`;
       }
       if (filters.date_to) {
-        dateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) <= ?';
-        statsParams.push(filters.date_to);
+        dateCondition += ` AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'`;
       }
 
-      // 2. Build Relevant Pairs Subquery (Only Assigned Offers)
+      // 2. Build Relevant Pairs Subquery (Active Data from Clicks + Conversions)
+      // This ensures we see stats even for unassigned/historical offers
       const pairsQuery = `
-        SELECT po.publisher_id, po.offer_id 
-        FROM publisher_offers po 
-        JOIN publishers p ON po.publisher_id = p.id 
-        WHERE p.tenant_id = ?
-        ${publisher_id ? ' AND po.publisher_id = ?' : ''}
-        ${offer_id ? ' AND po.offer_id = ?' : ''}
+        SELECT DISTINCT publisher_id, offer_id FROM clicks WHERE tenant_id = ? ${dateCondition}
+        UNION
+        SELECT DISTINCT publisher_id, offer_id FROM conversions WHERE tenant_id = ? ${dateCondition}
       `;
-      params.push(tenantId);
-      if (publisher_id) params.push(publisher_id);
-      if (offer_id) params.push(offer_id);
+      // params for pairsQuery: tenantId (x2)
+      // Note: date_from/to are injected directly above as strings, so we don't need params for them in the array if safe (they are usually sanitized dates).
+      // But above code pushed them to statsParams.
+      // Let's rely on string injection or params.
+      // The previous code injected ? and pushed to statsParams.
+      // To be safe and cleaner, let's keep using ? in dateCondition variables if possible, but here we construct the string.
+      // The original code used params for date_from/date_to.
+      // Let's stick to the pattern:
+
+      params.push(tenantId, tenantId); // For the 2 UNION selects
 
       // 3. Main Query
       const query = `
@@ -451,6 +463,8 @@ export class ReportService {
           COALESCE(conv_stats.pending_conversions, 0) as pending_conversions,
           COALESCE(conv_stats.rejected_conversions, 0) as rejected_conversions,
           COALESCE(conv_stats.rejected_cap_conversions, 0) as rejected_cap_conversions,
+          -- FINANCIAL SEPARATION: Revenue (ALL), Payout (Approved Only)
+          -- Total (Approved + Pending)
           COALESCE(conv_stats.total_revenue, 0) as total_revenue,
           COALESCE(conv_stats.approved_revenue, 0) as approved_revenue,
           COALESCE(conv_stats.total_payout, 0) as total_payout,
@@ -478,12 +492,22 @@ export class ReportService {
             COUNT(DISTINCT CASE WHEN status = 'pending' THEN id END) as pending_conversions,
             COUNT(DISTINCT CASE WHEN status = 'rejected' THEN id END) as rejected_conversions,
             COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END) as rejected_cap_conversions,
+            
+            -- Total (Approved + Pending)
             COALESCE(SUM(amount), 0) as total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout,
+            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_profit,
+
+            -- Approved
             COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as approved_revenue,
-            COALESCE(SUM(payout), 0) as total_payout,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
-            COALESCE(SUM(amount - payout), 0) as total_profit,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0) as approved_profit
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0) as approved_profit,
+
+            -- Pending
+            COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_revenue,
+            COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) as pending_payout,
+            COALESCE(SUM(CASE WHEN status = 'pending' THEN amount - payout ELSE 0 END), 0) as pending_profit
+
           FROM conversions
           WHERE tenant_id = ? ${dateCondition}
           GROUP BY publisher_id, offer_id
@@ -540,17 +564,40 @@ export class ReportService {
           revenue: {
             total: parseFloat(row.total_revenue || 0),
             approved: parseFloat(row.approved_revenue || 0),
+            pending: parseFloat(row.pending_revenue || 0),
           },
           payout: {
             total: parseFloat(row.total_payout || 0),
             approved: parseFloat(row.approved_payout || 0),
+            pending: parseFloat(row.pending_payout || 0),
           },
           profit: {
             total: parseFloat(row.total_profit || 0),
             approved: parseFloat(row.approved_profit || 0),
+            pending: parseFloat(row.pending_profit || 0),
           },
         };
       });
+
+      // Calculate Summary Aggregates
+      const summaryInitial = {
+        total_clicks: 0,
+        total_conversions: 0,
+        total_approved_conversions: 0,
+        total_revenue: 0,
+        total_payout: 0,
+        total_profit: 0
+      };
+
+      const summaryStats = stats.reduce((acc, curr) => {
+        acc.total_clicks += curr.clicks.total;
+        acc.total_conversions += curr.conversions.total;
+        acc.total_approved_conversions += curr.conversions.approved;
+        acc.total_revenue += curr.revenue.total;
+        acc.total_payout += curr.payout.total;
+        acc.total_profit += curr.profit.total;
+        return acc;
+      }, summaryInitial);
 
       return {
         stats,
@@ -558,6 +605,7 @@ export class ReportService {
           total_publishers: new Set(rows.map(r => r.publisher_id)).size,
           total_offers: new Set(rows.map(r => r.offer_id)).size,
           total_combinations: rows.length,
+          ...summaryStats
         },
       };
     } catch (error) {

@@ -294,6 +294,151 @@ export class PublisherService {
     return Array.isArray(rows) ? rows[0] : rows;
   }
 
+  async getPerformanceStats(filters = {}, tenantId = null) {
+    // FINANCIAL SEPARATION RULES:
+    // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
+    // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+    // 3. Profit = Revenue - Payout.
+    try {
+      const page = parseInt(filters.page || 1);
+      const limit = parseInt(filters.limit || 50);
+      const offset = (page - 1) * limit;
+
+      let whereClause = 'WHERE p.tenant_id = ?';
+      const params = [tenantId];
+
+      if (filters.search) {
+        whereClause += ` AND (p.company_name LIKE ? OR p.email LIKE ? OR p.first_name LIKE ?)`;
+        const term = `%${filters.search}%`;
+        params.push(term, term, term);
+      }
+
+      if (filters.status) {
+        whereClause += ` AND p.status = ?`;
+        params.push(filters.status);
+      }
+
+      let dateCondition = '';
+      if (filters.date_from) {
+        dateCondition += ` AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'`;
+      }
+      if (filters.date_to) {
+        dateCondition += ` AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'`;
+      }
+
+      const query = `
+        SELECT 
+          p.id,
+          p.public_publisher_id,
+          p.company_name,
+          p.email,
+          p.status,
+          COALESCE(stats.clicks, 0) as clicks,
+          COALESCE(stats.conversions, 0) as conversions,
+          COALESCE(stats.radius_revenue, 0) as revenue, -- "Radius Revenue" usually means Advertiser Revenue
+          COALESCE(stats.payout, 0) as payout,
+          COALESCE(stats.profit, 0) as profit,
+          COALESCE(stats.pending_payout, 0) as pending_payout
+        FROM publishers p
+        LEFT JOIN (
+          SELECT 
+            c.publisher_id,
+            COUNT(DISTINCT c.id) as clicks,
+            COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' THEN conv.id END) as conversions,
+            
+            -- Revenue: ALL (Advertiser Revenue - inc. Rejected)
+            COALESCE(SUM(conv.amount), 0) as radius_revenue,
+            
+            -- Payout: Approved Only (Publisher Earnings)
+            COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+            
+            -- Profit: Revenue - Approved Payout
+            COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+
+             -- Pending Payout (For reference only, also included in Total Payout now)
+            COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout
+
+          FROM clicks c
+          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid ${dateCondition}
+          WHERE c.tenant_id = ? 
+          /* Date condition for clicks also needs to be applied if we want accurate click counts in range */
+          ${filters.date_from ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'` : ''}
+          ${filters.date_to ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'` : ''}
+          GROUP BY c.publisher_id
+        ) stats ON stats.publisher_id = p.id
+        ${whereClause}
+        ORDER BY stats.radius_revenue DESC
+        LIMIT ? OFFSET ?
+      `;
+
+      // Params for stats subquery + main query
+      const finalParams = [tenantId, ...params, limit, offset];
+
+      const countQuery = `SELECT COUNT(*) as total FROM publishers p ${whereClause}`;
+
+      const [dataRows] = await pool.query(query, finalParams);
+      const [countRows] = await pool.query(countQuery, params);
+      const total = countRows[0]?.total || 0;
+
+      // Calculate Total Summary (Grand Total for the filters)
+      const summaryQuery = `
+        SELECT 
+          COUNT(DISTINCT c.id) as total_clicks,
+          COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' THEN conv.id END) as total_conversions,
+          COALESCE(SUM(conv.amount), 0) as total_revenue,
+          COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_payout,
+          COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_profit
+        FROM publishers p
+        LEFT JOIN clicks c ON c.publisher_id = p.id AND c.tenant_id = p.tenant_id
+        LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid 
+        ${dateCondition}
+        ${whereClause} 
+        /* Ensure we filter by date for clicks too in the summary if date range applies */
+        ${filters.date_from ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'` : ''}
+        ${filters.date_to ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'` : ''}
+      `;
+
+      // Params for summary (tenantId + filter params)
+      // Note: we need to reconstruct params for the summary query because 'whereClause' uses '?' placeholders provided in 'params'
+      // But we introduced joins. 
+      // Actually, 'whereClause' is "WHERE p.tenant_id = ? AND ..."
+      // So we can reuse 'params'.
+
+      const [summaryRows] = await pool.query(summaryQuery, params);
+      const summaryData = summaryRows[0] || {};
+
+      return {
+        data: dataRows.map(row => ({
+          ...row,
+          clicks: parseInt(row.clicks),
+          conversions: parseInt(row.conversions),
+          revenue: parseFloat(row.revenue),
+          payout: parseFloat(row.payout),
+          profit: parseFloat(row.profit),
+          epc: parseInt(row.clicks) > 0 ? (parseFloat(row.revenue) / parseInt(row.clicks)).toFixed(2) : '0.00',
+          cr: parseInt(row.clicks) > 0 ? ((parseInt(row.conversions) / parseInt(row.clicks)) * 100).toFixed(2) : '0.00'
+        })),
+        summary: {
+          clicks: parseInt(summaryData.total_clicks || 0),
+          conversions: parseInt(summaryData.total_conversions || 0),
+          revenue: parseFloat(summaryData.total_revenue || 0),
+          payout: parseFloat(summaryData.total_payout || 0),
+          profit: parseFloat(summaryData.total_profit || 0)
+        },
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit)
+        }
+      };
+
+    } catch (error) {
+      logger.error('PublisherService.getPerformanceStats error:', error);
+      throw error;
+    }
+  }
+
   async softDelete(id, tenantId = null) {
     // ✅ CRITICAL: Resolve internal ID first
     const existing = await this.findById(id, tenantId);

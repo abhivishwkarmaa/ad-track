@@ -11,7 +11,7 @@ export class OfferService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // Generate unique URL key
       const urlKey = this.generateUrlKey(data.name);
       // Ensure nullable dates have safe defaults for MySQL
@@ -63,20 +63,20 @@ export class OfferService {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     let query = 'SELECT * FROM offers WHERE id = ?';
     const params = [id];
-    
+
     if (tenantId) {
       query += ' AND tenant_id = ?';
       params.push(tenantId);
     }
-    
+
     const [rows] = await pool.query(query, params);
     const offer = Array.isArray(rows) ? rows[0] : rows;
-    
+
     // Verify offer belongs to tenant
     if (tenantId && offer && offer.tenant_id !== tenantId) {
       return null;
     }
-    
+
     return offer;
   }
 
@@ -180,7 +180,7 @@ export class OfferService {
         err.statusCode = 400;
         throw err;
       }
-      
+
       // Get offer details with tenant_id filtering
       const offer = await this.findById(id, tenantId);
       if (!offer) {
@@ -251,9 +251,10 @@ export class OfferService {
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'approved' AND tenant_id = ?) as approved_conversions,
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'pending' AND tenant_id = ?) as pending_conversions,
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'rejected' AND tenant_id = ?) as rejected_conversions,
+          -- FINANCIAL SEPARATION: Revenue (ALL), Payout (Approved Only)
           (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_revenue,
-          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_payout,
-          (SELECT COALESCE(SUM(amount - payout), 0) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_profit
+          (SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_payout,
+          (SELECT COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_profit
         FROM offers o
         WHERE o.id = ? AND o.tenant_id = ?`,
         [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, id, tenantId]
@@ -303,8 +304,9 @@ export class OfferService {
           p.company_name as publisher_company,
           COUNT(DISTINCT c.id) as click_count,
           COUNT(DISTINCT conv.id) as conversion_count,
+          -- FINANCIAL SEPARATION: Revenue (ALL), Payout (Approved Only)
           COALESCE(SUM(conv.amount), 0) as revenue,
-          COALESCE(SUM(conv.payout), 0) as payout
+          COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout
         FROM clicks c
         LEFT JOIN publishers p ON c.publisher_id = p.id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
@@ -348,7 +350,7 @@ export class OfferService {
     // If tenant_id is provided, filter by it
     let query = 'SELECT * FROM offers WHERE url_key = ?';
     const params = [urlKey];
-    
+
     // If tenant_id is provided, filter by it (for tenant isolation)
     // If not provided, return first match (backward compatibility)
     // TODO: Consider making url_key unique per tenant in database
@@ -363,7 +365,7 @@ export class OfferService {
       err.statusCode = 400;
       throw err;
     }
-    
+
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     let query = 'SELECT * FROM offers WHERE tenant_id = ?';
     const params = [tenantId]; // ✅ CRITICAL: Always filter by tenant_id

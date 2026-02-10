@@ -168,6 +168,7 @@ function AffiliateDetail() {
                                         <th className="text-right">Total Conv</th>
                                         <th className="text-right">Approved</th>
                                         <th className="text-right">Pending</th>
+                                        <th className="text-right">Pending Amt</th>
                                         <th className="text-right">Pub Rev</th>
                                         <th className="text-right">Revenue</th>
                                         <th className="text-right">Profit</th>
@@ -189,10 +190,15 @@ function AffiliateDetail() {
                                             <td className="text-right" style={{ color: '#ffb800', fontWeight: 500 }}>
                                                 {formatNumber(stat.conversions.pending)}
                                             </td>
-                                            <td className="text-right">{formatCurrency(stat.payout.approved)}</td>
-                                            <td className="text-right">{formatCurrency(stat.revenue.approved)}</td>
-                                            <td className="text-right" style={{ color: stat.profit.approved >= 0 ? 'green' : 'red', fontWeight: 500 }}>
-                                                {formatCurrency(stat.profit.approved)}
+                                            <td className="text-right" style={{ color: '#ffb800' }}>
+                                                {formatCurrency(stat.payout.pending)}
+                                            </td>
+                                            <td className="text-right" style={{ color: 'green' }}>
+                                                {formatCurrency(stat.payout.approved)}
+                                            </td>
+                                            <td className="text-right">{formatCurrency(stat.revenue.total)}</td>
+                                            <td className="text-right" style={{ color: stat.profit.total >= 0 ? 'green' : 'red', fontWeight: 500 }}>
+                                                {formatCurrency(stat.profit.total)}
                                             </td>
                                         </tr>
                                     ))}

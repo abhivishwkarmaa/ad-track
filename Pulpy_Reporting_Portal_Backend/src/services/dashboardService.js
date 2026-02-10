@@ -72,6 +72,10 @@ export class DashboardService {
       const dates = this.getDateRanges(filters);
 
       // Get conversions (current and previous)
+      // FINANCIAL SEPARATION RULES:
+      // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
+      // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
+      // 3. Profit = Revenue - Payout.
       const [conversionsCurrent] = await pool.query(
         `SELECT 
           COUNT(*) as total,
@@ -79,7 +83,7 @@ export class DashboardService {
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
           SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
           COALESCE(SUM(amount), 0) as revenue,
-          COALESCE(SUM(payout), 0) as payout
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
         WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
           AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
@@ -136,7 +140,7 @@ export class DashboardService {
       const [revenueCurrent] = await pool.query(
         `SELECT 
           COALESCE(SUM(amount), 0) as revenue,
-          COALESCE(SUM(payout), 0) as payout
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
         WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
           AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
@@ -387,6 +391,7 @@ export class DashboardService {
         LEFT JOIN conversions conv ON conv.publisher_id = p.id
           AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?
           AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?
+          AND conv.status != 'rejected' AND conv.status != 'rejected_cap'
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         GROUP BY p.id, p.company_name, p.first_name, p.email
         HAVING conversions > 0
@@ -622,11 +627,11 @@ export class DashboardService {
       const [revenueRows] = await pool.query(
         `SELECT 
           COALESCE(SUM(amount), 0) as total_revenue,
-          COALESCE(SUM(payout), 0) as total_payout
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout
         FROM conversions
         WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
           AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND status = 'approved' AND tenant_id = ?
+          AND tenant_id = ?
         `, [dates.currentFrom, dates.currentTo, tenantId]
       );
 
@@ -636,7 +641,7 @@ export class DashboardService {
         FROM conversions
         WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
           AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND status = 'approved' AND tenant_id = ?
+          AND tenant_id = ?
         `,
         [dates.previousFrom, dates.previousTo, tenantId]
       );
@@ -859,9 +864,10 @@ export class DashboardService {
           SELECT 
             offer_id, 
             COUNT(*) as total_conversions,
+            -- FINANCIAL SEPARATION: Payout = approved only, Revenue = ALL conversions
             SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
-            SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as advertiser_payout,
-            SUM(CASE WHEN status = 'approved' THEN (amount - payout) ELSE 0 END) as profit
+            SUM(amount) as advertiser_payout,
+            (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
           WHERE tenant_id = ?
             AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) BETWEEN ? AND ?
@@ -1021,9 +1027,10 @@ export class DashboardService {
             COUNT(*) as total_conversions,
             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+            -- FINANCIAL SEPARATION: Payout = approved only, Revenue = ALL conversions
             SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
-            SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as advertiser_payout,
-            SUM(CASE WHEN status = 'approved' THEN (amount - payout) ELSE 0 END) as profit
+            SUM(amount) as advertiser_payout,
+            (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
           WHERE tenant_id = ?
             AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
