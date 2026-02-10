@@ -579,7 +579,6 @@ export class AdminController {
 
   async deleteAssignment(request, reply) {
     try {
-      console.error('!!! DEBUG DELETE ASSIGNMENT !!!', request.params.id);
       logger.info(`Attempting to delete assignment ${request.params.id}`);
       // ✅ CRITICAL: Get tenant_id from request for tenant isolation
       const tenantId = getTenantIdFromRequest(request);
@@ -650,8 +649,6 @@ export class AdminController {
     try {
       // 🔒 STRICT: Tenant identity MUST come from subdomain (Host header) ONLY
       const tenantId = getTenantIdFromRequest(request);
-      console.log('tenantId', tenantId);
-      console.log('request', request.params);
       if (!tenantId) {
         logger.error('❌ getTrackingURL: No tenant resolved from subdomain - REJECTED', {
           host: request.headers.host,
@@ -732,9 +729,7 @@ export class AdminController {
 
       // UI se public id aata hai → tenant + public id se internal id resolve, phir sab internal se
       const internalAssignmentId = await assignmentService.getInternalAssignmentIdByPublicId(request.params.id, tenantId) ?? request.params.id;
-      console.log('internalAssignmentId', internalAssignmentId);
       const assignment = await assignmentService.findById(internalAssignmentId, tenantId, true);
-      console.log('assignment', assignment);
       if (!assignment) {
         return reply.code(404).send({
           success: false,

@@ -8,7 +8,6 @@ import offerPublicIdService from './offerPublicIdService.js';
 
 export class AssignmentService {
   async create(data, tenantId = null) {
-    console.log(data)
     try {
       // ✅ CRITICAL: Require tenant_id for assignment creation
       if (!tenantId) {
@@ -169,7 +168,6 @@ export class AssignmentService {
     if (!offer) {
       throw new Error('Offer not found or does not belong to this tenant');
     }
-    console.log(publisher.id, offer.id);
 
     // Store destination_url only if explicitly provided (override)
     // Do NOT generate tracking URLs - they are dynamic and generated at runtime

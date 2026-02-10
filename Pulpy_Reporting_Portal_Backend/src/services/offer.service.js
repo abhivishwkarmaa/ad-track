@@ -453,8 +453,6 @@ class OfferService {
 
   async getOfferById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
-    console.log('id', id);
-    console.log('tenantId', tenantId);
 
     // 1. Try Public ID / Display ID first (unless searching strictly by internal ID)
     if (tenantId && !internalOnly) {
@@ -470,7 +468,6 @@ class OfferService {
         LIMIT 1
       `;
       const [publicRows] = await pool.query(publicQuery, [tenantId, id, id]);
-      console.log('publicRows', publicRows);
       if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
         return Array.isArray(publicRows) ? publicRows[0] : publicRows;
       }
@@ -490,7 +487,6 @@ class OfferService {
     query += ' LIMIT 1';
 
     const [rows] = await pool.query(query, params);
-    console.log('rows', rows);
     return Array.isArray(rows) ? rows[0] : rows;
   }
 
