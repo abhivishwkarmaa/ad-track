@@ -635,9 +635,9 @@ class OfferService {
       // ✅ CRITICAL: Add tenant_id filtering to all subqueries for tenant isolation
       const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
 
-      // Fix: Ensure correct number of params for all 10 subqueries + 2 main query params (id, tenant_id)
+      // Fix: Ensure correct number of params for all 14 subqueries + 2 main query params (id, tenant_id)
       const params = tenantId
-        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
+        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
         : [internalId];
 
       const [statsRows] = await pool.query(
@@ -650,7 +650,11 @@ class OfferService {
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_conversions,
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'rejected'${tenantFilter}) as rejected_conversions,
           (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_revenue,
+          (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_revenue,
+          (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_revenue,
           (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_payout,
+          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_payout,
+          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_payout,
           (SELECT COALESCE(SUM(amount - payout), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_profit
         FROM offers o
         WHERE o.id = ?${tenantId ? ' AND o.tenant_id = ?' : ''}`,
@@ -671,7 +675,11 @@ class OfferService {
         pending_conversions: parseInt(stats.pending_conversions || 0),
         rejected_conversions: parseInt(stats.rejected_conversions || 0),
         total_revenue: parseFloat(stats.total_revenue || 0),
+        approved_revenue: parseFloat(stats.approved_revenue || 0),
+        pending_revenue: parseFloat(stats.pending_revenue || 0),
         total_payout: parseFloat(stats.total_payout || 0),
+        approved_payout: parseFloat(stats.approved_payout || 0),
+        pending_payout: parseFloat(stats.pending_payout || 0),
         total_profit: parseFloat(stats.total_profit || 0),
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
       };

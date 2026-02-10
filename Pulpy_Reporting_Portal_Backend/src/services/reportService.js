@@ -122,6 +122,8 @@ export class ReportService {
         // Impressions not linked to clicks 1:1, so generally 0 in this join unless we switch to UNION.
         selects.push('0 as impressions');
         selects.push('COUNT(DISTINCT conv.id) as conversions');
+        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'approved\' THEN conv.id END) as approved_conversions');
+        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'pending\' THEN conv.id END) as pending_conversions');
         selects.push('COALESCE(SUM(conv.amount), 0) as revenue');
         selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as payout');
         selects.push('COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as profit');
@@ -388,6 +390,11 @@ export class ReportService {
     if (filters.domain) {
       clause += ' AND c.domain = ?';
       params.push(filters.domain);
+    }
+
+    if (filters.status) {
+      clause += ' AND conv.status = ?';
+      params.push(filters.status);
     }
 
     if (filters.search) {

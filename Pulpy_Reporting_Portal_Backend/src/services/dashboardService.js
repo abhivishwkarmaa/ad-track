@@ -845,6 +845,8 @@ export class DashboardService {
           o.name as offer_name,
           COALESCE(c.total_clicks, 0) as clicks,
           COALESCE(conv.total_conversions, 0) as conversions,
+          COALESCE(conv.approved_conversions, 0) as approved_conversions,
+          COALESCE(conv.pending_conversions, 0) as pending_conversions,
           COALESCE(conv.affiliate_payout, 0) as affiliate_payout,
           COALESCE(conv.advertiser_payout, 0) as advertiser_payout,
           COALESCE(conv.profit, 0) as profit
@@ -864,6 +866,8 @@ export class DashboardService {
           SELECT 
             offer_id, 
             COUNT(*) as total_conversions,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
             -- FINANCIAL SEPARATION: Payout = approved only, Revenue = ALL conversions
             SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
             SUM(amount) as advertiser_payout,
@@ -891,6 +895,8 @@ export class DashboardService {
           offer_name: row.offer_name,
           clicks: clicks,
           conversions: conversions,
+          approved_conversions: parseInt(row.approved_conversions || 0),
+          pending_conversions: parseInt(row.pending_conversions || 0),
           conversion_ratio: parseFloat(conversionRatio),
           affiliate_payout: parseFloat(row.affiliate_payout || 0),
           advertiser_payout: parseFloat(row.advertiser_payout || 0),

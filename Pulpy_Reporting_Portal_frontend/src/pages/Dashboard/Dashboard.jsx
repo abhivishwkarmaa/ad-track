@@ -631,10 +631,12 @@ function Dashboard() {
                     </div>
                     {offerStatistics && offerStatistics.length > 0 ? (
                         <div className="activity-table">
-                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr' }}>
+                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
                                 <span>Offer</span>
                                 <span>Clicks</span>
-                                <span>Conv</span>
+                                <span>Total Conv</span>
+                                <span>Approved</span>
+                                <span>Pending</span>
                                 <span>CR</span>
                                 <span>Payout</span>
                                 <span>Profit</span>
@@ -644,13 +646,15 @@ function Dashboard() {
                                     to={`/offer/detail/${stat.display_id || stat.offer_id}`}
                                     key={stat.offer_id || index}
                                     className="table-row"
-                                    style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr', textDecoration: 'none', color: 'inherit' }}
+                                    style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr 1fr 1fr', textDecoration: 'none', color: 'inherit' }}
                                 >
                                     <div className="offer-name-cell" title={stat.offer_name}>
                                         <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
                                     </div>
                                     <span>{formatNumber(stat.clicks)}</span>
                                     <span>{formatNumber(stat.conversions)}</span>
+                                    <span style={{ color: 'green' }}>{formatNumber(stat.approved_conversions || 0)}</span>
+                                    <span style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions || 0)}</span>
                                     <span>{stat.conversion_ratio}%</span>
                                     <span>{formatCurrency(stat.affiliate_payout)}</span>
                                     <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
