@@ -343,28 +343,12 @@ function OfferDetail() {
                         <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>{offer.offer_currency} {stats.total_revenue || '0.00'}</div>
                     </div>
                     <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Approved Revenue</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{offer.offer_currency} {stats.approved_revenue || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Pending Revenue</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffb800' }}>{offer.offer_currency} {stats.pending_revenue || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Payout</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#9C27B0' }}>{offer.offer_currency} {stats.total_payout || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Approved Payout</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{offer.offer_currency} {stats.approved_payout || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Pending Payout</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffb800' }}>{offer.offer_currency} {stats.pending_payout || '0.00'}</div>
+                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Payout</div>
+                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#9C27B0' }}>{offer.offer_currency} {stats.approved_payout || '0.00'}</div>
                     </div>
                     <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
                         <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Profit</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#9C27B0' }}>{offer.offer_currency} {stats.total_profit || '0.00'}</div>
+                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{offer.offer_currency} {stats.total_profit || '0.00'}</div>
                     </div>
                 </div>
             )}

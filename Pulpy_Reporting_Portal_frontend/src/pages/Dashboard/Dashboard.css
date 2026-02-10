@@ -94,7 +94,7 @@
 /* Stats Grid - Auto-adjusting Bento Style */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
     gap: 16px;
     margin-bottom: 24px;
 }
@@ -1089,6 +1089,19 @@
 }
 
 /* Mobile (up to 768px) */
+/* Tablet - Medium Screens */
+@media (max-width: 1024px) {
+    .stats-grid {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+        gap: 14px;
+    }
+
+    .dashboard-content {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    }
+}
+
+/* Mobile - Small Screens */
 @media (max-width: 768px) {
     .dashboard-header {
         flex-direction: column;
@@ -1118,7 +1131,7 @@
     }
 
     .stats-grid {
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
         gap: 12px;
         margin-bottom: 20px;
     }
@@ -1204,6 +1217,7 @@
     }
 }
 
+/* Extra Small Screens */
 @media (max-width: 480px) {
     .dashboard-header-left h1 {
         font-size: 22px;

@@ -371,11 +371,35 @@ function Dashboard() {
                     <div className="stat-icon"><ConversionIcon /></div>
                     <div className="stat-info">
                         <span className="stat-value">{formatNumber(cards.conversions?.total || 0)}</span>
-                        <span className="stat-label">Conversions</span>
+                        <span className="stat-label">Total Conversions</span>
                     </div>
                     <TrendIndicator current={cards.conversions?.total || 0} previous={cards.conversions?.yesterday || 0} />
                     <div className="stat-badge">
                         {cards.conversions?.approved || 0} Approved
+                    </div>
+                </div>
+
+                {/* Approved Conversions - Green accent */}
+                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
+                    <div className="stat-icon" style={{ color: '#4CAF50' }}><ConversionIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatNumber(cards.conversions?.approved || 0)}</span>
+                        <span className="stat-label">Approved Conversions</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
+                        ✓ Confirmed
+                    </div>
+                </div>
+
+                {/* Pending Conversions - Amber accent */}
+                <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
+                    <div className="stat-icon" style={{ color: '#FF9800' }}><ConversionIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatNumber(cards.conversions?.pending || 0)}</span>
+                        <span className="stat-label">Pending Conversions</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
+                        ⏳ Awaiting
                     </div>
                 </div>
 
@@ -386,9 +410,57 @@ function Dashboard() {
                         <span className="stat-label">Total Revenue</span>
                     </div>
                     <div className="stat-badge">
-                        Profit: {formatCurrency(cards.revenue?.profit || 0)}
+                        Profit: {formatCurrency((cards.revenue?.total || 0) - (cards.revenue?.approved_payout || 0))}
                     </div>
                 </div>
+
+                {/* Approved Revenue - Green accent */}
+                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
+                    <div className="stat-icon" style={{ color: '#4CAF50' }}><RevenueIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatCurrency(cards.revenue?.approved || 0)}</span>
+                        <span className="stat-label">Approved Revenue</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
+                        ✓ Confirmed
+                    </div>
+                </div>
+
+                {/* Pending Revenue - Amber accent */}
+                <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
+                    <div className="stat-icon" style={{ color: '#FF9800' }}><RevenueIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatCurrency(cards.revenue?.pending || 0)}</span>
+                        <span className="stat-label">Pending Revenue</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
+                        ⏳ Awaiting
+                    </div>
+                </div>
+
+                {/* Approved Payout - Green accent */}
+                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
+                    <div className="stat-icon" style={{ color: '#4CAF50' }}><RevenueIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatCurrency(cards.revenue?.approved_payout || 0)}</span>
+                        <span className="stat-label">Approved Payout</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
+                        ✓ Confirmed
+                    </div>
+                </div>
+
+                {/* Pending Payout - Amber accent */}
+                {/* <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
+                    <div className="stat-icon" style={{ color: '#FF9800' }}><RevenueIcon /></div>
+                    <div className="stat-info">
+                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatCurrency(cards.revenue?.pending_payout || 0)}</span>
+                        <span className="stat-label">Pending Payout</span>
+                    </div>
+                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
+                        ⏳ Awaiting
+                    </div>
+                </div> */}
 
                 <div className="stat-card orange">
                     <div className="stat-icon"><AdvertiserIcon /></div>

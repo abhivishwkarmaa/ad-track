@@ -453,6 +453,8 @@ class OfferService {
 
   async getOfferById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
+    console.log('id', id);
+    console.log('tenantId', tenantId);
 
     // 1. Try Public ID / Display ID first (unless searching strictly by internal ID)
     if (tenantId && !internalOnly) {
@@ -468,6 +470,7 @@ class OfferService {
         LIMIT 1
       `;
       const [publicRows] = await pool.query(publicQuery, [tenantId, id, id]);
+      console.log('publicRows', publicRows);
       if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
         return Array.isArray(publicRows) ? publicRows[0] : publicRows;
       }
@@ -487,6 +490,7 @@ class OfferService {
     query += ' LIMIT 1';
 
     const [rows] = await pool.query(query, params);
+    console.log('rows', rows);
     return Array.isArray(rows) ? rows[0] : rows;
   }
 
@@ -635,9 +639,9 @@ class OfferService {
       // ✅ CRITICAL: Add tenant_id filtering to all subqueries for tenant isolation
       const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
 
-      // Fix: Ensure correct number of params for all 14 subqueries + 2 main query params (id, tenant_id)
+      // Fix: Ensure correct number of params for all 13 subqueries + 2 main query params (id, tenant_id)
       const params = tenantId
-        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
+        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
         : [internalId];
 
       const [statsRows] = await pool.query(
@@ -654,8 +658,7 @@ class OfferService {
           (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_revenue,
           (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_payout,
           (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_payout,
-          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_payout,
-          (SELECT COALESCE(SUM(amount - payout), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_profit
+          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_payout
         FROM offers o
         WHERE o.id = ?${tenantId ? ' AND o.tenant_id = ?' : ''}`,
         params
@@ -666,6 +669,10 @@ class OfferService {
         ? ((stats.total_conversions || 0) / stats.total_clicks) * 100
         : 0;
 
+      const totalRevenue = parseFloat(stats.total_revenue || 0);
+      const approvedPayout = parseFloat(stats.approved_payout || 0);
+      const totalProfit = totalRevenue - approvedPayout;
+
       return {
         total_clicks: parseInt(stats.total_clicks || 0),
         unique_publishers: parseInt(stats.unique_publishers || 0),
@@ -674,13 +681,13 @@ class OfferService {
         approved_conversions: parseInt(stats.approved_conversions || 0),
         pending_conversions: parseInt(stats.pending_conversions || 0),
         rejected_conversions: parseInt(stats.rejected_conversions || 0),
-        total_revenue: parseFloat(stats.total_revenue || 0),
+        total_revenue: totalRevenue,
         approved_revenue: parseFloat(stats.approved_revenue || 0),
         pending_revenue: parseFloat(stats.pending_revenue || 0),
         total_payout: parseFloat(stats.total_payout || 0),
-        approved_payout: parseFloat(stats.approved_payout || 0),
+        approved_payout: approvedPayout,
         pending_payout: parseFloat(stats.pending_payout || 0),
-        total_profit: parseFloat(stats.total_profit || 0),
+        total_profit: totalProfit,
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
       };
     } catch (error) {

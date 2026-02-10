@@ -120,7 +120,7 @@ export class PostbackService {
           });
 
           // 2. Validate Offer / Fetch Payout (using existing services with tenant_id)
-          const offer = await offerService.getOfferById(clickData.offer_id, tenantId);
+          const offer = await offerService.getOfferById(clickData.offer_id, tenantId,true);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
@@ -143,11 +143,12 @@ export class PostbackService {
           const publisher = await publisherService.findById(clickData.publisher_id, tenantId);
 
           let offerPayout = parseFloat(offer.advertiser_amount);
-
+          console.log('offerPayout', offerPayout);
           let payout = parseFloat(offer.affiliate_amount);
+          console.log('payout', payout);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
-
+          console.log('conversionAmount', conversionAmount);
           // 4. Status Determination
           let finalStatus = status;
           if (assignment?.conversion_approval_percentage) {

@@ -627,7 +627,11 @@ export class DashboardService {
       const [revenueRows] = await pool.query(
         `SELECT 
           COALESCE(SUM(amount), 0) as total_revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as approved_revenue,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_revenue,
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout,
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) as pending_payout
         FROM conversions
         WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
           AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
@@ -730,8 +734,12 @@ export class DashboardService {
         },
         revenue: {
           total: revenueToday,
+          approved: parseFloat(revenueRows[0]?.approved_revenue || 0),
+          pending: parseFloat(revenueRows[0]?.pending_revenue || 0),
           payout: parseFloat(revenueRows[0]?.total_payout || 0),
-          profit: (revenueToday - parseFloat(revenueRows[0]?.total_payout || 0)),
+          approved_payout: parseFloat(revenueRows[0]?.approved_payout || 0),
+          pending_payout: parseFloat(revenueRows[0]?.pending_payout || 0),
+          profit: (revenueToday - parseFloat(revenueRows[0]?.approved_payout || 0)),
           today: revenueToday,
           yesterday: revenueYesterday,
           mtd: 0,
