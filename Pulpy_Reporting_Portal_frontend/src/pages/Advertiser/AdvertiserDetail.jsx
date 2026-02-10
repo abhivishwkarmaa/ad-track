@@ -195,9 +195,9 @@ function AdvertiserDetail() {
                     </div>
                 </div>
 
-                {/* Offer Performance Stats */}
+                {/* Publisher Performance Stats */}
                 <div className="advertiser-form-section">
-                    <h3 className="advertiser-form-section-title">Offer Performance</h3>
+                    <h3 className="advertiser-form-section-title">Publisher Performance</h3>
                     {statsLoading ? (
                         <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', width: '100%' }}>
                             <div style={{ width: '30px', height: '30px', border: '3px solid #f3f3f3', borderTop: '3px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '10px' }}></div>

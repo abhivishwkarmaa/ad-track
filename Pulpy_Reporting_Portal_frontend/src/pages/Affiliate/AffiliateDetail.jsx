@@ -150,9 +150,9 @@ function AffiliateDetail() {
                     </div>
                 </div>
 
-                {/* Offer Performance Stats */}
+                {/* Publisher Performance Stats */}
                 <div className="affiliate-form-section">
-                    <h3 className="affiliate-form-section-title">Offer Performance</h3>
+                    <h3 className="affiliate-form-section-title">Publisher Performance</h3>
                     {statsLoading ? (
                         <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', width: '100%' }}>
                             <div style={{ width: '30px', height: '30px', border: '3px solid #f3f3f3', borderTop: '3px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '10px' }}></div>
@@ -163,27 +163,37 @@ function AffiliateDetail() {
                             <table className="table table-striped table-hover">
                                 <thead>
                                     <tr>
-                                        <th>Offer ID</th>
-                                        <th>Offer Name</th>
+                                        <th>Offer</th>
                                         <th className="text-right">Clicks</th>
-                                        <th className="text-right">Conversions</th>
-                                        <th className="text-right">Approved Payout</th>
-                                        <th className="text-right">Pending Payout</th>
-                                        <th className="text-right">Total Revenue</th>
+                                        <th className="text-right">Total Conv</th>
+                                        <th className="text-right">Approved</th>
+                                        <th className="text-right">Pending</th>
+                                        <th className="text-right">Pub Rev</th>
+                                        <th className="text-right">Revenue</th>
+                                        <th className="text-right">Profit</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {offerStats.map((stat, index) => (
                                         <tr key={index}>
-                                            <td>{stat.offer.public_id || stat.offer.id}</td>
-                                            <td>{stat.offer.name}</td>
-                                            <td className="text-right">{stat.clicks.total}</td>
-                                            <td className="text-right">{stat.conversions.total}</td>
-                                            <td className="text-right">${stat.payout.approved?.toFixed(2)}</td>
-                                            <td className="text-right">
-                                                ${(stat.payout.total - stat.payout.approved)?.toFixed(2)}
+                                            <td>
+                                                <div className="offer-name-cell" title={stat.offer.name}>
+                                                    <span className="id-badge">#{stat.offer.public_id || stat.offer.id}</span> {stat.offer.name}
+                                                </div>
                                             </td>
-                                            <td className="text-right">${stat.revenue.total?.toFixed(2)}</td>
+                                            <td className="text-right">{formatNumber(stat.clicks.total)}</td>
+                                            <td className="text-right">{formatNumber(stat.conversions.total)}</td>
+                                            <td className="text-right" style={{ color: 'green', fontWeight: 500 }}>
+                                                {formatNumber(stat.conversions.approved)}
+                                            </td>
+                                            <td className="text-right" style={{ color: '#ffb800', fontWeight: 500 }}>
+                                                {formatNumber(stat.conversions.pending)}
+                                            </td>
+                                            <td className="text-right">{formatCurrency(stat.payout.approved)}</td>
+                                            <td className="text-right">{formatCurrency(stat.revenue.approved)}</td>
+                                            <td className="text-right" style={{ color: stat.profit.approved >= 0 ? 'green' : 'red', fontWeight: 500 }}>
+                                                {formatCurrency(stat.profit.approved)}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -199,5 +209,20 @@ function AffiliateDetail() {
         </div>
     );
 }
+
+// Helper functions
+const formatNumber = (num) => {
+    if (num === undefined || num === null) return '0';
+    return new Intl.NumberFormat('en-US').format(num);
+};
+
+const formatCurrency = (amount) => {
+    if (amount === undefined || amount === null) return '$0.00';
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2
+    }).format(amount);
+};
 
 export default AffiliateDetail;

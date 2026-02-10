@@ -406,41 +406,36 @@ export class ReportService {
    */
   async getPublisherConversionStats(filters = {}, tenantId = null) {
     try {
-      // Build date conditions for WHERE clause
-      let conversionDateCondition = '';
+      const { publisher_id, offer_id } = filters;
       const params = [];
+      const statsParams = []; // Params for the Stats Subqueries
 
+      // 1. Build Date Condition (for Clicks/Conversions Stats)
+      let dateCondition = '';
       if (filters.date_from) {
-        conversionDateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) >= ?';
-        params.push(filters.date_from);
+        dateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) >= ?';
+        statsParams.push(filters.date_from);
       }
-
       if (filters.date_to) {
-        conversionDateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) <= ?';
-        params.push(filters.date_to);
+        dateCondition += ' AND DATE(CONVERT_TZ(created_at, \'+00:00\', \'+05:30\')) <= ?';
+        statsParams.push(filters.date_to);
       }
 
-      // Build base WHERE conditions
-      let whereConditions = 'WHERE 1=1';
+      // 2. Build Relevant Pairs Subquery (Only Assigned Offers)
+      const pairsQuery = `
+        SELECT po.publisher_id, po.offer_id 
+        FROM publisher_offers po 
+        JOIN publishers p ON po.publisher_id = p.id 
+        WHERE p.tenant_id = ?
+        ${publisher_id ? ' AND po.publisher_id = ?' : ''}
+        ${offer_id ? ' AND po.offer_id = ?' : ''}
+      `;
+      params.push(tenantId);
+      if (publisher_id) params.push(publisher_id);
+      if (offer_id) params.push(offer_id);
 
-      // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-      if (tenantId) {
-        whereConditions += ' AND p.tenant_id = ?';
-        params.push(tenantId);
-      }
-
-      if (filters.publisher_id) {
-        whereConditions += ' AND p.id = ?';
-        params.push(filters.publisher_id);
-      }
-
-      if (filters.offer_id) {
-        whereConditions += ' AND o.id = ?';
-        params.push(filters.offer_id);
-      }
-
-      // Use subqueries to calculate clicks and conversions separately to avoid cartesian product
-      let query = `
+      // 3. Main Query
+      const query = `
         SELECT 
           p.id as publisher_id,
           p.email as publisher_email,
@@ -462,15 +457,16 @@ export class ReportService {
           COALESCE(conv_stats.approved_payout, 0) as approved_payout,
           COALESCE(conv_stats.total_profit, 0) as total_profit,
           COALESCE(conv_stats.approved_profit, 0) as approved_profit
-        FROM publishers p
-        INNER JOIN publisher_offers po ON p.id = po.publisher_id
-        INNER JOIN offers o ON po.offer_id = o.id
+        FROM (${pairsQuery}) as pairs
+        JOIN publishers p ON pairs.publisher_id = p.id
+        JOIN offers o ON pairs.offer_id = o.id
         LEFT JOIN (
           SELECT 
             publisher_id,
             offer_id,
             COUNT(DISTINCT id) as total_clicks
           FROM clicks
+          WHERE tenant_id = ? ${dateCondition}
           GROUP BY publisher_id, offer_id
         ) click_stats ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
         LEFT JOIN (
@@ -489,15 +485,25 @@ export class ReportService {
             COALESCE(SUM(amount - payout), 0) as total_profit,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0) as approved_profit
           FROM conversions
-          WHERE 1=1${conversionDateCondition}
+          WHERE tenant_id = ? ${dateCondition}
           GROUP BY publisher_id, offer_id
         ) conv_stats ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
-        ${whereConditions}
         ORDER BY conv_stats.total_conversions DESC, conv_stats.approved_conversions DESC
       `;
 
-      const [rows] = await pool.query(query, params);
-      // Calculate conversion rates
+      // Params for main query:
+      // 1. pairs params (already accumulated)
+      // 2. click_stats params: tenantId, ...statsParams
+      // 3. conv_stats params: tenantId, ...statsParams
+
+      const finalParams = [
+        ...params,
+        tenantId, ...statsParams,
+        tenantId, ...statsParams
+      ];
+
+      const [rows] = await pool.query(query, finalParams);
+
       const stats = rows.map(row => {
         const conversionRate = row.total_clicks > 0
           ? (row.total_conversions / row.total_clicks) * 100

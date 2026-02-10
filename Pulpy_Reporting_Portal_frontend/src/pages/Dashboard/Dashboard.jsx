@@ -109,7 +109,7 @@ const formatCurrency = (amount) => {
 // --- MAIN DASHBOARD COMPONENT ---
 function Dashboard() {
     const { user } = useAuth();
-    const { refreshKey, triggerRefresh } = useRefresh();
+    const { refreshKey } = useRefresh();
 
     // Single consolidated state
     const [dashboardData, setDashboardData] = useState(null);
@@ -256,7 +256,7 @@ function Dashboard() {
         summary = {},
         summary_previous = null, // Previous period summary for comparison
         liveOffers = [], // Live offers list
-        recentActivity = [], // Detailed activity
+        publisherStatistics = [], // Publisher stats table
         offerStatistics = [], // Offer stats table
         performanceComparison = [] // Comparison chart data
     } = dashboardData || {};
@@ -317,29 +317,7 @@ function Dashboard() {
                     <p className="dashboard-date"><CalendarIcon /> {todayStr}</p>
                 </div>
                 <div className="dashboard-header-right">
-                    <button
-                        className="refresh-btn"
-                        onClick={() => triggerRefresh && triggerRefresh()}
-                        title="Refresh Data"
-                        style={{
-                            marginRight: '12px',
-                            background: 'var(--bg-secondary)',
-                            border: '1px solid var(--border-light)',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '8px',
-                            cursor: 'pointer',
-                            color: 'var(--text-muted)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}
-                    >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                            <path d="M23 4v6h-6" />
-                            <path d="M1 20v-6h6" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                        </svg>
-                    </button>
+
                     <div className="date-filter-container">
                         <label htmlFor="date-filter">Filter:</label>
                         <select
@@ -684,36 +662,46 @@ function Dashboard() {
                     ) : <div className="no-data">No offer statistics available</div>}
                 </div>
 
-                {/* Recent Activity */}
-                <div className="dashboard-card recent-activity-card">
+                {/* Publisher Statistics */}
+                <div className="dashboard-card publisher-stats-card" style={{ gridColumn: '1 / -1' }}>
                     <div className="card-header">
-                        <h3>Recent Activity</h3>
-                        <Link to="/reports" className="view-all">Detailed Reports</Link>
+                        <h3>Publisher Statistics</h3>
+                        <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
-                    {recentActivity && recentActivity.length > 0 ? (
+                    {publisherStatistics && publisherStatistics.length > 0 ? (
                         <div className="activity-table">
-                            <div className="table-header">
-                                <span>Time</span>
-                                <span>Offer</span>
+                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(150px, 2fr) 1fr 1fr 1fr 1fr 1.5fr 1.5fr 1.5fr' }}>
                                 <span>Publisher</span>
-                                <span>Status</span>
-                                <span>Rev</span>
+                                <span>Clicks</span>
+                                <span>Total Conv</span>
+                                <span>Approved</span>
+                                <span>Pending</span>
+                                <span>Pub Rev</span>
+                                <span>Revenue</span>
+                                <span>Profit</span>
                             </div>
-                            {recentActivity.map((item, index) => (
-                                <div key={item.id || index} className="table-row">
-                                    <span>{new Date(item.time).toLocaleTimeString()}</span>
-                                    <span>
-                                        <Link to={`/offer/detail/${item.offer?.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
-                                            {item.offer?.name}
-                                        </Link>
+                            {publisherStatistics.map((stat, index) => (
+                                <div
+                                    key={stat.publisher_id || index}
+                                    className="table-row"
+                                    style={{ gridTemplateColumns: 'minmax(150px, 2fr) 1fr 1fr 1fr 1fr 1.5fr 1.5fr 1.5fr' }}
+                                >
+                                    <div className="offer-name-cell" title={stat.publisher_name}>
+                                        <span className="id-badge">#{stat.public_id}</span> {stat.publisher_name}
+                                    </div>
+                                    <span>{formatNumber(stat.clicks)}</span>
+                                    <span>{formatNumber(stat.conversions)}</span>
+                                    <span style={{ color: 'green' }}>{formatNumber(stat.approved_conversions)}</span>
+                                    <span style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions)}</span>
+                                    <span>{formatCurrency(stat.publisher_revenue)}</span>
+                                    <span>{formatCurrency(stat.total_revenue)}</span>
+                                    <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
+                                        {formatCurrency(stat.profit)}
                                     </span>
-                                    <span>{item.publisher}</span>
-                                    <span className={`status-pill ${item.conversion_status.toLowerCase()}`}>{item.conversion_status}</span>
-                                    <span>${item.revenue}</span>
                                 </div>
                             ))}
                         </div>
-                    ) : <div className="no-data">No recent activity</div>}
+                    ) : <div className="no-data">No publisher statistics available</div>}
                 </div>
             </div>
         </div >

@@ -984,6 +984,76 @@ export class DashboardService {
     }
   }
 
+  async getPublisherStatistics(filters = {}, tenantId) {
+    if (!tenantId) throw new Error('Tenant ID required');
+    try {
+      const limit = parseInt(filters.limit || 50);
+      const dateBoundaries = this.getDateBoundaries();
+      const dateFrom = filters.date_from || dateBoundaries.monthStart;
+      const dateTo = filters.date_to || dateBoundaries.todayStart;
+
+      logger.info('getPublisherStatistics filters:', { dateFrom, dateTo, limit, tenantId });
+
+      const [rows] = await pool.query(
+        `SELECT 
+          p.id as publisher_id,p.public_publisher_id as public_id,
+          COALESCE(p.company_name, p.first_name, p.email, 'Unknown') as publisher_name,
+          COALESCE(c.total_clicks, 0) as clicks,
+          COALESCE(conv.total_conversions, 0) as conversions,
+          COALESCE(conv.approved_conversions, 0) as approved_conversions,
+          COALESCE(conv.pending_conversions, 0) as pending_conversions,
+          COALESCE(conv.affiliate_payout, 0) as affiliate_payout,
+          COALESCE(conv.advertiser_payout, 0) as total_revenue,
+          COALESCE(conv.profit, 0) as profit
+        FROM publishers p
+        LEFT JOIN (
+          SELECT 
+            publisher_id, 
+            COUNT(*) as total_clicks 
+          FROM clicks 
+          WHERE tenant_id = ?
+            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+          GROUP BY publisher_id
+        ) c ON p.id = c.publisher_id
+        LEFT JOIN (
+          SELECT 
+            publisher_id, 
+            COUNT(*) as total_conversions,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+            SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
+            SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as advertiser_payout,
+            SUM(CASE WHEN status = 'approved' THEN (amount - payout) ELSE 0 END) as profit
+          FROM conversions 
+          WHERE tenant_id = ?
+            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+          GROUP BY publisher_id
+        ) conv ON p.id = conv.publisher_id
+        WHERE p.status != 'suspended' AND p.tenant_id = ?
+        ORDER BY conversions DESC, clicks DESC, publisher_name ASC
+        LIMIT ?
+        `,
+        [tenantId, dateFrom, dateTo, tenantId, dateFrom, dateTo, tenantId, limit]
+      );
+
+      return rows.map(row => ({
+        publisher_id: row.publisher_id,
+        public_id: row.public_id,
+        publisher_name: row.publisher_name,
+        clicks: parseInt(row.clicks || 0),
+        conversions: parseInt(row.conversions || 0),
+        approved_conversions: parseInt(row.approved_conversions || 0),
+        pending_conversions: parseInt(row.pending_conversions || 0),
+        publisher_revenue: parseFloat(row.affiliate_payout || 0),
+        total_revenue: parseFloat(row.total_revenue || 0),
+        profit: parseFloat(row.profit || 0)
+      }));
+    } catch (error) {
+      logger.error('DashboardService.getPublisherStatistics error:', error);
+      throw error;
+    }
+  }
+
   async getAggregatedDashboard(filters = {}, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
 
@@ -1015,7 +1085,7 @@ export class DashboardService {
         summary,
         summaryPrevious,
         liveOffers,
-        recentActivity,
+        publisherStatistics,
         offerStatistics,
         performanceComparison
       ] = await Promise.all([
@@ -1026,7 +1096,7 @@ export class DashboardService {
         summaryPromise,
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
-        this.getRecentActivity(10, tenantId).catch(err => { logger.error('Error fetching recent activity:', err); return []; }),
+        this.getPublisherStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
         this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
         performanceComparisonPromise
       ]);
@@ -1038,7 +1108,7 @@ export class DashboardService {
         topAffiliates,
         summary,
         liveOffers,
-        recentActivity,
+        publisherStatistics,
         offerStatistics,
         performanceComparison
       };
