@@ -27,10 +27,14 @@ const TENANT_STATES = {
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SKIP_PREFIXES = ['/api/auth', '/api/subscription/status', '/api/contact'];
 const SKIP_PATHS = new Set(['/health']);
+// Tracking endpoints must always work (count clicks/postbacks) regardless of subscription
+const TRACKING_PREFIXES = ['/click', '/postback', '/imp'];
 
 const shouldSkipSubscriptionEnforcement = (request) => {
     const url = request.url || '';
-    if (SKIP_PATHS.has(url)) return true;
+    const path = url.split('?')[0];
+    if (SKIP_PATHS.has(path)) return true;
+    if (TRACKING_PREFIXES.some((prefix) => path === prefix)) return true;
     return SKIP_PREFIXES.some((prefix) => url.startsWith(prefix));
 };
 

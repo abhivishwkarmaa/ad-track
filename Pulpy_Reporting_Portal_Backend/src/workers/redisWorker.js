@@ -406,6 +406,26 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
         return;
     }
 
+    // ✅ Resolve publisher_offer_id FK: only use IDs that exist in publisher_offers (avoid ER_NO_REFERENCED_ROW_2)
+    const poId = (c) => c.publisher_offer_id ?? c.publisherOfferId;
+    const rawPoIds = [...new Set(validClicks.map(c => poId(c)).filter(Boolean))].map(id => parseInt(id, 10)).filter(n => !isNaN(n) && n > 0);
+    let validPublisherOfferIds = new Set();
+    if (rawPoIds.length > 0) {
+        try {
+            const placeholders = rawPoIds.map(() => '?').join(',');
+            const [rows] = await pool.query(`SELECT id FROM publisher_offers WHERE id IN (${placeholders})`, rawPoIds);
+            validPublisherOfferIds = new Set((rows || []).map(r => r.id));
+            const invalidCount = rawPoIds.filter(id => !validPublisherOfferIds.has(id)).length;
+            if (invalidCount > 0) {
+                logger.warn(`⚠️ Resolving FK: ${invalidCount} publisher_offer_id(s) not in publisher_offers will be stored as NULL`, {
+                    invalidIds: rawPoIds.filter(id => !validPublisherOfferIds.has(id)).slice(0, 20)
+                });
+            }
+        } catch (lookupErr) {
+            logger.error('❌ publisher_offers lookup failed, storing all publisher_offer_id as NULL', { err: lookupErr.message });
+        }
+    }
+
     // UTC ENFORCEMENT: All timestamps stored as UTC only. Business logic converts to IST when needed.
     // Column order must match table schema exactly
     // ✅ CRITICAL: Use INSERT IGNORE or ON DUPLICATE KEY UPDATE to prevent duplicates
@@ -433,7 +453,8 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
         // Safe parsing with fallbacks
         const offerId = parseInt(c.offer_id) || 0;
         const publisherId = parseInt(c.publisher_id) || 0;
-        const publisherOfferId = c.publisher_offer_id ? parseInt(c.publisher_offer_id) : null;
+        const rawPoId = poId(c) ? parseInt(poId(c), 10) : null;
+        const publisherOfferId = rawPoId != null && validPublisherOfferIds.has(rawPoId) ? rawPoId : null;
 
         // ✅ CRITICAL: Parse tenant_id from Redis (may be string, number, or empty)
         // Redis stores values as strings, so handle empty string as null
@@ -513,7 +534,8 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             })
         });
 
-        // ✅ CRITICAL: Check for foreign key constraint errors
+        // ✅ CRITICAL: Check for foreign key constraint errors (use both message and sqlMessage; some drivers put details in sqlMessage)
+        const errText = (err.message || '') + (err.sqlMessage || '');
         if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === '23000') {
             logger.error('❌ FOREIGN KEY CONSTRAINT ERROR!');
             logger.error('   Error details:', {
@@ -523,8 +545,8 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
                 sqlMessage: err.sqlMessage
             });
 
-            // Check which foreign key failed
-            if (err.message && err.message.includes('tenant_id')) {
+            // Check which foreign key failed (check publisher_offer_id before offer_id since "publisher_offer_id" contains "offer_id")
+            if (errText.includes('tenant_id') && !errText.includes('publisher_offer_id')) {
                 logger.error('   ❌ tenant_id does not exist in tenants table!');
                 logger.error('   Check: SELECT * FROM tenants WHERE id IN (SELECT DISTINCT tenant_id FROM clicks WHERE tenant_id IS NOT NULL);');
                 logger.error('   Problematic tenant_ids in batch:', validClicks.map(c => ({
@@ -533,10 +555,13 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
                     offer_id: c.offer_id,
                     publisher_id: c.publisher_id
                 })));
-            } else if (err.message && err.message.includes('offer_id')) {
+            } else if (errText.includes('publisher_offer_id') || errText.includes('fk_click_po')) {
+                logger.error('   ❌ publisher_offer_id does not exist in publisher_offers table!');
+                logger.error('   Problematic publisher_offer_ids in batch:', validClicks.map(c => poId(c)).filter(Boolean));
+            } else if (errText.includes('offer_id')) {
                 logger.error('   ❌ offer_id does not exist in offers table!');
                 logger.error('   Problematic offer_ids in batch:', validClicks.map(c => c.offer_id));
-            } else if (err.message && err.message.includes('publisher_id')) {
+            } else if (errText.includes('publisher_id')) {
                 logger.error('   ❌ publisher_id does not exist in publishers table!');
                 logger.error('   Problematic publisher_ids in batch:', validClicks.map(c => c.publisher_id));
             }
