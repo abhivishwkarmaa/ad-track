@@ -13,7 +13,154 @@ import http from 'http';
 import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
+const APPROVAL_KEY_PREFIX = 'approval';
+const APPROVAL_SCRIPT_KEY_COUNT = 3;
+
+const DETERMINISTIC_APPROVAL_LUA = `
+local totalKey = KEYS[1]
+local approvedKey = KEYS[2]
+local percentageKey = KEYS[3]
+
+local percentageArg = ARGV[1]
+if not percentageArg then
+  return redis.error_reply('percentage argument required')
+end
+
+local percentage = tonumber(percentageArg)
+if not percentage then
+  return redis.error_reply('percentage argument must be numeric')
+end
+
+local storedPercentage = redis.call('GET', percentageKey)
+if not storedPercentage or storedPercentage ~= percentageArg then
+  redis.call('DEL', totalKey)
+  redis.call('DEL', approvedKey)
+  redis.call('SET', percentageKey, percentageArg)
+end
+
+local total = redis.call('INCR', totalKey)
+local approvedRaw = redis.call('GET', approvedKey)
+local approvedCount = 0
+if approvedRaw then
+  approvedCount = tonumber(approvedRaw)
+end
+
+local expected = (percentage * total) / 100
+local status = 'pending'
+
+if approvedCount < expected then
+  approvedCount = redis.call('INCR', approvedKey)
+  status = 'approved'
+end
+
+return {
+  status,
+  tostring(total),
+  tostring(approvedCount),
+  string.format('%.10f', expected),
+  tostring(percentage)
+}
+`;
+
+if (typeof redis.deterministicApproval !== 'function') {
+  redis.defineCommand('deterministicApproval', {
+    numberOfKeys: APPROVAL_SCRIPT_KEY_COUNT,
+    lua: DETERMINISTIC_APPROVAL_LUA,
+  });
+}
+
+const normalizeApprovalKeySegment = (value, label) => {
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`Missing ${label} for deterministic approval`);
+  }
+
+  const segment = String(value).trim();
+  if (!segment) {
+    throw new Error(`Empty ${label} provided for deterministic approval`);
+  }
+
+  return segment.replace(/\s+/g, '_');
+};
+
+const buildApprovalKeys = ({ tenantId, offerId, publisherId, assignmentId }) => {
+  const tenantSegment = normalizeApprovalKeySegment(tenantId, 'tenantId');
+  const offerSegment = normalizeApprovalKeySegment(offerId, 'offerId');
+  const publisherSegment = normalizeApprovalKeySegment(publisherId, 'publisherId');
+  const assignmentSegment = normalizeApprovalKeySegment(assignmentId, 'assignmentId');
+
+  const base = `${APPROVAL_KEY_PREFIX}:${tenantSegment}:${offerSegment}:${publisherSegment}:${assignmentSegment}`;
+
+  return {
+    base,
+    totalKey: `${base}:total`,
+    approvedKey: `${base}:approved`,
+    percentageKey: `${base}:percentage`,
+  };
+};
+
 export class PostbackService {
+  async determineDeterministicApprovalStatus({
+    tenantId,
+    offerId,
+    publisherId,
+    assignmentId,
+    approvalPercentage,
+    fallbackStatus = 'pending'
+  }) {
+    if (approvalPercentage === null || approvalPercentage === undefined) {
+      return fallbackStatus;
+    }
+
+    let numericPercentage = Number(approvalPercentage);
+    if (!Number.isFinite(numericPercentage)) {
+      logger.warn('Invalid approval percentage provided; falling back to pending', {
+        tenantId,
+        offerId,
+        publisherId,
+        assignmentId,
+        approvalPercentage
+      });
+      return fallbackStatus;
+    }
+
+    if (numericPercentage < 0) numericPercentage = 0;
+    if (numericPercentage > 100) numericPercentage = 100;
+
+    try {
+      const keys = buildApprovalKeys({ tenantId, offerId, publisherId, assignmentId });
+      const result = await redis.deterministicApproval(
+        keys.totalKey,
+        keys.approvedKey,
+        keys.percentageKey,
+        numericPercentage.toString()
+      );
+
+      if (!Array.isArray(result) || result.length < 1) {
+        logger.warn('Unexpected response from deterministic approval script; defaulting to fallback status', {
+          tenantId,
+          offerId,
+          publisherId,
+          assignmentId,
+          result
+        });
+        return fallbackStatus;
+      }
+
+      const status = result[0] === 'approved' ? 'approved' : 'pending';
+
+      return status;
+    } catch (error) {
+      logger.error('Failed to evaluate deterministic approval status', {
+        error: error.message,
+        tenantId,
+        offerId,
+        publisherId,
+        assignmentId
+      });
+      return fallbackStatus;
+    }
+  }
+
   async processPostback(query, request) {
     try {
       const { click_id, rcid, amount, status = 'approved' } = query;
@@ -149,9 +296,14 @@ export class PostbackService {
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
           // 4. Status Determination
           let finalStatus = status;
-          if (assignment?.conversion_approval_percentage) {
-            const randomValue = Math.random() * 100;
-            finalStatus = (randomValue <= parseFloat(assignment.conversion_approval_percentage)) ? 'approved' : 'pending';
+          if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
+            finalStatus = await this.determineDeterministicApprovalStatus({
+              tenantId,
+              offerId: clickData.offer_id,
+              publisherId: clickData.publisher_id,
+              assignmentId: assignment.internal_id ?? assignment.id,
+              approvalPercentage: assignment.conversion_approval_percentage
+            });
           }
 
           // Resolve Callback URL
@@ -420,14 +572,13 @@ export class PostbackService {
       // Determine conversion status based on conversion_approval_percentage
       let finalStatus = status;
       if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
-        const approvalPercentage = parseFloat(assignment.conversion_approval_percentage);
-        // Random percentage check for auto-approval
-        const randomValue = Math.random() * 100;
-        if (randomValue <= approvalPercentage) {
-          finalStatus = 'approved';
-        } else {
-          finalStatus = 'pending';
-        }
+        finalStatus = await this.determineDeterministicApprovalStatus({
+          tenantId,
+          offerId,
+          publisherId,
+          assignmentId: assignment.internal_id ?? assignment.id,
+          approvalPercentage: assignment.conversion_approval_percentage
+        });
       }
 
       // Extract IP
