@@ -244,13 +244,14 @@ async function bulkInsertConversions(items) {
             conversionUuid,
             c.click_uuid, c.offer_id, c.publisher_id, c.publisher_offer_id, c.tenant_id,
             c.rcid || uuidv4(), c.status, c.amount, c.payout, c.ip,
-            c.postback_payload, new Date(), new Date(), new Date()
+            c.postback_payload, new Date(), new Date(), new Date(),
+            0  // affiliate_postback_fired: fire only when status=approved, then set to 1
         ];
     });
 
     const sql = `INSERT INTO conversions (
         conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+        rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
     ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`;
 
     await pool.query(sql, [values]);
@@ -309,37 +310,44 @@ async function bulkInsertConversions(items) {
 
 /**
  * Fire Affiliate Postbacks
+ * BUSINESS RULE: Only fire when status === 'approved'. Then set affiliate_postback_fired=1 for idempotency.
  */
 async function fireAffiliatePostbacks(items) {
     const promises = items.map(async (item) => {
         const c = item.data;
-        if (c.callback_url) {
-            try {
-                // Construct fake objects expected by sendPublisherPostback
-                const conversion = {
-                    conversion_uuid: c.conversion_uuid,
-                    id: c.id,
-                    tenant_id: c.tenant_id,
-                    publisher_id: c.publisher_id,
-                    rcid: c.rcid,
-                    payout: c.payout,
-                    amount: c.amount,
-                    status: c.status
-                };
-                const click = {
-                    tid: c.tid // Affiliate click ID
-                };
+        // STRICT: Affiliate postback ONLY for approved conversions. Never for pending/rejected/rejected_cap.
+        if (c.status !== 'approved' || !c.callback_url) return;
 
-                await postbackService.sendPublisherPostback(c.callback_url, conversion, click);
-                logger.info(`✅ Affiliate Postback Fired: ${c.callback_url}`);
-            } catch (err) {
-                logger.error(`❌ Failed to fire affiliate postback: ${err.message}`, { url: c.callback_url });
+        try {
+            const conversion = {
+                conversion_uuid: c.conversion_uuid,
+                id: c.id,
+                tenant_id: c.tenant_id,
+                publisher_id: c.publisher_id,
+                rcid: c.rcid,
+                payout: c.payout,
+                amount: c.amount,
+                status: c.status
+            };
+            const click = { tid: c.tid };
+
+            await postbackService.sendPublisherPostback(c.callback_url, conversion, click);
+            try {
+                await pool.query(
+                    'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
+                    [c.id, c.tenant_id]
+                );
+            } catch (updateErr) {
+                if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
+                    logger.warn('affiliate_postback_fired column missing - run migration add_affiliate_postback_fired.sql');
+                } else throw updateErr;
             }
+            logger.info(`✅ Affiliate Postback Fired: ${c.callback_url}`);
+        } catch (err) {
+            logger.error(`❌ Failed to fire affiliate postback: ${err.message}`, { url: c.callback_url });
         }
     });
 
-    // Fire and forget (or await if we want to ensure completion before ACK, but speed is priority)
-    // We await allSettled to avoid crashing worker
     await Promise.allSettled(promises);
 }
 

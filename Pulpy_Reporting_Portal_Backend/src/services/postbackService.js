@@ -732,15 +732,40 @@ export class PostbackService {
       // Resolve callback URL: assignment.callback_url OR publisher.global_postback_url
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
-      // Send postback to publisher's callback URL if available
+      // BUSINESS RULE: Affiliate postback fires ONLY when conversion status = 'approved'.
+      // Pending/rejected/rejected_cap → NO postback. Idempotency: only fire if not already fired.
+      const mayFirePostback = conversion &&
+        conversion.status === 'approved' &&
+        !conversion.affiliate_postback_fired &&
+        callbackUrl;
+
       let postbackResult = null;
-      if (callbackUrl && conversion) {
+      if (mayFirePostback) {
         postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
+        if (postbackResult && postbackResult.success) {
+          try {
+            await pool.query(
+              'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
+              [conversion.id, tenantId]
+            );
+            conversion.affiliate_postback_fired = 1;
+          } catch (updateErr) {
+            if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
+              logger.warn('affiliate_postback_fired column missing - run migration add_affiliate_postback_fired.sql');
+            } else throw updateErr;
+          }
+        }
       } else {
         postbackResult = {
           success: false,
           executed: false,
-          reason: !callbackUrl ? 'No callback URL configured' : 'No conversion created'
+          reason: !conversion
+            ? 'No conversion created'
+            : conversion.status !== 'approved'
+              ? 'Affiliate postback only fires for approved conversions'
+              : conversion.affiliate_postback_fired
+                ? 'Postback already fired (idempotency)'
+                : 'No callback URL configured'
         };
       }
 
