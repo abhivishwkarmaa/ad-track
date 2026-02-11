@@ -43,6 +43,7 @@ export class PostbackService {
               [click_id, tenantId],
               2000  // ✅ 2-second timeout for fast response
             );
+            console.log('dbRows', dbRows);
             if (dbRows && dbRows.length > 0) {
               const dbClick = dbRows[0];
               // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -136,11 +137,11 @@ export class PostbackService {
           // 3. Get Assignment & Payout (with tenant_id filtering)
           let assignment = null;
           if (clickData.publisher_offer_id) {
-            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId);
+            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId,true);
           }
 
           // Fetch Publisher to get Global Postback URL
-          const publisher = await publisherService.findById(clickData.publisher_id, tenantId);
+          const publisher = await publisherService.findById(clickData.publisher_id, tenantId,true);
 
           let offerPayout = parseFloat(offer.advertiser_amount);
           let payout = parseFloat(offer.affiliate_amount);
