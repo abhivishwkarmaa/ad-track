@@ -276,7 +276,6 @@ async function retryBufferedPostbacks() {
 
                 // Mock Request Object
                 const mockReq = { headers, url: '/postback' };
-
                 await postbackService.processPostback(query, mockReq);
                 logger.info(`✅ Successfully reprocessed buffered postback: ${query.click_id || query.rcid}`);
 

@@ -2,9 +2,6 @@ import pool, { queryWithTimeout } from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
-import assignmentService from './assignmentService.js';
-import offerService from './offer.service.js';
-import publisherService from './publisherService.js';
 import { replaceMacros } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import https from 'https';
@@ -12,6 +9,91 @@ import http from 'http';
 
 import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
+
+// ---------- In-file lookups (no external findById/getOfferById) ----------
+/** Get offer by internal id only. Returns row or null. */
+async function getOfferByInternalId(offerId, tenantId) {
+  if (offerId == null) return null;
+  const id = parseInt(offerId, 10);
+  if (Number.isNaN(id) || id < 1) return null;
+  let query = 'SELECT o.* FROM offers o WHERE o.id = ?';
+  const params = [id];
+  if (tenantId != null) {
+    query += ' AND o.tenant_id = ?';
+    params.push(tenantId);
+  }
+  query += ' LIMIT 1';
+  const [rows] = await pool.query(query, params);
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+/** Get assignment by internal id only. Returns shape: { internal_id, id, payout_override, callback_url, conversion_approval_percentage, tenant_id, ... }. */
+async function getAssignmentByInternalId(id, tenantId) {
+  if (id == null || id === '') return null;
+  const numericId = Number(String(id).trim());
+  if (Number.isNaN(numericId)) return null;
+  let query = `SELECT po.*, o.public_offer_id
+    FROM publisher_offers po
+    JOIN offers o ON po.offer_id = o.id
+    WHERE po.id = ?`;
+  const params = [numericId];
+  if (tenantId != null) {
+    query += ' AND po.tenant_id = ?';
+    params.push(tenantId);
+  }
+  query += ' LIMIT 1';
+  const [rows] = await pool.query(query, params);
+  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+  if (!row) return null;
+  return {
+    id: row.public_assignment_id ?? row.id,
+    internal_id: row.id,
+    publisher_id: row.publisher_id,
+    offer_id: row.offer_id,
+    payout_override: row.payout_override,
+    conversion_approval_percentage: row.conversion_approval_percentage,
+    callback_url: row.callback_url,
+    tenant_id: row.tenant_id,
+  };
+}
+
+/** Get publisher by internal id only. Returns row or null. */
+async function getPublisherByInternalId(id, tenantId) {
+  if (id == null) return null;
+  const numericId = parseInt(id, 10);
+  if (Number.isNaN(numericId)) return null;
+  let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ?';
+  const params = [numericId];
+  if (tenantId != null) {
+    query += ' AND tenant_id = ?';
+    params.push(tenantId);
+  }
+  query += ' LIMIT 1';
+  const [rows] = await pool.query(query, params);
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+}
+
+/** Check if offer is valid for conversions (live, within dates). */
+function checkOfferValidity(offer) {
+  if (!offer) return { valid: false, message: 'Offer not found', error_type: 'offer_not_found' };
+  if (offer.status !== 'live') {
+    return { valid: false, message: `Offer is not live. Current status: ${offer.status}.`, error_type: 'offer_not_live' };
+  }
+  const now = new Date();
+  if (offer.end_date) {
+    const endDate = new Date(offer.end_date);
+    endDate.setHours(23, 59, 59, 999);
+    if (now > endDate) return { valid: false, message: `Offer has expired.`, error_type: 'offer_expired' };
+  }
+  if (offer.start_date) {
+    const startDate = new Date(offer.start_date);
+    startDate.setHours(0, 0, 0, 0);
+    if (now < startDate) return { valid: false, message: `Offer has not started yet.`, error_type: 'offer_not_started' };
+  }
+  return { valid: true, message: 'Offer is valid and active', error_type: null };
+}
+
+// ---------- End in-file lookups ----------
 
 const APPROVAL_KEY_PREFIX = 'approval';
 const APPROVAL_SCRIPT_KEY_COUNT = 3;
@@ -191,6 +273,8 @@ export class PostbackService {
               2000  // ✅ 2-second timeout for fast response
             );
             console.log('dbRows', dbRows);
+            const offer = await getOfferByInternalId(dbRows[0].offer_id, tenantId);
+            console.log('offer', offer);
             if (dbRows && dbRows.length > 0) {
               const dbClick = dbRows[0];
               // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -241,6 +325,7 @@ export class PostbackService {
 
         if (redisClick && redisClick.offer_id) {
           // Click found in Redis! Process conversion in Redis.
+          logger.info('[POSTBACK] Redis path: processing conversion', { click_id, rcid });
 
           // 1. Rehydrate click data object
           const clickData = {
@@ -267,8 +352,9 @@ export class PostbackService {
             rcid: rcid
           });
 
-          // 2. Validate Offer / Fetch Payout (using existing services with tenant_id)
-          const offer = await offerService.getOfferById(clickData.offer_id, tenantId, true);
+          // 2. Validate Offer / Fetch Payout (in-file lookup by internal id)
+          const offer = await getOfferByInternalId(clickData.offer_id, tenantId);
+          console.log('offer', offer);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
@@ -276,24 +362,37 @@ export class PostbackService {
             throw new Error('Offer does not belong to this tenant');
           }
 
-          const offerValidation = offerService.checkOfferValidity(offer, true);
+          const offerValidation = checkOfferValidity(offer);
           if (!offerValidation.valid) {
             return { success: false, message: offerValidation.message, duplicate: false };
           }
 
-          // 3. Get Assignment & Payout (with tenant_id filtering)
+          // 3. Get Assignment & Payout (in-file lookup by internal id)
           let assignment = null;
           if (clickData.publisher_offer_id) {
-            assignment = await assignmentService.findById(clickData.publisher_offer_id, tenantId,true);
+            assignment = await getAssignmentByInternalId(clickData.publisher_offer_id, tenantId);
           }
 
-          // Fetch Publisher to get Global Postback URL
-          const publisher = await publisherService.findById(clickData.publisher_id, tenantId,true);
-
+          // Fetch Publisher (in-file lookup by internal id)
+          const publisher = await getPublisherByInternalId(clickData.publisher_id, tenantId);
+          logger.info('offeyfcjhcdjdcffjdfkr', offer);
           let offerPayout = parseFloat(offer.advertiser_amount);
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
+          logger.info({
+            path: 'redis',
+            click_id,
+            rcid,
+            tenantId,
+            amount,
+            status,
+            conversion_amount: conversionAmount,
+            offer_payout: offerPayout,
+            payout: payout,
+            publisher_id: clickData.publisher_id,
+            assignment_id: assignment?.id ?? assignment?.internal_id
+          }, '[POSTBACK] Redis path – Payout debug');
           // 4. Status Determination
           let finalStatus = status;
           if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
@@ -377,7 +476,8 @@ export class PostbackService {
         while (attempts < maxAttempts) {
           // ✅ STRICT: Always filter by tenant_id (from subdomain)
           // 🔥 UPDATED: Look up by click_uuid OR tid (affiliate click ID)
-          const query = 'SELECT * FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ?';
+          // ✅ Use ORDER BY id DESC LIMIT 1 so we get the same (latest) click as Strategy 1 and avoid wrong offer_id from duplicate rows
+          const query = 'SELECT * FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ? ORDER BY id DESC LIMIT 1';
           const params = [click_id, click_id, tenantId];
 
           try {
@@ -525,20 +625,25 @@ export class PostbackService {
         throw new Error('Offer ID not found. Cannot determine offer from click_id or rcid');
       }
 
-      // ✅ CRITICAL: Get offer with tenant_id filtering
-      const offer = await offerService.getOfferById(offerId, tenantId);
+      // ✅ CRITICAL: Use integer internal id – click/DB store internal id; avoid display_id/public_offer_id resolution
+      const internalOfferId = parseInt(offerId, 10);
+      if (Number.isNaN(internalOfferId)) {
+        throw new Error('Invalid offer ID from click');
+      }
+      const offer = await getOfferByInternalId(internalOfferId, tenantId);
       if (!offer) {
         throw new Error('Offer not found or does not belong to this tenant');
       }
+      // Use loaded offer's internal id for all downstream logic and inserts
+      offerId = offer.id ?? internalOfferId;
 
       // ✅ CRITICAL: Verify tenant ownership
       if (offer.tenant_id !== tenantId) {
         throw new Error('Offer does not belong to this tenant');
       }
 
-      // Validate offer is active and not expired before processing conversion
-      // Pass checkTimeRestrictions=true for conversions
-      const offerValidation = offerService.checkOfferValidity(offer, true);
+      // Validate offer is active and not expired (in-file check)
+      const offerValidation = checkOfferValidity(offer);
       if (!offerValidation.valid) {
         return {
           success: false,
@@ -552,10 +657,10 @@ export class PostbackService {
       const publisherId = click ? click.publisher_id : null;
       const publisherOfferId = click ? click.publisher_offer_id : null;
 
-      // ✅ CRITICAL: Get assignment with tenant_id filtering
+      // Get assignment by internal id (in-file lookup)
       let assignment = null;
       if (publisherOfferId) {
-        assignment = await assignmentService.findById(publisherOfferId, tenantId);
+        assignment = await getAssignmentByInternalId(publisherOfferId, tenantId);
 
         // ✅ CRITICAL: Verify assignment belongs to tenant
         // if (assignment && assignment.tenant_id !== tenantId) {
@@ -568,6 +673,21 @@ export class PostbackService {
       let payout = parseFloat(offer.affiliate_amount);
       if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
       const conversionAmount = amount ? parseFloat(amount) : offerPayout;
+
+      logger.info({
+        path: 'db',
+        click_id,
+        rcid,
+        tenantId,
+        amount,
+        status,
+        conversionAmount,
+        offerPayout,
+        payout,
+        offerId,
+        publisherId,
+        assignment_id: assignment?.id ?? assignment?.internal_id
+      }, '[POSTBACK] DB path – Payout debug');
 
       // Determine conversion status based on conversion_approval_percentage
       let finalStatus = status;
@@ -718,10 +838,10 @@ export class PostbackService {
       // Update daily stats
       await this.updateDailyStats(offerId, conversionAmount, payout, finalStatus);
 
-      // ✅ CRITICAL: Get publisher with tenant_id filtering
+      // Get publisher by internal id (in-file lookup)
       let publisher = null;
       if (publisherId) {
-        publisher = await publisherService.findById(publisherId, tenantId);
+        publisher = await getPublisherByInternalId(publisherId, tenantId);
 
         // ✅ CRITICAL: Verify publisher belongs to tenant
         if (publisher && publisher.tenant_id !== tenantId) {

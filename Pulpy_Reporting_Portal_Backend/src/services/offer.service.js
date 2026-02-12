@@ -452,7 +452,10 @@ class OfferService {
   }
 
   async getOfferById(id, tenantId = null, internalOnly = false) {
-    if (!id) return null;
+    if (id === undefined || id === null) return null;
+    // When looking up by internal id only, coerce to integer so we never match display_id/public_offer_id by mistake
+    const internalId = internalOnly ? parseInt(id, 10) : id;
+    if (internalOnly && (Number.isNaN(internalId) || internalId < 1)) return null;
 
     // 1. Try Public ID / Display ID first (unless searching strictly by internal ID)
     if (tenantId && !internalOnly) {
@@ -473,13 +476,14 @@ class OfferService {
       }
     }
 
-    // 2. Fallback to internal ID
+    // 2. Internal ID lookup (use internalId when internalOnly to avoid type/coercion issues)
+    const lookupId = internalOnly ? internalId : id;
     let query = `
       SELECT o.*,
       (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
       FROM offers o WHERE o.id = ?
     `;
-    const params = [id];
+    const params = [lookupId];
     if (tenantId) {
       query += ' AND o.tenant_id = ?';
       params.push(tenantId);
