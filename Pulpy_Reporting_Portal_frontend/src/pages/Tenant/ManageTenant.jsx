@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI } from '../../services/api';
+import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
 
 // Icons
@@ -191,7 +192,7 @@ function ManageTenant() {
     if (loading) {
         return (
             <div className="tenant-container">
-                <div className="loading-state">Loading tenants...</div>
+                <SkeletonPage tableRows={8} tableCols={5} />
             </div>
         );
     }

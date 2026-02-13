@@ -265,8 +265,7 @@ export const authAPI = {
 
 // Dashboard API
 export const dashboardAPI = {
-    // Main dashboard data (KPI cards)
-    // Main dashboard data (KPI cards)
+    // Aggregated dashboard - single call for all used data (cards, performance, summary, live offers, offer/pub stats, comparison)
     getDashboard: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard?${queryString}`);
@@ -286,15 +285,15 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance?${queryString}`);
     },
-    // Top affiliates chart
-    getTopAffiliates: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/top-affiliates?${queryString}`);
-    },
     // Top countries
     getTopCountries: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/top-countries?${queryString}`);
+    },
+    // Live offers
+    getLiveOffers: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/live-offers?${queryString}`);
     },
     // Legacy endpoints (keeping for backward compatibility)
     getSummary: async (params = {}) => {
@@ -318,6 +317,16 @@ export const dashboardAPI = {
     getOfferStatistics: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/offer-statistics?${queryString}`);
+    },
+    // Publisher Statistics
+    getPublisherStatistics: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/publisher-statistics?${queryString}`);
+    },
+    // Performance Comparison (current vs previous period)
+    getPerformanceComparison: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/performance-comparison?${queryString}`);
     },
 };
 

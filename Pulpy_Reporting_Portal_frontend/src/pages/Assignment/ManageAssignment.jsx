@@ -4,6 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Assignment.css';
 
 // Icons
@@ -260,10 +261,7 @@ function ManageAssignment() {
     if (loading) {
         return (
             <div className="assignment-page">
-                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
-                    <p>Loading assignments...</p>
-                </div>
+                <SkeletonPage tableRows={8} tableCols={6} />
             </div>
         );
     }

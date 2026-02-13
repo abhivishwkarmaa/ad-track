@@ -4,6 +4,7 @@ import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { advertisersAPI } from '../../services/api';
+import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
 // Icons
@@ -184,10 +185,7 @@ function ManageAdvertiser() {
     if (loading) {
         return (
             <div className="advertiser-page">
-                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
-                    <p>Loading advertisers...</p>
-                </div>
+                <SkeletonPage tableRows={8} tableCols={5} />
             </div>
         );
     }

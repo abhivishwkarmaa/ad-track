@@ -535,7 +535,7 @@ export class DashboardService {
 
   /**
    * Get dashboard cards data matching the UI requirements
-   * Returns: Total Offers, Publishers, Total Clicks, Conversions, Total Revenue, Advertisers
+   * Returns: Total Clicks, Conversions, Total Revenue, Approved Payout
    */
   async getDashboardCards(filters = {}, tenantId) {
     // Handle overload
@@ -547,26 +547,6 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
-
-      // Get total offers count (Global)
-      const [offerRows] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'live' THEN 1 ELSE 0 END) as active
-        FROM offers
-        WHERE status != 'remove' AND tenant_id = ?
-        `, [tenantId]
-      );
-
-      // Get publishers count (Global)
-      const [publisherRows] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
-        FROM publishers
-        WHERE tenant_id = ?
-        `, [tenantId]
-      );
 
       // Get clicks (Current Range)
       const [clickRows] = await pool.query(
@@ -627,8 +607,6 @@ export class DashboardService {
       const [revenueRows] = await pool.query(
         `SELECT 
           COALESCE(SUM(amount), 0) as total_revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as approved_revenue,
-          COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
           COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) as pending_payout
@@ -653,16 +631,6 @@ export class DashboardService {
       const revenueToday = parseFloat(revenueRows[0]?.total_revenue || 0);
       const revenueYesterday = parseFloat(revenuePreviousRows[0]?.revenue || 0);
       const revenueChange = revenueToday - revenueYesterday;
-
-      // Get advertisers count (Global)
-      const [advertiserRows] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
-        FROM advertisers
-        WHERE tenant_id = ?
-        `, [tenantId]
-      );
 
       // Get impressions data (Current Range)
       const [impressionsRows] = await pool.query(
@@ -691,18 +659,6 @@ export class DashboardService {
       const conversionRate = clicksTotal > 0 ? ((totalConversions / clicksTotal) * 100) : 0;
 
       return {
-        offers: {
-          total: parseInt(offerRows[0]?.total || 0),
-          active: parseInt(offerRows[0]?.active || 0),
-          label: 'TOTAL OFFERS',
-          status_label: 'Active'
-        },
-        publishers: {
-          total: parseInt(publisherRows[0]?.total || 0),
-          active: parseInt(publisherRows[0]?.active || 0),
-          label: 'PUBLISHERS',
-          status_label: 'Active'
-        },
         clicks: {
           total: clicksTotal,
           unique: parseInt(clickRows[0]?.unique_clicks || 0),
@@ -734,8 +690,6 @@ export class DashboardService {
         },
         revenue: {
           total: revenueToday,
-          approved: parseFloat(revenueRows[0]?.approved_revenue || 0),
-          pending: parseFloat(revenueRows[0]?.pending_revenue || 0),
           payout: parseFloat(revenueRows[0]?.total_payout || 0),
           approved_payout: parseFloat(revenueRows[0]?.approved_payout || 0),
           pending_payout: parseFloat(revenueRows[0]?.pending_payout || 0),
@@ -749,12 +703,6 @@ export class DashboardService {
           change: revenueChange,
           label: 'TOTAL REVENUE',
           status_label: `Up $${revenueChange.toFixed(2)}`
-        },
-        advertisers: {
-          total: parseInt(advertiserRows[0]?.total || 0),
-          active: parseInt(advertiserRows[0]?.active || 0),
-          label: 'ADVERTISERS',
-          status_label: 'Active'
         }
       };
     } catch (error) {
@@ -1097,12 +1045,10 @@ export class DashboardService {
         ? this.getPerformanceComparison({ date_from, date_to, group_by }, { date_from: previous_from, date_to: previous_to, group_by }, tenantId)
         : Promise.resolve([]);
 
-      // Execute all sub-queries in parallel
+      // Execute only the sub-queries used by the Dashboard UI (no topOffers, topAffiliates)
       const [
         cards,
         performanceChart,
-        topOffers,
-        topAffiliates,
         summary,
         summaryPrevious,
         liveOffers,
@@ -1112,8 +1058,6 @@ export class DashboardService {
       ] = await Promise.all([
         this.getDashboardCards({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
         this.getPerformanceChart({ date_from, date_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
-        this.getTopOffers({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top offers:', err); return []; }),
-        this.getTopAffiliates({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching top affiliates:', err); return { data: [] }; }),
         summaryPromise,
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
@@ -1125,8 +1069,6 @@ export class DashboardService {
       const result = {
         cards,
         performanceChart,
-        topOffers,
-        topAffiliates,
         summary,
         liveOffers,
         publisherStatistics,

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI } from '../../services/api';
+import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
 
 // Icons
@@ -157,10 +158,7 @@ function OfferList() {
     if (loading) {
         return (
             <div className="offer-page">
-                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
-                    <p>Loading offers...</p>
-                </div>
+                <SkeletonPage tableRows={8} tableCols={10} />
             </div>
         );
     }

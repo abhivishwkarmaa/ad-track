@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { publishersAPI, dashboardAPI } from '../../services/api';
+import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Affiliate.css';
 
 function AffiliateDetail() {
@@ -57,10 +58,7 @@ function AffiliateDetail() {
     if (fetchLoading) {
         return (
             <div className="affiliate-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
-                    <p>Loading publisher...</p>
-                </div>
+                <SkeletonDetail sections={3} />
             </div>
         );
     }

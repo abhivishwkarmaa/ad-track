@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI, advertisersAPI, assignmentsAPI, publishersAPI } from '../../services/api';
+import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import './Offer.css';
 
@@ -822,10 +823,7 @@ function EditOffer() {
     if (loadingOffer) {
         return (
             <div className="offer-page">
-                <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '20px' }}></div>
-                    <p>Loading offer...</p>
-                </div>
+                <SkeletonDetail sections={4} />
             </div>
         );
     }

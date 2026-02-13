@@ -57,12 +57,6 @@ const PlusIcon = () => (
     </svg>
 );
 
-const ArrowUpIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="18 15 12 9 6 15" />
-    </svg>
-);
-
 const CalendarIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -84,18 +78,6 @@ const ListIcon = () => (
 );
 
 // --- HELPER COMPONENTS ---
-const TrendIndicator = ({ current, previous }) => {
-    if (!previous || previous === 0) return null;
-    const change = ((current - previous) / previous) * 100;
-    const isPositive = change >= 0;
-    return (
-        <div className={`stat-trend ${isPositive ? 'up' : 'down'}`}>
-            <ArrowUpIcon style={{ transform: isPositive ? 'none' : 'rotate(180deg)' }} />
-            <span>{Math.abs(change).toFixed(1)}%</span>
-        </div>
-    );
-};
-
 const formatNumber = (num) => {
     if (num === null || num === undefined) return '0';
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -106,16 +88,83 @@ const formatCurrency = (amount) => {
     return `$${parseFloat(amount).toFixed(2)}`;
 };
 
+// --- SKELETON COMPONENTS ---
+const SkeletonStatCard = () => (
+    <div className="stat-card skeleton-stat-card">
+        <div className="skeleton" style={{ width: 36, height: 36, borderRadius: 6, marginBottom: 10 }} />
+        <div className="skeleton" />
+        <div className="skeleton" />
+    </div>
+);
+
+const SkeletonChart = () => (
+    <div className="skeleton-chart">
+        <div className="skeleton" style={{ width: '100%', height: '100%' }} />
+    </div>
+);
+
+const SkeletonList = ({ rows = 5 }) => (
+    <div className="offers-list">
+        {Array.from({ length: rows }).map((_, i) => (
+            <div key={i} className="skeleton-list-item">
+                <div className="skeleton" />
+                <div className="skeleton" />
+            </div>
+        ))}
+    </div>
+);
+
+const SkeletonTable = ({ rows = 5, cols = 8 }) => (
+    <div className="activity-table">
+        <div className="table-header" style={{ gridTemplateColumns: `minmax(150px, 2fr) repeat(${cols - 1}, 1fr)` }}>
+            {Array.from({ length: cols }).map((_, i) => (
+                <span key={i} className="skeleton" style={{ height: 12, display: 'block' }} />
+            ))}
+        </div>
+        {Array.from({ length: rows }).map((_, ri) => (
+            <div key={ri} className="skeleton-table-row table-row" style={{ gridTemplateColumns: `minmax(150px, 2fr) repeat(${cols - 1}, 1fr)` }}>
+                {Array.from({ length: cols }).map((_, ci) => (
+                    <div key={ci} className="skeleton" style={{ height: 12 }} />
+                ))}
+            </div>
+        ))}
+    </div>
+);
+
+const SkeletonSummary = () => (
+    <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginTop: 'auto' }}>
+        {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton-summary-item summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                <div className="skeleton" />
+                <div className="skeleton" />
+            </div>
+        ))}
+    </div>
+);
+
 // --- MAIN DASHBOARD COMPONENT ---
 function Dashboard() {
     const { user } = useAuth();
     const { refreshKey } = useRefresh();
 
-    // Single consolidated state
-    const [dashboardData, setDashboardData] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [dateFilter, setDateFilter] = useState('today');
+
+    // Per-section state for progressive loading - show data as each API returns
+    const [cards, setCards] = useState(null);
+    const [loadingCards, setLoadingCards] = useState(true);
+    const [performanceChart, setPerformanceChart] = useState([]);
+    const [loadingPerformance, setLoadingPerformance] = useState(true);
+    const [summary, setSummary] = useState({});
+    const [summaryPrevious, setSummaryPrevious] = useState(null);
+    const [loadingSummary, setLoadingSummary] = useState(true);
+    const [liveOffers, setLiveOffers] = useState([]);
+    const [loadingLiveOffers, setLoadingLiveOffers] = useState(true);
+    const [publisherStatistics, setPublisherStatistics] = useState([]);
+    const [loadingPublisherStats, setLoadingPublisherStats] = useState(true);
+    const [offerStatistics, setOfferStatistics] = useState([]);
+    const [loadingOfferStats, setLoadingOfferStats] = useState(true);
+    const [performanceComparison, setPerformanceComparison] = useState([]);
+    const [loadingComparison, setLoadingComparison] = useState(true);
 
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
@@ -203,63 +252,77 @@ function Dashboard() {
         };
     }, [dateFilter]);
 
-    // ✅ SINGLE API CALL
+    const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
+    const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
+
+    // Progressive loading - jo API pehle ready ho uska data dikha do, sab ka wait mat karo
     useEffect(() => {
-        let isMounted = true;
+        let cancelled = false;
+        const mountCheck = () => !cancelled;
 
-        const fetchDashboard = async () => {
-            try {
-                setLoading(true);
-                setError(null);
+        const params = { ...baseParams, group_by: groupBy };
+        const prevParams = previousRange
+            ? { previous_from: previousRange.from, previous_to: previousRange.to }
+            : {};
 
-                // One call to get EVERYTHING (include previous period for Performance Summary comparison)
-                const params = {
-                    date_from: dateRange.from,
-                    date_to: dateRange.to,
-                    group_by: (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day',
-                    limit: 10
-                };
-                if (previousRange) {
-                    params.previous_from = previousRange.from;
-                    params.previous_to = previousRange.to;
-                }
-                const response = await dashboardAPI.getDashboard(params);
+        setLoadingCards(true);
+        setLoadingPerformance(true);
+        setLoadingSummary(true);
+        setLoadingLiveOffers(true);
+        setLoadingPublisherStats(true);
+        setLoadingOfferStats(true);
+        setLoadingComparison(true);
 
-                if (isMounted) {
-                    if (response.success && response.data) {
-                        setDashboardData(response.data);
-                    } else {
-                        throw new Error(response.message || 'Failed to load dashboard data');
-                    }
-                }
-            } catch (err) {
-                if (isMounted) {
-                    console.error('Dashboard Load Error:', err);
-                    setError(err.message || 'Failed to connect to server');
-                }
-            } finally {
-                if (isMounted) setLoading(false);
-            }
-        };
+        dashboardAPI.getDashboardCards(baseParams)
+            .then(res => mountCheck() && res.success && setCards(res.data || {}))
+            .catch(err => mountCheck() && console.error('Cards error:', err))
+            .finally(() => mountCheck() && setLoadingCards(false));
 
-        fetchDashboard();
+        dashboardAPI.getPerformance({ ...baseParams, group_by: groupBy })
+            .then(res => mountCheck() && res.success && setPerformanceChart(res.data || []))
+            .catch(err => mountCheck() && console.error('Performance error:', err))
+            .finally(() => mountCheck() && setLoadingPerformance(false));
 
-        return () => { isMounted = false; };
-    }, [dateRange, refreshKey]);
+        dashboardAPI.getSummary(baseParams)
+            .then(res => mountCheck() && res.success && setSummary(res.data || {}))
+            .catch(err => mountCheck() && console.error('Summary error:', err))
+            .finally(() => mountCheck() && setLoadingSummary(false));
 
-    // Safely extract data parts with defaults
-    const {
-        cards = {},
-        topOffers = [],
-        performanceChart = [],
-        topAffiliates = {},
-        summary = {},
-        summary_previous = null, // Previous period summary for comparison
-        liveOffers = [], // Live offers list
-        publisherStatistics = [], // Publisher stats table
-        offerStatistics = [], // Offer stats table
-        performanceComparison = [] // Comparison chart data
-    } = dashboardData || {};
+        if (previousRange) {
+            dashboardAPI.getSummary({ date_from: previousRange.from, date_to: previousRange.to })
+                .then(res => mountCheck() && res.success && setSummaryPrevious(res.data || null))
+                .catch(err => mountCheck() && console.error('Summary previous error:', err));
+        } else {
+            setSummaryPrevious(null);
+        }
+
+        dashboardAPI.getLiveOffers({ limit: 5 })
+            .then(res => mountCheck() && res.success && setLiveOffers(res.data || []))
+            .catch(err => mountCheck() && console.error('Live offers error:', err))
+            .finally(() => mountCheck() && setLoadingLiveOffers(false));
+
+        dashboardAPI.getPublisherStatistics(baseParams)
+            .then(res => mountCheck() && res.success && setPublisherStatistics(res.data || []))
+            .catch(err => mountCheck() && console.error('Publisher stats error:', err))
+            .finally(() => mountCheck() && setLoadingPublisherStats(false));
+
+        dashboardAPI.getOfferStatistics(baseParams)
+            .then(res => mountCheck() && res.success && setOfferStatistics(res.data || []))
+            .catch(err => mountCheck() && console.error('Offer stats error:', err))
+            .finally(() => mountCheck() && setLoadingOfferStats(false));
+
+        if (previousRange) {
+            dashboardAPI.getPerformanceComparison({ ...baseParams, ...prevParams, group_by: groupBy })
+                .then(res => mountCheck() && res.success && setPerformanceComparison(res.data || []))
+                .catch(err => mountCheck() && console.error('Comparison error:', err))
+                .finally(() => mountCheck() && setLoadingComparison(false));
+        } else {
+            setPerformanceComparison([]);
+            setLoadingComparison(false);
+        }
+
+        return () => { cancelled = true; };
+    }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
 
     const processChartData = (data) => {
         if (!data || data.length === 0) return [];
@@ -277,32 +340,7 @@ function Dashboard() {
     const processedPerformanceChart = useMemo(() => processChartData(performanceChart), [performanceChart]);
     const processedComparisonChart = useMemo(() => processChartData(performanceComparison), [performanceComparison]);
 
-    // For Top Publishers list (Handle different structure if any)
-    const publisherList = topAffiliates.data || [];
-
-    if (loading && !dashboardData) {
-        return (
-            <div className="dashboard">
-                <div className="dashboard-loading">
-                    <div className="spinner"></div>
-                    <p>Loading dashboard...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (error && !dashboardData) {
-        return (
-            <div className="dashboard">
-                <div className="dashboard-error">
-                    <p>Error: {error}</p>
-                    <button onClick={() => window.location.reload()}>Retry</button>
-                </div>
-            </div>
-        );
-    }
-
-
+    const cardsData = cards || {};
 
     const todayStr = new Date().toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
@@ -337,172 +375,106 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* KPI Cards */}
-            <div className="stats-grid">
-                <div className="stat-card blue">
-                    <div className="stat-icon"><OfferIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{cards.offers?.total || 0}</span>
-                        <span className="stat-label">Total Offers</span>
-                    </div>
-                    <div className="stat-badge">{cards.offers?.active || 0} Active</div>
-                </div>
+            {/* Quick Actions - Static, on top */}
+            <div className="quick-actions-row">
+                <Link to="/offer/new" className="action-btn">
+                    <div className="action-icon blue"><PlusIcon /></div>
+                    <span>New Offer</span>
+                </Link>
+                <Link to="/affiliate/new" className="action-btn">
+                    <div className="action-icon green"><AffiliateIcon /></div>
+                    <span>Add Publisher</span>
+                </Link>
+                <Link to="/advertiser/new" className="action-btn">
+                    <div className="action-icon orange"><AdvertiserIcon /></div>
+                    <span>Add Advertiser</span>
+                </Link>
+                <Link to="/offer/list" className="action-btn">
+                    <div className="action-icon purple"><ListIcon /></div>
+                    <span>View All Offers</span>
+                </Link>
+            </div>
 
-                <div className="stat-card green">
-                    <div className="stat-icon"><AffiliateIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{cards.publishers?.total || 0}</span>
-                        <span className="stat-label">Publishers</span>
+            {/* KPI Cards - One box like Quick Actions */}
+            <div className="stats-cards-box">
+                {loadingCards ? (
+                    <div className="stats-cards-inner">
+                        {Array.from({ length: 7 }).map((_, i) => (
+                            <div key={i} className="stat-item stat-item-skeleton">
+                                <div className="stat-item-icon skeleton" style={{ width: 32, height: 32, borderRadius: 6 }} />
+                                <div className="stat-item-content">
+                                    <div className="skeleton" style={{ height: 18, width: 60, marginBottom: 4 }} />
+                                    <div className="skeleton" style={{ height: 12, width: 80 }} />
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                    <div className="stat-badge">{cards.publishers?.active || 0} Active</div>
-                </div>
-
-                <div className="stat-card purple">
-                    <div className="stat-icon"><ClickIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatNumber(cards.clicks?.total || 0)}</span>
-                        <span className="stat-label">Total Clicks</span>
+                ) : (
+                    <div className="stats-cards-inner">
+                        <div className="stat-item stat-item-purple">
+                            <div className="stat-item-icon"><ClickIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatNumber(cardsData.clicks?.total || 0)}</span>
+                                <span className="stat-item-label">Total Clicks</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-teal">
+                            <div className="stat-item-icon"><ConversionIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.total || 0)}</span>
+                                <span className="stat-item-label">Total Conversions</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-green">
+                            <div className="stat-item-icon"><ConversionIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.approved || 0)}</span>
+                                <span className="stat-item-label">Approved Conversions</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-amber">
+                            <div className="stat-item-icon"><ConversionIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.pending || 0)}</span>
+                                <span className="stat-item-label">Pending Conversions</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-red">
+                            <div className="stat-item-icon"><RevenueIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatCurrency(cardsData.revenue?.total || 0)}</span>
+                                <span className="stat-item-label">Total Revenue</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-green">
+                            <div className="stat-item-icon"><RevenueIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatCurrency(cardsData.revenue?.approved_payout || 0)}</span>
+                                <span className="stat-item-label">Approved Payout</span>
+                            </div>
+                        </div>
+                        <div className="stat-item stat-item-profit">
+                            <div className="stat-item-icon"><RevenueIcon /></div>
+                            <div className="stat-item-content">
+                                <span className="stat-item-value">{formatCurrency((cardsData.revenue?.total || 0) - (cardsData.revenue?.approved_payout || 0))}</span>
+                                <span className="stat-item-label">Profit</span>
+                            </div>
+                        </div>
                     </div>
-                    <TrendIndicator current={cards.clicks?.total || 0} previous={cards.clicks?.yesterday || 0} />
-                    <div className="stat-badge">{formatNumber(cards.clicks?.unique || 0)} Unique</div>
-                </div>
-
-                <div className="stat-card teal">
-                    <div className="stat-icon"><ConversionIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatNumber(cards.conversions?.total || 0)}</span>
-                        <span className="stat-label">Total Conversions</span>
-                    </div>
-                    <TrendIndicator current={cards.conversions?.total || 0} previous={cards.conversions?.yesterday || 0} />
-                    <div className="stat-badge">
-                        {cards.conversions?.approved || 0} Approved
-                    </div>
-                </div>
-
-                {/* Approved Conversions - Green accent */}
-                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
-                    <div className="stat-icon" style={{ color: '#4CAF50' }}><ConversionIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatNumber(cards.conversions?.approved || 0)}</span>
-                        <span className="stat-label">Approved Conversions</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
-                        ✓ Confirmed
-                    </div>
-                </div>
-
-                {/* Pending Conversions - Amber accent */}
-                <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
-                    <div className="stat-icon" style={{ color: '#FF9800' }}><ConversionIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatNumber(cards.conversions?.pending || 0)}</span>
-                        <span className="stat-label">Pending Conversions</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
-                        ⏳ Awaiting
-                    </div>
-                </div>
-
-                <div className="stat-card red">
-                    <div className="stat-icon"><RevenueIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{formatCurrency(cards.revenue?.total || 0)}</span>
-                        <span className="stat-label">Total Revenue</span>
-                    </div>
-                    <div className="stat-badge">
-                        Profit: {formatCurrency((cards.revenue?.total || 0) - (cards.revenue?.approved_payout || 0))}
-                    </div>
-                </div>
-
-                {/* Approved Revenue - Green accent */}
-                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
-                    <div className="stat-icon" style={{ color: '#4CAF50' }}><RevenueIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatCurrency(cards.revenue?.approved || 0)}</span>
-                        <span className="stat-label">Approved Revenue</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
-                        ✓ Confirmed
-                    </div>
-                </div>
-
-                {/* Pending Revenue - Amber accent */}
-                <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
-                    <div className="stat-icon" style={{ color: '#FF9800' }}><RevenueIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatCurrency(cards.revenue?.pending || 0)}</span>
-                        <span className="stat-label">Pending Revenue</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
-                        ⏳ Awaiting
-                    </div>
-                </div>
-
-                {/* Approved Payout - Green accent */}
-                <div className="stat-card" style={{ borderLeft: '4px solid #4CAF50' }}>
-                    <div className="stat-icon" style={{ color: '#4CAF50' }}><RevenueIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#4CAF50' }}>{formatCurrency(cards.revenue?.approved_payout || 0)}</span>
-                        <span className="stat-label">Approved Payout</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#E8F5E9', color: '#4CAF50' }}>
-                        ✓ Confirmed
-                    </div>
-                </div>
-
-                {/* Pending Payout - Amber accent */}
-                {/* <div className="stat-card" style={{ borderLeft: '4px solid #FF9800' }}>
-                    <div className="stat-icon" style={{ color: '#FF9800' }}><RevenueIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value" style={{ color: '#FF9800' }}>{formatCurrency(cards.revenue?.pending_payout || 0)}</span>
-                        <span className="stat-label">Pending Payout</span>
-                    </div>
-                    <div className="stat-badge" style={{ background: '#FFF3E0', color: '#FF9800' }}>
-                        ⏳ Awaiting
-                    </div>
-                </div> */}
-
-                <div className="stat-card orange">
-                    <div className="stat-icon"><AdvertiserIcon /></div>
-                    <div className="stat-info">
-                        <span className="stat-value">{cards.advertisers?.total || 0}</span>
-                        <span className="stat-label">Advertisers</span>
-                    </div>
-                    <div className="stat-badge">{cards.advertisers?.active || 0} Active</div>
-                </div>
+                )}
             </div>
 
             <div className="dashboard-content">
-                {/* Quick Actions */}
-                <div className="dashboard-card quick-actions-card">
-                    <div className="card-header"><h3>Quick Actions</h3></div>
-                    <div className="quick-actions-grid">
-                        <Link to="/offer/new" className="action-btn">
-                            <div className="action-icon blue"><PlusIcon /></div>
-                            <span>New Offer</span>
-                        </Link>
-                        <Link to="/affiliate/new" className="action-btn">
-                            <div className="action-icon green"><AffiliateIcon /></div>
-                            <span>Add Publisher</span>
-                        </Link>
-                        <Link to="/advertiser/new" className="action-btn">
-                            <div className="action-icon orange"><AdvertiserIcon /></div>
-                            <span>Add Advertiser</span>
-                        </Link>
-                        <Link to="/offer/list" className="action-btn">
-                            <div className="action-icon purple"><ListIcon /></div>
-                            <span>View All Offers</span>
-                        </Link>
-                    </div>
-                </div>
-
                 {/* Performance Chart */}
                 <div className="dashboard-card chart-card">
                     <div className="card-header">
                         <h3>Performance Chart</h3>
                         <span className="period-indicator">{periodLabels.current}</span>
                     </div>
-                    <div style={{ width: '100%', height: 300, minHeight: 300 }}> {/* Ensure explicit minHeight */}
+                    <div className="chart-wrapper">
+                        {loadingPerformance ? (
+                            <SkeletonChart />
+                        ) : (
                         <ResponsiveContainer debounce={300}>
                             <AreaChart data={processedPerformanceChart}>
                                 <defs>
@@ -523,6 +495,7 @@ function Dashboard() {
                                 <Area type="monotone" dataKey="conversions" stroke="#82ca9d" strokeWidth={3} fillOpacity={1} fill="url(#colorConversions)" animationDuration={1000} animationEasing="ease-out" />
                             </AreaChart>
                         </ResponsiveContainer>
+                        )}
                     </div>
                 </div>
 
@@ -534,7 +507,9 @@ function Dashboard() {
                         <h3>Live Offers</h3>
                         <Link to="/offer/list" className="view-all">View All</Link>
                     </div>
-                    {liveOffers && liveOffers.length > 0 ? (
+                    {loadingLiveOffers ? (
+                        <SkeletonList rows={5} />
+                    ) : liveOffers && liveOffers.length > 0 ? (
                         <div className="offers-list">
                             {liveOffers.slice(0, 5).map(offer => (
                                 <Link to={`/offer/detail/${offer.id}`} key={offer.id} className="offer-row" style={{ textDecoration: 'none', color: 'inherit', display: 'flex' }}>
@@ -551,27 +526,6 @@ function Dashboard() {
                     ) : <div className="no-data">No live offers</div>}
                 </div>
 
-                {/* Top Publishers */}
-                <div className="dashboard-card affiliates-card">
-                    <div className="card-header">
-                        <h3>Top Publishers</h3>
-                        <Link to="/affiliate/manage" className="view-all">View All</Link>
-                    </div>
-                    {publisherList && publisherList.length > 0 ? (
-                        <div className="affiliates-list">
-                            {publisherList.map((aff, idx) => (
-                                <div key={aff.publisher_id || idx} className="affiliate-row">
-                                    <div className="affiliate-rank">#{idx + 1}</div>
-                                    <div className="affiliate-info">
-                                        <span className="affiliate-name">{aff.publisher_name}</span>
-                                        <span className="affiliate-email">{formatNumber(aff.conversions)} conv</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : <div className="no-data">No active publishers</div>}
-                </div>
-
                 {/* Summary — current period vs previous period */}
                 <div className="dashboard-card summary-reports-card" style={{ display: 'flex', flexDirection: 'column' }}>
                     <div className="card-header">
@@ -580,8 +534,12 @@ function Dashboard() {
                     </div>
 
                     {/* Performance Comparison Chart (NOW AT TOP) */}
-                    {performanceComparison && performanceComparison.length > 0 ? (
-                        <div className="chart-container" style={{ marginTop: '0px', marginBottom: '16px', height: '280px', width: '100%', flexShrink: 0, minHeight: 280 }}> {/* explicit minHeight */}
+                    {loadingComparison ? (
+                        <div className="chart-container summary-chart">
+                            <SkeletonChart />
+                        </div>
+                    ) : performanceComparison && performanceComparison.length > 0 ? (
+                        <div className="chart-container summary-chart">
                             <ResponsiveContainer width="100%" height="100%" debounce={300}>
                                 <AreaChart data={processedComparisonChart} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
                                     <defs>
@@ -644,17 +602,20 @@ function Dashboard() {
                                 </AreaChart>
                             </ResponsiveContainer>
                         </div>
-                    ) : <div className="no-data" style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No comparison data available</div>}
+                    ) : <div className="no-data summary-no-data">No comparison data available</div>}
 
                     {/* KPI Stats (BELOW CHART - COMPACT) */}
-                    <div className="summary-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginTop: 'auto' }}>
+                    {loadingSummary ? (
+                        <SkeletonSummary />
+                    ) : (
+                    <div className="summary-grid summary-kpi-grid">
                         <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
                             <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Clicks</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.unique_clicks)}</span>
-                                {summary_previous != null && (
+                                {summaryPrevious != null && (
                                     <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatNumber(summary_previous.unique_clicks)}
+                                        prev: {formatNumber(summaryPrevious.unique_clicks)}
                                     </span>
                                 )}
                             </div>
@@ -663,9 +624,9 @@ function Dashboard() {
                             <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Conversions</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.conversions)}</span>
-                                {summary_previous != null && (
+                                {summaryPrevious != null && (
                                     <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatNumber(summary_previous.conversions)}
+                                        prev: {formatNumber(summaryPrevious.conversions)}
                                     </span>
                                 )}
                             </div>
@@ -674,9 +635,9 @@ function Dashboard() {
                             <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Revenue</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.revenue)}</span>
-                                {summary_previous != null && (
+                                {summaryPrevious != null && (
                                     <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatCurrency(summary_previous.revenue)}
+                                        prev: {formatCurrency(summaryPrevious.revenue)}
                                     </span>
                                 )}
                             </div>
@@ -685,14 +646,15 @@ function Dashboard() {
                             <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Profit</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <span className="summary-value profit" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.profit)}</span>
-                                {summary_previous != null && (
+                                {summaryPrevious != null && (
                                     <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatCurrency(summary_previous.profit)}
+                                        prev: {formatCurrency(summaryPrevious.profit)}
                                     </span>
                                 )}
                             </div>
                         </div>
                     </div>
+                    )}
                 </div>
 
                 {/* Offer Statistics (Moved Here) */}
@@ -701,7 +663,9 @@ function Dashboard() {
                         <h3>Offer Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
-                    {offerStatistics && offerStatistics.length > 0 ? (
+                    {loadingOfferStats ? (
+                        <SkeletonTable rows={5} cols={8} />
+                    ) : offerStatistics && offerStatistics.length > 0 ? (
                         <div className="activity-table">
                             <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
                                 <span>Offer</span>
@@ -744,7 +708,9 @@ function Dashboard() {
                         <h3>Publisher Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
-                    {publisherStatistics && publisherStatistics.length > 0 ? (
+                    {loadingPublisherStats ? (
+                        <SkeletonTable rows={5} cols={9} />
+                    ) : publisherStatistics && publisherStatistics.length > 0 ? (
                         <div className="activity-table">
                             <div className="table-header" style={{ gridTemplateColumns: 'minmax(150px, 2fr) 1fr 1fr 1fr 1fr 1.5fr 1.5fr 1.5fr' }}>
                                 <span>Publisher</span>
@@ -780,7 +746,7 @@ function Dashboard() {
                     ) : <div className="no-data">No publisher statistics available</div>}
                 </div>
             </div>
-        </div >
+        </div>
     );
 }
 

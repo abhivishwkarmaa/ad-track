@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
+import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
 
 function EditTenant() {
@@ -163,7 +164,7 @@ function EditTenant() {
     if (loading) {
         return (
             <div className="tenant-container">
-                <div className="loading-state">Loading tenant...</div>
+                <SkeletonDetail sections={3} />
             </div>
         );
     }

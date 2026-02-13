@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { advertisersAPI, dashboardAPI } from '../../services/api';
+import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
 function AdvertiserDetail() {
@@ -97,10 +98,7 @@ function AdvertiserDetail() {
     if (fetchLoading) {
         return (
             <div className="advertiser-page">
-                <div className="loading-spinner" style={{ textAlign: 'center', padding: '50px' }}>
-                    <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
-                    <p>Loading advertiser...</p>
-                </div>
+                <SkeletonDetail sections={3} />
             </div>
         );
     }

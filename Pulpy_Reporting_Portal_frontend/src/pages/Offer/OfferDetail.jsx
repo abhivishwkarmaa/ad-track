@@ -4,6 +4,7 @@ import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -209,31 +210,9 @@ function OfferDetail() {
 
     if (loading) {
         return (
-            <div
-                className="offer-page"
-                style={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    minHeight: '50vh'
-                }}
-            >
-                <div className="loading-spinner" style={{ textAlign: 'center' }}>
-                    <div
-                        style={{
-                            width: '40px',
-                            height: '40px',
-                            border: '4px solid #f3f3f3',
-                            borderTop: '4px solid #2196F3',
-                            borderRadius: '50%',
-                            animation: 'spin 1s linear infinite',
-                            margin: '0 auto 20px'
-                        }}
-                    />
-                    <p>Loading offer details...</p>
-                </div>
+            <div className="offer-page">
+                <SkeletonDetail sections={4} />
             </div>
-
         );
     }
 

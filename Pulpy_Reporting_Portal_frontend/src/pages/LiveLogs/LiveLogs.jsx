@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
 
 // Icon for Reports navigation
@@ -186,6 +187,9 @@ const LiveLogs = () => {
             </div>
 
             <div className="logs-table-container">
+                {loading ? (
+                    <SkeletonTable rows={10} cols={activeTab === 'clicks' ? 9 : 8} />
+                ) : (
                 <table className="logs-table">
                     <thead>
                         {activeTab === 'clicks' ? (
@@ -255,6 +259,7 @@ const LiveLogs = () => {
                         ))}
                     </tbody>
                 </table>
+                )}
             </div>
         </div>
     );

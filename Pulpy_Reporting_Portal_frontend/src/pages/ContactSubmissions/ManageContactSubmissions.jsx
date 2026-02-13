@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { contactSubmissionsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
+import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './ContactSubmissions.css';
 
 // Icons
@@ -240,10 +241,7 @@ function ManageContactSubmissions() {
 
             {/* Table */}
             {loading ? (
-                <div className="contact-loading">
-                    <div className="spinner"></div>
-                    <p>Loading contact submissions...</p>
-                </div>
+                <SkeletonTable rows={8} cols={6} />
             ) : submissions.length === 0 ? (
                 <div className="contact-empty">
                     <EmailIcon />

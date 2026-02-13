@@ -307,6 +307,74 @@ export class DashboardController {
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
+
+  async getPublisherStatistics(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {
+        limit: request.query.limit,
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+      };
+
+      const data = await dashboardService.getPublisherStatistics(filters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getPublisherStatistics error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getPerformanceComparison(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const {
+        date_from,
+        date_to,
+        previous_from,
+        previous_to,
+        group_by = 'day',
+      } = request.query;
+
+      if (!previous_from || !previous_to) {
+        return reply.send({
+          success: true,
+          data: [],
+        });
+      }
+
+      const currentFilters = { date_from, date_to, group_by };
+      const previousFilters = { date_from: previous_from, date_to: previous_to, group_by };
+
+      const data = await dashboardService.getPerformanceComparison(currentFilters, previousFilters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getPerformanceComparison error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
 }
 
 export default new DashboardController();

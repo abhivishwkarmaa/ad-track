@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI, authAPI, getAccessToken } from '../../services/api';
+import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './Reports.css';
 
 // Icons
@@ -460,10 +461,7 @@ function DetailedReports() {
 
             <div className="reports-table-container">
                 {loading ? (
-                    <div className="loading-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '50px', width: '100%', minHeight: '300px' }}>
-                        <div style={{ width: '40px', height: '40px', border: '4px solid #f3f3f3', borderTop: '4px solid #2196F3', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' }}></div>
-                        <p>Loading...</p>
-                    </div>
+                    <SkeletonTable rows={10} cols={Math.max(tableColumns.length, 6)} />
                 ) : (
                     <table className="reports-table">
                         <thead>
