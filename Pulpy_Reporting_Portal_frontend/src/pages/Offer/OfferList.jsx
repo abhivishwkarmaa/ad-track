@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
@@ -49,7 +49,7 @@ const AlertIcon = () => (
 function OfferList() {
 
     const toast = useToast();
-    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { refreshKey } = useRefresh();
     const [offers, setOffers] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -57,22 +57,45 @@ function OfferList() {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [deleteModal, setDeleteModal] = useState({ open: false, offer: null });
-    const [currentPage, setCurrentPage] = useState(1);
+    const currentPage = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const itemsPerPage = 10;
+    const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+    const [searchDebounced, setSearchDebounced] = useState('');
     const [updatingStatus, setUpdatingStatus] = useState({});
+    const prevSearchAndFilter = useRef({ search: searchDebounced, filter: statusFilter });
 
-    // Fetch offers data
+    useEffect(() => {
+        const t = setTimeout(() => setSearchDebounced(searchTerm), 400);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    useEffect(() => {
+        const prev = prevSearchAndFilter.current;
+        const searchChanged = prev.search !== searchDebounced;
+        const filterChanged = prev.filter !== statusFilter;
+        prevSearchAndFilter.current = { search: searchDebounced, filter: statusFilter };
+        if (searchChanged || filterChanged) {
+            setSearchParams((p) => {
+                const next = new URLSearchParams(p);
+                next.set('page', '1');
+                return next;
+            }, { replace: true });
+        }
+    }, [searchDebounced, statusFilter]);
+
     useEffect(() => {
         const fetchOffers = async () => {
             try {
                 setLoading(true);
                 setError(null);
-                const response = await offersAPI.getOffers({
-                    page: 1,
-                    limit: 100 // Get more offers for client-side filtering
-                });
+                const params = { page: currentPage, limit: itemsPerPage };
+                if (searchDebounced) params.search = searchDebounced;
+                if (statusFilter !== 'all') params.type = statusFilter;
+
+                const response = await offersAPI.getOffers(params);
                 if (response.success) {
-                    setOffers(response.data);
+                    setOffers(response.data || []);
+                    setPagination(response.pagination || { total: 0, totalPages: 1 });
                 } else {
                     setError('Failed to load offers');
                 }
@@ -85,21 +108,9 @@ function OfferList() {
         };
 
         fetchOffers();
-    }, [refreshKey]);
+    }, [currentPage, searchDebounced, statusFilter, refreshKey]);
 
-    const filteredOffers = offers.filter(offer => {
-        const matchesSearch = offer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (offer.advertiser_id && offer.advertiser_id.toString().includes(searchTerm)) ||
-            (offer.public_offer_id && offer.public_offer_id.toString().includes(searchTerm)) ||
-            (offer.display_id && offer.display_id.toString().includes(searchTerm)) ||
-            (offer.id && offer.id.toString().includes(searchTerm));
-        const matchesStatus = statusFilter === 'all' || offer.status.toLowerCase() === statusFilter.toLowerCase();
-        return matchesSearch && matchesStatus;
-    });
-
-    const totalPages = Math.ceil(filteredOffers.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const paginatedOffers = filteredOffers.slice(startIndex, startIndex + itemsPerPage);
+    const { total, totalPages } = pagination;
 
     const handleDelete = (offer) => {
         setDeleteModal({ open: true, offer });
@@ -113,13 +124,20 @@ function OfferList() {
                 toast.success('Offer archived successfully');
                 setDeleteModal({ open: false, offer: null });
 
-                // Refresh offers data after deletion
-                const response = await offersAPI.getOffers({
-                    page: 1,
-                    limit: 100
-                });
+                const params = { page: currentPage, limit: itemsPerPage };
+                if (searchDebounced) params.search = searchDebounced;
+                if (statusFilter !== 'all') params.type = statusFilter;
+                const response = await offersAPI.getOffers(params);
                 if (response.success) {
-                    setOffers(response.data);
+                    setOffers(response.data || []);
+                    setPagination(response.pagination || pagination);
+                    if (response.data?.length === 0 && currentPage > 1) {
+                        setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            return next;
+                        }, { replace: true });
+                    }
                 }
             } catch (err) {
                 console.error('Delete error:', err);
@@ -136,13 +154,13 @@ function OfferList() {
             if (response.success) {
                 toast.success('Offer status updated successfully');
 
-                // Refresh offers data after status update
-                const offersResponse = await offersAPI.getOffers({
-                    page: 1,
-                    limit: 100
-                });
+                const params = { page: currentPage, limit: itemsPerPage };
+                if (searchDebounced) params.search = searchDebounced;
+                if (statusFilter !== 'all') params.type = statusFilter;
+                const offersResponse = await offersAPI.getOffers(params);
                 if (offersResponse.success) {
-                    setOffers(offersResponse.data);
+                    setOffers(offersResponse.data || []);
+                    setPagination(offersResponse.pagination || pagination);
                 }
             } else {
                 toast.error(response.message || 'Failed to update offer status');
@@ -232,14 +250,14 @@ function OfferList() {
                         </tr>
                     </thead>
                     <tbody>
-                        {paginatedOffers.length === 0 ? (
+                        {offers.length === 0 ? (
                             <tr>
                                 <td colSpan="10" style={{ textAlign: 'center', padding: '40px' }}>
                                     No offers found
                                 </td>
                             </tr>
                         ) : (
-                            paginatedOffers.map((offer) => (
+                            offers.map((offer) => (
                                 <tr key={offer.id}>
                                     <td>
                                         <Link to={`/offer/detail/${offer.public_offer_id || offer.display_id}`} className="offer-row-link" style={{ position: 'absolute', width: '100%', height: '100%', left: 0, top: 0, opacity: 0, zIndex: 1 }}></Link>
@@ -322,32 +340,51 @@ function OfferList() {
                     </tbody>
                 </table>
 
-                {filteredOffers.length > itemsPerPage && (
+                {total > 0 && (
                     <div className="offer-pagination">
                         <div className="offer-pagination-info">
-                            Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredOffers.length)} of {filteredOffers.length} entries
+                            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, total)} of {total} entries
                         </div>
                         <div className="offer-pagination-buttons">
                             <button
                                 className="offer-pagination-btn"
                                 disabled={currentPage === 1}
-                                onClick={() => setCurrentPage(currentPage - 1)}
+                                onClick={() => setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('page', String(currentPage - 1));
+                                    return next;
+                                }, { replace: false })}
                             >
                                 Previous
                             </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                                <button
-                                    key={page}
-                                    className={`offer-pagination-btn ${currentPage === page ? 'active' : ''}`}
-                                    onClick={() => setCurrentPage(page)}
-                                >
-                                    {page}
-                                </button>
-                            ))}
+                            {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
+                                let page;
+                                if (totalPages <= 10) page = i + 1;
+                                else if (currentPage <= 5) page = i + 1;
+                                else if (currentPage >= totalPages - 4) page = totalPages - 9 + i;
+                                else page = currentPage - 5 + i;
+                                return (
+                                    <button
+                                        key={page}
+                                        className={`offer-pagination-btn ${currentPage === page ? 'active' : ''}`}
+                                        onClick={() => setSearchParams((p) => {
+                                            const next = new URLSearchParams(p);
+                                            next.set('page', String(page));
+                                            return next;
+                                        }, { replace: false })}
+                                    >
+                                        {page}
+                                    </button>
+                                );
+                            })}
                             <button
                                 className="offer-pagination-btn"
                                 disabled={currentPage === totalPages}
-                                onClick={() => setCurrentPage(currentPage + 1)}
+                                onClick={() => setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('page', String(currentPage + 1));
+                                    return next;
+                                }, { replace: false })}
                             >
                                 Next
                             </button>

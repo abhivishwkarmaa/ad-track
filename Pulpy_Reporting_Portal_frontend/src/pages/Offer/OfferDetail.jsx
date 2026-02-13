@@ -258,7 +258,7 @@ function OfferDetail() {
                 <div className="offer-header-left">
                     <button
                         className="btn btn-secondary"
-                        onClick={() => navigate('/offer/list')}
+                        onClick={() => navigate(-1)}
                         style={{ marginRight: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}
                     >
                         <ArrowLeftIcon />
