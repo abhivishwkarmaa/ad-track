@@ -165,24 +165,12 @@ h3 {
   font-weight: 600;
 }
 
-/* Scrollbar Styling */
+/* Scrollbar - Hidden (scroll still works) */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 0;
+  height: 0;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--bg-primary);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--secondary-light);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--secondary-color);
-}
 
 /* Common Utility Classes */
 .container {
@@ -1186,9 +1174,11 @@ select.form-control {
   }
 }
 
-/* Ensure all elements respect theme transitions */
+/* Ensure all elements respect theme transitions + hide scrollbars */
 * {
   transition: background-color var(--transition-normal),
     color var(--transition-normal),
     border-color var(--transition-normal);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
