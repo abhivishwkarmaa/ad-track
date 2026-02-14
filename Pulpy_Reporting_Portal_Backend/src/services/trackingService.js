@@ -1,5 +1,11 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+
+const getIstDateString = () => {
+  const now = new Date();
+  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+  return istTime.toISOString().split('T')[0];
+};
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
 import { parseDevice } from '../utils/deviceParser.js';
@@ -1102,7 +1108,7 @@ export class TrackingService {
     try {
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
       // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = new Date().toISOString().split('T')[0];
+      const today = getIstDateString();
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {

@@ -16,6 +16,12 @@ const ERROR_TYPES = {
     RETRYABLE: 'retryable'
 };
 
+const getIstDateString = () => {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+    return istTime.toISOString().split('T')[0];
+};
+
 function classifyError(err) {
     if (!err) return ERROR_TYPES.FATAL;
     const msg = (err.message || '').toLowerCase();
@@ -259,7 +265,7 @@ async function processBatch(buffer) {
             // Update daily_offer_stats directly in DB for clicks.
             // Aggregate by offer+tenant for a single upsert per group to avoid double-counting.
             try {
-                const today = new Date().toISOString().split('T')[0];
+                const today = getIstDateString();
                 const groups = {}; // key -> { offerId, tenantId, clicks: n }
 
                 for (const c of clicks) {

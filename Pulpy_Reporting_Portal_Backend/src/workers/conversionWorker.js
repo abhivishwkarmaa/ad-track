@@ -12,6 +12,12 @@ const BLOCK_MS = 2000;
 
 const MAX_RETRY = 3;
 
+const getIstDateString = () => {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+    return istTime.toISOString().split('T')[0];
+};
+
 /**
  * Setup Redis Stream Group
  */
@@ -284,7 +290,7 @@ async function bulkInsertConversions(items) {
 
     // Update Stats
     const pipeline = redis.pipeline();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getIstDateString();
 
     items.forEach(item => {
         const c = item.data;

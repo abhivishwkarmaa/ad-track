@@ -10,6 +10,12 @@ import http from 'http';
 import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
+const getIstDateString = () => {
+  const now = new Date();
+  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+  return istTime.toISOString().split('T')[0];
+};
+
 // ---------- In-file lookups (no external findById/getOfferById) ----------
 /** Get offer by internal id only. Returns row or null. */
 async function getOfferByInternalId(offerId, tenantId) {
@@ -838,7 +844,7 @@ export class PostbackService {
       // Update stats via Redis (consistent pipeline with conversionWorker)
       try {
         const tenantIdVal = tenantId || 0;
-        const today = new Date().toISOString().split('T')[0];
+        const today = getIstDateString();
         const statsPipe = redis.pipeline();
         const statsKeyOffer = `stats:offer:${offerId}:${tenantIdVal}:${today}`;
         const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantIdVal}:${today}`;
@@ -1038,7 +1044,7 @@ export class PostbackService {
 
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
       // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = new Date().toISOString().split('T')[0];
+      const today = getIstDateString();
 
       await pool.query(
         `INSERT INTO daily_offer_stats (
