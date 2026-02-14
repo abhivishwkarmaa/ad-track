@@ -114,6 +114,21 @@ class OfferController {
     }
   }
 
+  async searchOffers(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send(buildError('Tenant context required', 400, 'Bad Request'));
+      }
+
+      const offers = await offerService.searchOffers(request.query, tenantId);
+      return reply.send(buildSuccess(offers));
+    } catch (error) {
+      logger.error('OfferController.searchOffers error:', error);
+      return reply.code(500).send(buildError('Failed to search offers'));
+    }
+  }
+
   async deleteOffer(request, reply) {
     try {
       // ✅ CRITICAL: Get tenant_id from request for tenant isolation

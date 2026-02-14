@@ -32,6 +32,16 @@ export const listOffersQuerySchema = {
   },
 };
 
+export const searchOffersQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['q'],
+  properties: {
+    q: { type: 'string', minLength: 1, maxLength: 150 },
+    limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+  },
+};
+
 export const createOfferSchema = {
   type: 'object',
   additionalProperties: false,

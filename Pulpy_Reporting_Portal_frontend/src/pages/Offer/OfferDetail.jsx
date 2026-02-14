@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
@@ -70,6 +70,13 @@ const ExternalLinkIcon = () => (
     </svg>
 );
 
+const SearchIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+);
+
 function OfferDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -92,6 +99,12 @@ function OfferDetail() {
     const [dailyStats, setDailyStats] = useState([]);
     const [loadingStats, setLoadingStats] = useState(false);
     const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
+    const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [showSearchResults, setShowSearchResults] = useState(false);
+    const searchContainerRef = useRef(null);
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -135,6 +148,52 @@ function OfferDetail() {
             fetchStats();
         }
     }, [id, refreshKey]);
+
+    useEffect(() => {
+        const timeoutId = setTimeout(() => {
+            setDebouncedSearchTerm(searchTerm.trim());
+        }, 350);
+
+        return () => clearTimeout(timeoutId);
+    }, [searchTerm]);
+
+    useEffect(() => {
+        const fetchSearchResults = async () => {
+            if (!debouncedSearchTerm) {
+                setSearchResults([]);
+                setSearchLoading(false);
+                return;
+            }
+
+            try {
+                setSearchLoading(true);
+                const response = await offersAPI.searchOffers({ q: debouncedSearchTerm, limit: 8 });
+                if (response.success) {
+                    setSearchResults(response.data || []);
+                } else {
+                    setSearchResults([]);
+                }
+            } catch (searchError) {
+                console.error('Error searching offers:', searchError);
+                setSearchResults([]);
+            } finally {
+                setSearchLoading(false);
+            }
+        };
+
+        fetchSearchResults();
+    }, [debouncedSearchTerm]);
+
+    useEffect(() => {
+        const onDocumentClick = (event) => {
+            if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+                setShowSearchResults(false);
+            }
+        };
+
+        document.addEventListener('mousedown', onDocumentClick);
+        return () => document.removeEventListener('mousedown', onDocumentClick);
+    }, []);
 
     // Fetch publishers
     useEffect(() => {
@@ -270,6 +329,47 @@ function OfferDetail() {
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
+                    <div className="offer-search offer-detail-search" ref={searchContainerRef}>
+                        <SearchIcon />
+                        <input
+                            type="text"
+                            placeholder="Search offers and jump..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onFocus={() => setShowSearchResults(true)}
+                        />
+                        {showSearchResults && (
+                            <div className="offer-detail-search-dropdown">
+                                {searchLoading ? (
+                                    <div className="offer-detail-search-item muted">Searching...</div>
+                                ) : !debouncedSearchTerm ? (
+                                    <div className="offer-detail-search-item muted">Type to search offers</div>
+                                ) : debouncedSearchTerm && searchResults.length === 0 ? (
+                                    <div className="offer-detail-search-item muted">No offers found</div>
+                                ) : (
+                                    searchResults.map((result) => {
+                                        const offerPublicId = result.public_offer_id || result.display_id;
+                                        return (
+                                            <button
+                                                key={result.id}
+                                                type="button"
+                                                className="offer-detail-search-item"
+                                                onClick={() => {
+                                                    setShowSearchResults(false);
+                                                    setSearchTerm('');
+                                                    setDebouncedSearchTerm('');
+                                                    navigate(`/offer/detail/${offerPublicId}`);
+                                                }}
+                                            >
+                                                <span className="result-name">{result.name}</span>
+                                                <span className="result-meta">ID: {offerPublicId} | {result.status}</span>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
+                    </div>
                     <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
                         <EditIcon />
                         <span>Edit Offer</span>

@@ -6,6 +6,7 @@ import {
   createOfferSchema,
   listOffersQuerySchema,
   offerIdParamSchema,
+  searchOffersQuerySchema,
   updateAssignmentSchema,
   updateOfferSchema,
 } from '../schemas/offer.schema.js';
@@ -91,6 +92,16 @@ async function offerRoutes(fastify) {
       },
     },
     offerController.listOffers
+  );
+
+  fastify.get(
+    '/api/admin/offers/search',
+    {
+      schema: {
+        querystring: searchOffersQuerySchema,
+      },
+    },
+    offerController.searchOffers
   );
 
   fastify.get(

@@ -887,33 +887,33 @@ class OfferService {
 
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
     if (tenantId) {
-      conditions.push('tenant_id = ?');
+      conditions.push('o.tenant_id = ?');
       params.push(tenantId);
     }
 
     if (filters.type) {
-      conditions.push('status = ?');
+      conditions.push('o.status = ?');
       params.push(filters.type);
     }
 
     if (filters.advertiser_id) {
-      conditions.push('advertiser_id = ?');
+      conditions.push('o.advertiser_id = ?');
       params.push(filters.advertiser_id);
     }
 
     if (filters.category) {
-      conditions.push('category = ?');
+      conditions.push('o.category = ?');
       params.push(filters.category);
     }
 
     if (filters.offer_visibility) {
-      conditions.push('offer_visibility = ?');
+      conditions.push('o.offer_visibility = ?');
       params.push(filters.offer_visibility);
     }
 
     if (filters.search) {
       const term = `%${filters.search}%`;
-      conditions.push('(name LIKE ? OR description LIKE ?)');
+      conditions.push('(o.name LIKE ? OR o.description LIKE ?)');
       params.push(term, term);
     }
 
@@ -921,7 +921,7 @@ class OfferService {
     const limit = Number(filters.limit) > 0 ? Number(filters.limit) : 20;
     const offset = (page - 1) * limit;
 
-    const whereClause = conditions.length ? `WHERE ${conditions.map(c => `o.${c}`).join(' AND ')}` : '';
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const listSql = `
       SELECT o.*,
       a.name as advertiser_name,
@@ -953,6 +953,52 @@ class OfferService {
         totalPages: total ? Math.ceil(total / limit) : 0,
       },
     };
+  }
+
+  async searchOffers(filters = {}, tenantId = null) {
+    const term = (filters.q || '').trim();
+    if (!term) {
+      return [];
+    }
+
+    const limit = Number(filters.limit) > 0 ? Math.min(Number(filters.limit), 50) : 10;
+    const wildcardTerm = `%${term}%`;
+
+    const conditions = [];
+    const params = [];
+
+    if (tenantId) {
+      conditions.push('o.tenant_id = ?');
+      params.push(tenantId);
+    }
+
+    conditions.push('(o.name LIKE ? OR o.description LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)');
+    params.push(wildcardTerm, wildcardTerm, wildcardTerm);
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    const sql = `
+      SELECT
+        o.id,
+        o.public_offer_id,
+        o.name,
+        o.status,
+        o.country,
+        o.category,
+        a.name AS advertiser_name,
+        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) AS display_id
+      FROM offers o
+      LEFT JOIN advertisers a ON a.id = o.advertiser_id
+      ${whereClause}
+      ORDER BY
+        CASE WHEN o.name LIKE ? THEN 0 ELSE 1 END,
+        o.created_at DESC
+      LIMIT ?
+    `;
+
+    const startsWithTerm = `${term}%`;
+    const [rows] = await pool.query(sql, [...params, startsWithTerm, limit]);
+    return Array.isArray(rows) ? rows : [];
   }
 
   async deleteOffer(id, tenantId = null) {

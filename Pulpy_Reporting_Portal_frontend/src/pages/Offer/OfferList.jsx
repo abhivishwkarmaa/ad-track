@@ -15,6 +15,13 @@ const SearchIcon = () => (
     </svg>
 );
 
+const ClearIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+);
+
 const PlusIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
         <line x1="12" y1="5" x2="12" y2="19" />
@@ -53,6 +60,8 @@ function OfferList() {
     const { refreshKey } = useRefresh();
     const [offers, setOffers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -62,7 +71,8 @@ function OfferList() {
     const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
     const [searchDebounced, setSearchDebounced] = useState('');
     const [updatingStatus, setUpdatingStatus] = useState({});
-    const prevSearchAndFilter = useRef({ search: searchDebounced, filter: statusFilter });
+    const effectiveSearch = searchDebounced.trim().length >= 3 ? searchDebounced.trim() : '';
+    const prevSearchAndFilter = useRef({ search: effectiveSearch, filter: statusFilter });
 
     useEffect(() => {
         const t = setTimeout(() => setSearchDebounced(searchTerm), 400);
@@ -71,9 +81,9 @@ function OfferList() {
 
     useEffect(() => {
         const prev = prevSearchAndFilter.current;
-        const searchChanged = prev.search !== searchDebounced;
+        const searchChanged = prev.search !== effectiveSearch;
         const filterChanged = prev.filter !== statusFilter;
-        prevSearchAndFilter.current = { search: searchDebounced, filter: statusFilter };
+        prevSearchAndFilter.current = { search: effectiveSearch, filter: statusFilter };
         if (searchChanged || filterChanged) {
             setSearchParams((p) => {
                 const next = new URLSearchParams(p);
@@ -81,15 +91,19 @@ function OfferList() {
                 return next;
             }, { replace: true });
         }
-    }, [searchDebounced, statusFilter]);
+    }, [effectiveSearch, statusFilter]);
 
     useEffect(() => {
         const fetchOffers = async () => {
             try {
-                setLoading(true);
+                if (initialLoading) {
+                    setLoading(true);
+                } else {
+                    setIsRefreshing(true);
+                }
                 setError(null);
                 const params = { page: currentPage, limit: itemsPerPage };
-                if (searchDebounced) params.search = searchDebounced;
+                if (effectiveSearch) params.search = effectiveSearch;
                 if (statusFilter !== 'all') params.type = statusFilter;
 
                 const response = await offersAPI.getOffers(params);
@@ -104,11 +118,15 @@ function OfferList() {
                 setError(err.message || 'Failed to load offers');
             } finally {
                 setLoading(false);
+                setIsRefreshing(false);
+                if (initialLoading) {
+                    setInitialLoading(false);
+                }
             }
         };
 
         fetchOffers();
-    }, [currentPage, searchDebounced, statusFilter, refreshKey]);
+    }, [currentPage, effectiveSearch, statusFilter, refreshKey]);
 
     const { total, totalPages } = pagination;
 
@@ -125,7 +143,7 @@ function OfferList() {
                 setDeleteModal({ open: false, offer: null });
 
                 const params = { page: currentPage, limit: itemsPerPage };
-                if (searchDebounced) params.search = searchDebounced;
+                if (effectiveSearch) params.search = effectiveSearch;
                 if (statusFilter !== 'all') params.type = statusFilter;
                 const response = await offersAPI.getOffers(params);
                 if (response.success) {
@@ -155,7 +173,7 @@ function OfferList() {
                 toast.success('Offer status updated successfully');
 
                 const params = { page: currentPage, limit: itemsPerPage };
-                if (searchDebounced) params.search = searchDebounced;
+                if (effectiveSearch) params.search = effectiveSearch;
                 if (statusFilter !== 'all') params.type = statusFilter;
                 const offersResponse = await offersAPI.getOffers(params);
                 if (offersResponse.success) {
@@ -215,10 +233,21 @@ function OfferList() {
                     <SearchIcon />
                     <input
                         type="text"
-                        placeholder="Search offers..."
+                        placeholder="Search offers (min 3 characters)..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
+                    {searchTerm && (
+                        <button
+                            type="button"
+                            className="offer-search-clear"
+                            onClick={() => setSearchTerm('')}
+                            aria-label="Clear search"
+                            title="Clear search"
+                        >
+                            <ClearIcon />
+                        </button>
+                    )}
                 </div>
                 <select
                     className="form-control offer-filter-select"
@@ -232,6 +261,8 @@ function OfferList() {
                     <option value="archived">Archived</option>
                 </select>
             </div>
+
+            {isRefreshing && <div className="offer-search-glow-line" />}
 
             <div className="offer-table-container">
                 <table className="offer-table">

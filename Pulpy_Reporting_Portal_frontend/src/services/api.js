@@ -355,6 +355,10 @@ export const offersAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/offers?${queryString}`);
     },
+    searchOffers: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/offers/search?${queryString}`);
+    },
     getOffer: async (id) => {
         return apiRequest(`/api/admin/offers/${id}`);
     },
