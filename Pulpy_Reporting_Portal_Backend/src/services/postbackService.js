@@ -835,8 +835,34 @@ export class PostbackService {
       const [convRows] = await pool.query('SELECT * FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
       const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
 
-      // Update daily stats
-      await this.updateDailyStats(offerId, conversionAmount, payout, finalStatus);
+      // Update stats via Redis (consistent pipeline with conversionWorker)
+      try {
+        const tenantIdVal = tenantId || 0;
+        const today = new Date().toISOString().split('T')[0];
+        const statsPipe = redis.pipeline();
+        const statsKeyOffer = `stats:offer:${offerId}:${tenantIdVal}:${today}`;
+        const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantIdVal}:${today}`;
+
+        // Revenue: ALWAYS increment (Advertiser Revenue)
+        statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, conversionAmount);
+        statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, conversionAmount);
+
+        // Only increment conversions if not rejected
+        if (finalStatus !== 'rejected' && finalStatus !== 'rejected_cap') {
+          statsPipe.incr(`${statsKeyOffer}:conversions`);
+          statsPipe.incr(`${statsKeyPub}:conversions`);
+
+          // Payout: ONLY Approved
+          if (finalStatus === 'approved') {
+            statsPipe.incrbyfloat(`${statsKeyOffer}:payout`, payout);
+            statsPipe.incrbyfloat(`${statsKeyPub}:payout`, payout);
+          }
+        }
+
+        await statsPipe.exec();
+      } catch (err) {
+        logger.error('Failed to update Redis stats for conversion (postback DB path):', err);
+      }
 
       // Get publisher by internal id (in-file lookup)
       let publisher = null;

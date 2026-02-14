@@ -2,6 +2,7 @@ import redis from '../config/redis.js';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
+import { generateClickId } from '../utils/urlGenerator.js';
 
 const STREAM_KEY = 'stream:conversions';
 const GROUP_NAME = 'conversion_group';
@@ -237,7 +238,14 @@ async function bulkInsertConversions(items) {
 
     const values = items.map(item => {
         const c = item.data; // conversion data
-        const conversionUuid = uuidv4();
+        // Generate a longer, collision-resistant conversion UUID using the same generator
+        // Fallback to uuidv4 for missing ids (shouldn't happen)
+        let conversionUuid;
+        try {
+            conversionUuid = generateClickId(c.tenant_id || 0, c.offer_id || 0, c.publisher_id || 0, 96);
+        } catch (e) {
+            conversionUuid = uuidv4();
+        }
         c.conversion_uuid = conversionUuid; // Save for postback
 
         return [

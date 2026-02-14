@@ -12,12 +12,12 @@ import crypto from 'crypto';
  * @param {number} tenantId - Tenant ID
  * @param {number} offerId - Offer ID
  * @param {number} publisherId - Publisher ID
- * @param {number} length - Desired length (default: 36, max: 36 to match database schema)
+ * @param {number} length - Desired length (default: 96). Increase this to 2-3x for stronger uniqueness.
  * @returns {string} - URL-safe click_id (hash)
  * 
  * Example output: "aB3cD4eF5gH6iJ7kL8mN9oP0qR1sT2u"
  */
-export function generateClickId(tenantId, offerId, publisherId, length = 36) {
+export function generateClickId(tenantId, offerId, publisherId, length = 96) {
   // Validate required parameters
   if (tenantId === undefined || tenantId === null || 
       offerId === undefined || offerId === null || 
@@ -25,8 +25,9 @@ export function generateClickId(tenantId, offerId, publisherId, length = 36) {
     throw new Error('generateClickId requires tenantId, offerId, and publisherId');
   }
 
-  // Database column is CHAR(36), so limit to 36 characters
-  const validLength = Math.min(36, length || 36);
+  // Allow longer IDs for stronger uniqueness. Cap to a reasonable maximum.
+  const MAX_LENGTH = 192;
+  const validLength = Math.min(MAX_LENGTH, length || 96);
 
   // Generate hash from: tenant_id + offer_id + publisher_id + timestamp + random salt
   const timestamp = Date.now();
@@ -40,7 +41,7 @@ export function generateClickId(tenantId, offerId, publisherId, length = 36) {
   // Base64URL uses - and _ instead of + and /, and removes = padding
   let clickId = hash.toString('base64url');
 
-  // Trim to exact length (36 chars max to match database CHAR(36))
+  // Trim to requested length
   if (clickId.length > validLength) {
     clickId = clickId.substring(0, validLength);
   }
@@ -51,8 +52,8 @@ export function generateClickId(tenantId, offerId, publisherId, length = 36) {
     clickId += additionalBytes.toString('base64url');
   }
 
-  // Final trim to ensure we don't exceed 36 characters (database limit)
-  return clickId.substring(0, 36);
+  // Final trim to ensure we don't exceed validLength
+  return clickId.substring(0, validLength);
 }
 
 /**

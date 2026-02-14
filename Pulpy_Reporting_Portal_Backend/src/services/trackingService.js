@@ -293,7 +293,7 @@ export class TrackingService {
       // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
       // This ensures unique click identity across publishers and tenants
       // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for click UUID generation
-      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
 
       // Check Global Offer Caps (Daily/Total Conversions)
       // We READ the current counter from Redis. We do NOT increment here (only on conversion).
@@ -624,7 +624,7 @@ export class TrackingService {
         await redis.set(key, JSON.stringify(session), 'KEEPTTL');
 
         // Continue redirect normally (no postback fired)
-        const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+        const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
         const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
 
         return {
@@ -719,7 +719,7 @@ export class TrackingService {
       // ❌ NO clicks table insert
       // ❌ NO conversions table insert
       // ❌ NO postback_logs table insert
-      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 36);
+      const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
       const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
 
       logger.info('[TEST] 🔄 Returning redirect (ZERO DB WRITES)', {
