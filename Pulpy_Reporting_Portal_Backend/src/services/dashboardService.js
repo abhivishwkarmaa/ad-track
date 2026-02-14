@@ -548,130 +548,70 @@ export class DashboardService {
     try {
       const dates = this.getDateRanges(filters);
 
-      // Get clicks (Current Range)
-      const [clickRows] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          COUNT(DISTINCT click_uuid) as unique_clicks
-        FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+      const statsSql = `
+        SELECT
+          COALESCE(SUM(clicks), 0) as clicks,
+          COALESCE(SUM(unique_clicks), 0) as unique_clicks,
+          COALESCE(SUM(conversions), 0) as conversions,
+          COALESCE(SUM(approved_conversions), 0) as approved_conversions,
+          COALESCE(SUM(pending_conversions), 0) as pending_conversions,
+          COALESCE(SUM(rejected_conversions), 0) as rejected_conversions,
+          COALESCE(SUM(revenue), 0) as revenue,
+          COALESCE(SUM(payout), 0) as payout,
+          COALESCE(SUM(impressions), 0) as impressions
+        FROM daily_offer_stats
+        WHERE day >= ?
+          AND day <= ?
           AND tenant_id = ?
-        `, [dates.currentFrom, dates.currentTo, tenantId]
-      );
+      `;
 
-      // Get clicks (Previous Range)
-      const [clicksPrevious] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `,
-        [dates.previousFrom, dates.previousTo, tenantId]
-      );
-
-      // Get conversions count (Current Range)
-      const [conversionRows] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
-        FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `, [dates.currentFrom, dates.currentTo, tenantId]
-      );
-
-      // Get conversions (Previous Range)
-      const [conversionsPrevious] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `,
-        [dates.previousFrom, dates.previousTo, tenantId]
-      );
-
-      // Calculate approval rate
-      const totalConversions = parseInt(conversionRows[0]?.total || 0);
-      const approvedConversions = parseInt(conversionRows[0]?.approved || 0);
-      const approvalRate = totalConversions > 0
-        ? ((approvedConversions / totalConversions) * 100).toFixed(2)
-        : '0.00';
-
-      // Get total revenue (Current Range)
-      const [revenueRows] = await pool.query(
-        `SELECT 
-          COALESCE(SUM(amount), 0) as total_revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
-          COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) as pending_payout
-        FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `, [dates.currentFrom, dates.currentTo, tenantId]
-      );
-
-      // Get revenue (Previous Range)
-      const [revenuePreviousRows] = await pool.query(
-        `SELECT COALESCE(SUM(amount), 0) as revenue
-        FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `,
-        [dates.previousFrom, dates.previousTo, tenantId]
-      );
-
-      const revenueToday = parseFloat(revenueRows[0]?.total_revenue || 0);
-      const revenueYesterday = parseFloat(revenuePreviousRows[0]?.revenue || 0);
-      const revenueChange = revenueToday - revenueYesterday;
-
-      // Get impressions data (Current Range)
-      const [impressionsRows] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM impressions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `,
+      const [currentStatsRows] = await pool.query(
+        statsSql,
         [dates.currentFrom, dates.currentTo, tenantId]
       );
 
-      // Get impressions (Previous Range)
-      const [impressionsPreviousRows] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM impressions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
-          AND tenant_id = ?
-        `,
+      const [previousStatsRows] = await pool.query(
+        statsSql,
         [dates.previousFrom, dates.previousTo, tenantId]
       );
 
-      // Calculate conversion rate
-      const clicksTotal = parseInt(clickRows[0]?.total || 0);
+      const currentStats = currentStatsRows[0] || {};
+      const previousStats = previousStatsRows[0] || {};
+
+      const clicksTotal = parseInt(currentStats.clicks || 0);
+      const uniqueClicks = parseInt(currentStats.unique_clicks || 0);
+      const approvedConversions = parseInt(currentStats.approved_conversions || 0);
+      const pendingConversions = parseInt(currentStats.pending_conversions || 0);
+      const rejectedConversions = parseInt(currentStats.rejected_conversions || 0);
+      const totalConversions = parseInt(currentStats.conversions || 0);
+      const previousConversions = parseInt(previousStats.conversions || 0);
+
+      const revenueToday = parseFloat(currentStats.revenue || 0);
+      const revenueYesterday = parseFloat(previousStats.revenue || 0);
+      const totalPayout = parseFloat(currentStats.payout || 0);
+      const previousPayout = parseFloat(previousStats.payout || 0);
+      const revenueChange = revenueToday - revenueYesterday;
+      const impressionsToday = parseInt(currentStats.impressions || 0);
+      const impressionsYesterday = parseInt(previousStats.impressions || 0);
+
+      // Calculate conversion and approval rates
       const conversionRate = clicksTotal > 0 ? ((totalConversions / clicksTotal) * 100) : 0;
+      const approvalRateValue = totalConversions > 0 ? ((approvedConversions / totalConversions) * 100).toFixed(2) : '0.00';
 
       return {
         clicks: {
           total: clicksTotal,
-          unique: parseInt(clickRows[0]?.unique_clicks || 0),
+          unique: uniqueClicks,
           today: clicksTotal, // Mapped to total for frontend consistency if needed
-          yesterday: parseInt(clicksPrevious[0]?.total || 0), // Mapped to previous
+          yesterday: parseInt(previousStats.clicks || 0), // Mapped to previous
           mtd: 0,
           label: 'TOTAL CLICKS',
           status_label: 'Unique'
         },
         impressions: {
-          total: parseInt(impressionsRows[0]?.total || 0),
-          today: parseInt(impressionsRows[0]?.total || 0),
-          yesterday: parseInt(impressionsPreviousRows[0]?.total || 0),
+          total: impressionsToday,
+          today: impressionsToday,
+          yesterday: impressionsYesterday,
           mtd: 0,
           label: 'IMPRESSIONS',
           status_label: 'Total'
@@ -679,26 +619,26 @@ export class DashboardService {
         conversions: {
           total: totalConversions,
           today: totalConversions,
-          yesterday: parseInt(conversionsPrevious[0]?.total || 0),
+          yesterday: previousConversions,
           approved: approvedConversions,
-          pending: parseInt(conversionRows[0]?.pending || 0),
-          rejected: parseInt(conversionRows[0]?.rejected || 0),
+          pending: pendingConversions,
+          rejected: rejectedConversions,
           conversion_rate: conversionRate,
-          approval_rate: `${approvalRate}%`,
+          approval_rate: `${approvalRateValue}%`,
           label: 'CONVERSIONS',
-          status_label: `Approved +${approvalRate}%`
+          status_label: `Approved +${approvalRateValue}%`
         },
         revenue: {
           total: revenueToday,
-          payout: parseFloat(revenueRows[0]?.total_payout || 0),
-          approved_payout: parseFloat(revenueRows[0]?.approved_payout || 0),
-          pending_payout: parseFloat(revenueRows[0]?.pending_payout || 0),
-          profit: (revenueToday - parseFloat(revenueRows[0]?.approved_payout || 0)),
+          payout: totalPayout,
+          approved_payout: totalPayout,
+          pending_payout: 0,
+          profit: (revenueToday - totalPayout),
           today: revenueToday,
           yesterday: revenueYesterday,
           mtd: 0,
-          payout_today: parseFloat(revenueRows[0]?.total_payout || 0),
-          payout_yesterday: 0,
+          payout_today: totalPayout,
+          payout_yesterday: previousPayout,
           payout_mtd: 0,
           change: revenueChange,
           label: 'TOTAL REVENUE',

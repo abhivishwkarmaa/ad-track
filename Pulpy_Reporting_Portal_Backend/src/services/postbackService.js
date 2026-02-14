@@ -847,16 +847,23 @@ export class PostbackService {
         statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, conversionAmount);
         statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, conversionAmount);
 
-        // Only increment conversions if not rejected
-        if (finalStatus !== 'rejected' && finalStatus !== 'rejected_cap') {
-          statsPipe.incr(`${statsKeyOffer}:conversions`);
-          statsPipe.incr(`${statsKeyPub}:conversions`);
+        // Track conversions as total + per-status buckets.
+        const normalizedStatus = (finalStatus || 'pending').toLowerCase();
+        statsPipe.incr(`${statsKeyOffer}:conversions`);
+        statsPipe.incr(`${statsKeyPub}:conversions`);
 
+        if (normalizedStatus === 'approved') {
+          statsPipe.incr(`${statsKeyOffer}:approved_conversions`);
+          statsPipe.incr(`${statsKeyPub}:approved_conversions`);
           // Payout: ONLY Approved
-          if (finalStatus === 'approved') {
-            statsPipe.incrbyfloat(`${statsKeyOffer}:payout`, payout);
-            statsPipe.incrbyfloat(`${statsKeyPub}:payout`, payout);
-          }
+          statsPipe.incrbyfloat(`${statsKeyOffer}:payout`, payout);
+          statsPipe.incrbyfloat(`${statsKeyPub}:payout`, payout);
+        } else if (normalizedStatus === 'pending') {
+          statsPipe.incr(`${statsKeyOffer}:pending_conversions`);
+          statsPipe.incr(`${statsKeyPub}:pending_conversions`);
+        } else if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_cap') {
+          statsPipe.incr(`${statsKeyOffer}:rejected_conversions`);
+          statsPipe.incr(`${statsKeyPub}:rejected_conversions`);
         }
 
         await statsPipe.exec();
@@ -1016,11 +1023,15 @@ export class PostbackService {
       // Revamped Logic:
       // - Revenue: Always add (even if rejected)
       // - Payout: Only add if approved
-      // - Conversions: Only increment if NOT rejected (to keep stats valid)
+      // - Conversions: Increment for every conversion status
+      // - Status buckets: approved/pending/rejected tracked separately
 
       const finalRevenue = revenue;
       const finalPayout = (status === 'approved') ? payout : 0;
-      const conversionInc = (status !== 'rejected' && status !== 'rejected_cap') ? 1 : 0;
+      const conversionInc = 1;
+      const approvedConversionInc = status === 'approved' ? 1 : 0;
+      const pendingConversionInc = status === 'pending' ? 1 : 0;
+      const rejectedConversionInc = (status === 'rejected' || status === 'rejected_cap') ? 1 : 0;
 
       // Profit
       const profit = finalRevenue - finalPayout;
@@ -1030,15 +1041,31 @@ export class PostbackService {
       const today = new Date().toISOString().split('T')[0];
 
       await pool.query(
-        `INSERT INTO daily_offer_stats (offer_id, day, conversions, revenue, payout, profit, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        `INSERT INTO daily_offer_stats (
+          offer_id, day, conversions, approved_conversions, pending_conversions, rejected_conversions,
+          revenue, payout, profit, created_at, updated_at
+        )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE
            conversions = daily_offer_stats.conversions + VALUES(conversions),
+           approved_conversions = daily_offer_stats.approved_conversions + VALUES(approved_conversions),
+           pending_conversions = daily_offer_stats.pending_conversions + VALUES(pending_conversions),
+           rejected_conversions = daily_offer_stats.rejected_conversions + VALUES(rejected_conversions),
            revenue = daily_offer_stats.revenue + VALUES(revenue),
            payout = daily_offer_stats.payout + VALUES(payout),
            profit = daily_offer_stats.profit + VALUES(profit),
            updated_at = UTC_TIMESTAMP()`,
-        [offerId, today, conversionInc, finalRevenue, finalPayout, profit]
+        [
+          offerId,
+          today,
+          conversionInc,
+          approvedConversionInc,
+          pendingConversionInc,
+          rejectedConversionInc,
+          finalRevenue,
+          finalPayout,
+          profit
+        ]
       );
     } catch (error) {
       logger.error('PostbackService.updateDailyStats error:', error);

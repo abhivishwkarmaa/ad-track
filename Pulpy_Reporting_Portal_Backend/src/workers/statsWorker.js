@@ -85,6 +85,9 @@ async function flushStats() {
                         date,
                         clicks: 0,
                         conversions: 0,
+                        approved_conversions: 0,
+                        pending_conversions: 0,
+                        rejected_conversions: 0,
                         revenue: 0,
                         payout: 0
                     };
@@ -112,19 +115,42 @@ async function flushStats() {
             const profit = stat.revenue - stat.payout;
             // UTC ENFORCEMENT: Use UTC_TIMESTAMP() for DB timestamps, never pass JS Date objects
             const sql = `
-                INSERT INTO daily_offer_stats (offer_id, tenant_id, day, clicks, conversions, revenue, payout, profit, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+                INSERT INTO daily_offer_stats (
+                    offer_id, tenant_id, day, clicks, conversions, approved_conversions, pending_conversions, rejected_conversions,
+                    revenue, payout, profit, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE
                     clicks = daily_offer_stats.clicks + ?,
                     conversions = daily_offer_stats.conversions + ?,
+                    approved_conversions = daily_offer_stats.approved_conversions + ?,
+                    pending_conversions = daily_offer_stats.pending_conversions + ?,
+                    rejected_conversions = daily_offer_stats.rejected_conversions + ?,
                     revenue = daily_offer_stats.revenue + ?,
                     payout = daily_offer_stats.payout + ?,
                     profit = daily_offer_stats.profit + ?,
                     updated_at = UTC_TIMESTAMP()
             `;
             const params = [
-                stat.offerId, stat.tenantId, stat.date, stat.clicks, stat.conversions, stat.revenue, stat.payout, profit,
-                stat.clicks, stat.conversions, stat.revenue, stat.payout, profit
+                stat.offerId,
+                stat.tenantId,
+                stat.date,
+                stat.clicks,
+                stat.conversions,
+                stat.approved_conversions,
+                stat.pending_conversions,
+                stat.rejected_conversions,
+                stat.revenue,
+                stat.payout,
+                profit,
+                stat.clicks,
+                stat.conversions,
+                stat.approved_conversions,
+                stat.pending_conversions,
+                stat.rejected_conversions,
+                stat.revenue,
+                stat.payout,
+                profit
             ];
 
             await pool.query(sql, params);

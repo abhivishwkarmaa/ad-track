@@ -296,16 +296,24 @@ async function bulkInsertConversions(items) {
         pipeline.incrbyfloat(`${statsKeyOffer}:revenue`, c.amount);
         pipeline.incrbyfloat(`${statsKeyPub}:revenue`, c.amount);
 
-        // Only increment stats if status is not rejected
-        if (c.status !== 'rejected' && c.status !== 'rejected_cap') {
-            pipeline.incr(`${statsKeyOffer}:conversions`);
-            pipeline.incr(`${statsKeyPub}:conversions`);
+        // Conversions: track total + per-status buckets.
+        pipeline.incr(`${statsKeyOffer}:conversions`);
+        pipeline.incr(`${statsKeyPub}:conversions`);
 
+        const normalizedStatus = (c.status || 'pending').toString().toLowerCase();
+
+        if (normalizedStatus === 'approved') {
+            pipeline.incr(`${statsKeyOffer}:approved_conversions`);
+            pipeline.incr(`${statsKeyPub}:approved_conversions`);
             // Payout: ONLY Approved
-            if (c.status === 'approved') {
-                pipeline.incrbyfloat(`${statsKeyOffer}:payout`, c.payout);
-                pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
-            }
+            pipeline.incrbyfloat(`${statsKeyOffer}:payout`, c.payout);
+            pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
+        } else if (normalizedStatus === 'pending') {
+            pipeline.incr(`${statsKeyOffer}:pending_conversions`);
+            pipeline.incr(`${statsKeyPub}:pending_conversions`);
+        } else if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_cap') {
+            pipeline.incr(`${statsKeyOffer}:rejected_conversions`);
+            pipeline.incr(`${statsKeyPub}:rejected_conversions`);
         }
     });
 
@@ -323,8 +331,9 @@ async function bulkInsertConversions(items) {
 async function fireAffiliatePostbacks(items) {
     const promises = items.map(async (item) => {
         const c = item.data;
+        const normalizedStatus = (c.status || '').toString().toLowerCase();
         // STRICT: Affiliate postback ONLY for approved conversions. Never for pending/rejected/rejected_cap.
-        if (c.status !== 'approved' || !c.callback_url) return;
+        if (normalizedStatus !== 'approved' || !c.callback_url) return;
 
         try {
             const conversion = {
