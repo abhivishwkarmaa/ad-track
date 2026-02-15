@@ -18,6 +18,12 @@ import redis from '../config/redis.js';
 import cacheService from './cacheService.js';
 import postbackService from './postbackService.js';
 
+const getIstDateString = () => {
+  const now = new Date();
+  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+  return istTime.toISOString().split('T')[0];
+};
+
 export class TrackingService {
   async trackClick(query, request) {
     // 1. Fail early if system is overloaded (Backpressure)
@@ -1102,7 +1108,7 @@ export class TrackingService {
     try {
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
       // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = new Date().toISOString().split('T')[0];
+      const today = getIstDateString();
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {
@@ -1118,14 +1124,16 @@ export class TrackingService {
 
         let isUnique = true;
         if (clickIp) {
-          const [countRows] = await pool.query(
-            `SELECT COUNT(*) as cnt FROM clicks
+          let countQuery = `SELECT COUNT(*) as cnt FROM clicks
                  WHERE offer_id = ?
-                   AND publisher_id = ?
                    AND ip = ?
-                   AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`,
-            [offerId, publisherId, clickIp, today]
-          );
+                   AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
+          const countParams = [offerId, clickIp, today];
+          if (tenantId) {
+            countQuery += ' AND tenant_id = ?';
+            countParams.push(tenantId);
+          }
+          const [countRows] = await pool.query(countQuery, countParams);
           const cnt = (Array.isArray(countRows) ? countRows[0] : countRows).cnt;
           isUnique = (cnt === 1);
         }

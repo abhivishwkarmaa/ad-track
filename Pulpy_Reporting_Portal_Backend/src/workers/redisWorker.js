@@ -16,6 +16,12 @@ const ERROR_TYPES = {
     RETRYABLE: 'retryable'
 };
 
+const getIstDateString = () => {
+    const now = new Date();
+    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+    return istTime.toISOString().split('T')[0];
+};
+
 function classifyError(err) {
     if (!err) return ERROR_TYPES.FATAL;
     const msg = (err.message || '').toLowerCase();
@@ -259,7 +265,7 @@ async function processBatch(buffer) {
             // Update daily_offer_stats directly in DB for clicks.
             // Aggregate by offer+tenant for a single upsert per group to avoid double-counting.
             try {
-                const today = new Date().toISOString().split('T')[0];
+                const today = getIstDateString();
                 const groups = {}; // key -> { offerId, tenantId, clicks: n }
 
                 for (const c of clicks) {
@@ -270,7 +276,9 @@ async function processBatch(buffer) {
                     groups[key].clicks += 1;
                 }
 
-                // For each group, compute today's distinct IPs and existing unique_clicks, then upsert deltas
+                // For each group, compute today's actual distinct IPs and upsert:
+                // - clicks: increment by delta (existing behavior)
+                // - unique_clicks: set to actual distinct count (strictly unique only)
                 await Promise.all(Object.values(groups).map(async (g) => {
                     const offerId = g.offerId;
                     const tenantId = g.tenantId;
@@ -284,24 +292,15 @@ async function processBatch(buffer) {
                     const [ipRows] = await pool.query(ipCountQuery, ipParams);
                     const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
 
-                    // Fetch existing unique_clicks from daily_offer_stats
-                    const [statRows] = await pool.query(
-                        'SELECT unique_clicks FROM daily_offer_stats WHERE offer_id = ? AND tenant_id ' + (tenantId ? '= ?' : 'IS NULL') + ' AND day = ? LIMIT 1',
-                        tenantId ? [offerId, tenantId, today] : [offerId, today]
-                    );
-                    const existingUnique = statRows && statRows.length > 0 ? parseInt(statRows[0].unique_clicks || 0) : 0;
-
-                    const uniqueDelta = Math.max(0, uniqToday - existingUnique);
-
                     // Upsert with calculated deltas
                     await pool.query(
                         `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, clicks, unique_clicks, created_at, updated_at)
                          VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
                          ON DUPLICATE KEY UPDATE
                            clicks = daily_offer_stats.clicks + VALUES(clicks),
-                           unique_clicks = daily_offer_stats.unique_clicks + VALUES(unique_clicks),
+                           unique_clicks = VALUES(unique_clicks),
                            updated_at = UTC_TIMESTAMP()`,
-                        [offerId, tenantId, today, deltaClicks, uniqueDelta]
+                        [offerId, tenantId, today, deltaClicks, uniqToday]
                     );
                 }));
             } catch (statsErr) {
