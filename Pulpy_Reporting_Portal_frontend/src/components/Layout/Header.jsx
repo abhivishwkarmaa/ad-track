@@ -39,7 +39,13 @@ const SearchIcon = () => (
 );
 
 
-function Header({ onToggleSidebar, onToggleMobileMenu, subscriptionAlert }) {
+function Header({
+    onToggleSidebar,
+    onToggleMobileMenu,
+    subscriptionAlert,
+    expiredWarningAlert,
+    onDismissExpiredWarning
+}) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const { isDarkMode, toggleTheme } = useTheme();
@@ -68,9 +74,27 @@ function Header({ onToggleSidebar, onToggleMobileMenu, subscriptionAlert }) {
             </div>
 
             <div className="header-right">
-                {subscriptionAlert && (
-                    <div className="header-subscription-alert" title={subscriptionAlert}>
-                        {subscriptionAlert}
+                {(subscriptionAlert || expiredWarningAlert) && (
+                    <div
+                        className={`header-subscription-alert ${expiredWarningAlert ? 'header-subscription-alert-expired' : ''}`}
+                        title={expiredWarningAlert || subscriptionAlert}
+                    >
+                        <span className="header-subscription-alert-text">
+                            {expiredWarningAlert || subscriptionAlert}
+                        </span>
+                        {expiredWarningAlert && (
+                            <button
+                                type="button"
+                                className="header-subscription-alert-close"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onDismissExpiredWarning?.();
+                                }}
+                                aria-label="Dismiss subscription warning"
+                            >
+                                ×
+                            </button>
+                        )}
                     </div>
                 )}
                 <button 

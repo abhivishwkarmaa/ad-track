@@ -1,0 +1,68 @@
+.subscription-warning-banner {
+    position: sticky;
+    top: 0;
+    z-index: 210;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 8px 16px;
+}
+
+.subscription-warning-pill {
+    width: auto;
+    color: #92400e;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    border-radius: 999px;
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 6px 10px;
+}
+
+.subscription-warning-banner-text {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: normal;
+}
+
+.subscription-warning-banner-close {
+    border: none;
+    background: transparent;
+    color: #92400e;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.subscription-warning-banner-close:hover {
+    color: #78350f;
+    background: rgba(146, 64, 14, 0.12);
+}
+
+@media (max-width: 768px) {
+    .subscription-warning-banner {
+        min-height: 40px;
+        padding: 8px 12px;
+    }
+
+    .subscription-warning-pill {
+        min-height: 28px;
+        padding: 6px 8px;
+    }
+
+    .subscription-warning-banner-text {
+        font-size: 13px;
+    }
+}

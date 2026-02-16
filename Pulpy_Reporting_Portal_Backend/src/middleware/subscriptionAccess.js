@@ -24,19 +24,72 @@ const TENANT_STATES = {
     SUSPENDED: 'SUSPENDED'
 };
 
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SKIP_PREFIXES = ['/api/auth', '/api/subscription/status', '/api/contact'];
 const SKIP_PATHS = new Set(['/health']);
-// Tracking endpoints must always work (count clicks/postbacks) regardless of subscription
-const TRACKING_PREFIXES = ['/click', '/postback', '/imp'];
+
+const getRequestPath = (request) => (request.url || '').split('?')[0];
 
 const shouldSkipSubscriptionEnforcement = (request) => {
     const url = request.url || '';
-    const path = url.split('?')[0];
+    const path = getRequestPath(request);
     if (SKIP_PATHS.has(path)) return true;
-    if (TRACKING_PREFIXES.some((prefix) => path === prefix)) return true;
     return SKIP_PREFIXES.some((prefix) => url.startsWith(prefix));
 };
+
+const isClickEndpointRequest = (request) => {
+    return request.method === 'GET' && getRequestPath(request) === '/click';
+};
+
+const generateSuspendedTrackingPage = () => `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Suspended</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #fde68a 0%, #f59e0b 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            width: 100%;
+            max-width: 540px;
+            background: #ffffff;
+            border-radius: 14px;
+            box-shadow: 0 18px 50px rgba(17, 24, 39, 0.18);
+            padding: 32px 28px;
+            text-align: center;
+        }
+        .icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+        h1 {
+            color: #92400e;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #4b5563;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">⚠️</div>
+        <h1>Account Suspended</h1>
+        <p>Your account has been suspended. Please contact billing@track-myads.com for assistance.</p>
+    </div>
+</body>
+</html>`;
 
 /**
  * Require active subscription or trial
@@ -291,9 +344,10 @@ export function getCountdownText(request) {
 /**
  * Centralized subscription enforcement
  * - Applies to tenant-scoped API requests
- * - Allows read-only access for EXPIRED tenants
- * - Blocks SUSPENDED tenants entirely
- * - Skips auth/health/public endpoints
+ * - Attaches subscription status for UI warning/telemetry use
+ * - Allows EXPIRED tenants (warning-only mode)
+ * - Blocks SUSPENDED tenants
+ * - Skips auth/health/contact endpoints only
  */
 export async function enforceSubscriptionAccess(request, reply) {
     try {
@@ -313,6 +367,10 @@ export async function enforceSubscriptionAccess(request, reply) {
                 ip: request.ip
             });
 
+            if (isClickEndpointRequest(request)) {
+                return reply.code(403).type('text/html').send(generateSuspendedTrackingPage());
+            }
+
             return reply.code(403).send({
                 success: false,
                 error: 'Account Suspended',
@@ -328,21 +386,11 @@ export async function enforceSubscriptionAccess(request, reply) {
                 url: request.url,
                 ip: request.ip
             });
-
-            return reply.code(403).send({
-                success: false,
-                error: 'Subscription Expired',
-                message: 'Your access has expired. Please contact billing@track-myads.com to continue.',
-                subscription_status: 'expired',
-                billing_email: 'billing@track-myads.com'
-            });
+            return;
         }
     } catch (error) {
         logger.error('Error enforcing subscription access:', error);
-        return reply.code(500).send({
-            success: false,
-            error: 'Internal Server Error',
-            message: 'Failed to verify subscription status'
-        });
+        request.subscriptionStatus = null;
+        return;
     }
 }

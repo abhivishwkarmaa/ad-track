@@ -2,10 +2,14 @@ import { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import SubscriptionExpiryModal from './SubscriptionExpiryModal';
 import { DataProvider } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { subscriptionAPI } from '../../services/api';
+import { isSubscriptionExpired } from '../../utils/subscription';
 import './Layout.css';
+
+const SUBSCRIPTION_POPUP_SHOWN_KEY = 'subscription_popup_shown';
 
 function Layout() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -14,6 +18,8 @@ function Layout() {
     const [checkingStatus, setCheckingStatus] = useState(true);
     const [subscriptionStatus, setSubscriptionStatus] = useState(null);
     const [isExpired, setIsExpired] = useState(false);
+    const [showExpiryModal, setShowExpiryModal] = useState(false);
+    const [isBannerDismissed, setIsBannerDismissed] = useState(false);
     const { user } = useAuth();
 
     const toggleSidebar = () => {
@@ -81,6 +87,11 @@ function Layout() {
         return `Subscription expires in ${remaining} (UTC ${endDateUtc})`;
     };
 
+    const handleCloseExpiryModal = () => {
+        setShowExpiryModal(false);
+        localStorage.setItem(SUBSCRIPTION_POPUP_SHOWN_KEY, 'true');
+    };
+
     // Fetch subscription status on mount
     useEffect(() => {
         const checkTenantStatus = async () => {
@@ -95,9 +106,21 @@ function Layout() {
                     const status = response.data;
                     setSubscriptionStatus(status);
                     setIsSuspended(Boolean(status?.subscription?.is_suspended));
-                    setIsExpired(Boolean(status?.subscription?.is_expired));
+                    const expired = isSubscriptionExpired(status?.tenant);
+                    setIsExpired(expired);
+
+                    if (!expired) {
+                        setShowExpiryModal(false);
+                        setIsBannerDismissed(false);
+                        localStorage.removeItem(SUBSCRIPTION_POPUP_SHOWN_KEY);
+                    } else {
+                        const popupAlreadyShown = localStorage.getItem(SUBSCRIPTION_POPUP_SHOWN_KEY) === 'true';
+                        setShowExpiryModal(!popupAlreadyShown);
+                        setIsBannerDismissed(false);
+                    }
                 } else {
                     setSubscriptionStatus(null);
+                    setIsExpired(false);
                 }
             } catch (err) {
                 const errorMessage = err?.message || err?.toString() || '';
@@ -146,24 +169,6 @@ function Layout() {
         );
     }
 
-    if (isExpired && user?.tenant_id) {
-        return (
-            <div className="layout-expired">
-                <div className="expired-container">
-                    <div className="expired-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 6v6l4 2" />
-                        </svg>
-                    </div>
-                    <h2>Plan Expired</h2>
-                    <p>Your access has expired.</p>
-                    <p>Please contact billing@track-myads.com to continue.</p>
-                </div>
-            </div>
-        );
-    }
-
     return (
         <DataProvider>
             <div className={`layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -176,13 +181,19 @@ function Layout() {
                     <Header
                         onToggleSidebar={toggleSidebar}
                         onToggleMobileMenu={toggleMobileMenu}
-                        subscriptionAlert={getExpiringAlert(subscriptionStatus)}
+                        subscriptionAlert={!isExpired ? getExpiringAlert(subscriptionStatus) : null}
+                        expiredWarningAlert={isExpired && !isBannerDismissed ? '⚠ Your subscription has expired. Please renew your plan.' : null}
+                        onDismissExpiredWarning={() => setIsBannerDismissed(true)}
                     />
                     <main className="layout-content">
                         <Outlet />
                     </main>
                 </div>
             </div>
+            <SubscriptionExpiryModal
+                open={isExpired && showExpiryModal}
+                onClose={handleCloseExpiryModal}
+            />
         </DataProvider>
     );
 }
