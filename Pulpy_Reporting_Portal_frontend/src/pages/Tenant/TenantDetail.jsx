@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
+import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
 
@@ -86,19 +87,17 @@ function TenantDetail() {
         }
     };
 
-    const formatUtcDateTime = (value) => {
+    const formatIstDateTime = (value) => {
         if (!value) return 'N/A';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return 'N/A';
-        return date.toLocaleString('en-US', {
-            timeZone: 'UTC',
+        const formatted = formatDateTimeIST(value, {
             year: 'numeric',
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
             hour12: true,
-        });
+        }, 'en-US');
+        return formatted || 'N/A';
     };
 
     const fetchSubscriptionStatus = async () => {
@@ -114,14 +113,11 @@ function TenantDetail() {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
+        return formatDateIST(dateString, {
             year: 'numeric',
             month: 'long',
             day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        }, 'en-US') || 'N/A';
     };
 
     const formatNumber = (num) => {
@@ -220,15 +216,15 @@ function TenantDetail() {
                                 </div>
                             </div>
                             <div className="tenant-detail-card">
-                                <label>Subscription Start (UTC)</label>
+                                <label>Subscription Start (IST)</label>
                                 <div className="value">
-                                    {formatUtcDateTime(subscriptionStatus.tenant.subscription_start_at)}
+                                    {formatIstDateTime(subscriptionStatus.tenant.subscription_start_at)}
                                 </div>
                             </div>
                             <div className="tenant-detail-card">
-                                <label>Subscription End (UTC)</label>
+                                <label>Subscription End (IST)</label>
                                 <div className="value">
-                                    {formatUtcDateTime(subscriptionStatus.tenant.subscription_end_at)}
+                                    {formatIstDateTime(subscriptionStatus.tenant.subscription_end_at)}
                                 </div>
                             </div>
                             <div className="tenant-detail-card">

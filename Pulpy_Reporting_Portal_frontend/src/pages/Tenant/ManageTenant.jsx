@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI } from '../../services/api';
+import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
 
@@ -181,12 +182,11 @@ function ManageTenant() {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
+        return formatDateIST(dateString, {
             year: 'numeric',
             month: 'short',
             day: 'numeric'
-        });
+        }, 'en-US') || 'N/A';
     };
 
     if (loading) {

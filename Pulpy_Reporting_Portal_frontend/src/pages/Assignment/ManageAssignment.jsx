@@ -4,6 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Assignment.css';
 
@@ -380,7 +381,7 @@ function ManageAssignment() {
                                     </td>
                                     <td>
                                         {assignment.assigned_at
-                                            ? new Date(assignment.assigned_at).toLocaleDateString()
+                                            ? formatDateIST(assignment.assigned_at)
                                             : '-'
                                         }
                                     </td>

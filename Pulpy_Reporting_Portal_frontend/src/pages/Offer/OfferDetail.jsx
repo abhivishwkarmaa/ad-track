@@ -4,6 +4,7 @@ import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
 
@@ -293,22 +294,22 @@ function OfferDetail() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-US', {
+        return formatDateIST(dateString, {
             year: 'numeric',
             month: 'short',
             day: 'numeric'
-        });
+        }, 'en-US');
     };
 
     const formatDateTime = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleString('en-US', {
+        return formatDateTimeIST(dateString, {
             year: 'numeric',
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
             minute: '2-digit'
-        });
+        }, 'en-US');
     };
 
     return (

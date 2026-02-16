@@ -239,12 +239,12 @@ async function bulkInsertConversions(items) {
     const values = items.map(item => {
         const c = item.data; // conversion data
         // Generate a longer, collision-resistant conversion UUID using the same generator
-        // Fallback to uuidv4 for missing ids (shouldn't happen)
+        // Keep long-format IDs even in fallback paths.
         let conversionUuid;
         try {
             conversionUuid = generateClickId(c.tenant_id || 0, c.offer_id || 0, c.publisher_id || 0, 96);
         } catch (e) {
-            conversionUuid = uuidv4();
+            conversionUuid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`.slice(0, 96);
         }
         c.conversion_uuid = conversionUuid; // Save for postback
 

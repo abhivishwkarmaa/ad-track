@@ -426,7 +426,7 @@ class SubscriptionController {
                 });
             }
 
-            const status = await subscriptionService.getTenantSubscriptionStatus(tenantId);
+            const status = await subscriptionService.updateTenantState(tenantId);
 
             return reply.send({
                 success: true,

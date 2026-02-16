@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { publishersAPI, offersAPI } from '../../services/api';
+import { formatTimeIST } from '../../utils/dateTime';
 import './Affiliate.css';
 
 // Simple check icon
@@ -421,7 +422,7 @@ function PostbackTest() {
                                 <h3>Test Status</h3>
                                 <div className="result-meta">
                                     {result.mode === 'BROWSER_CLICK' && <span className="badge browser-mode">BROWSER CLICK</span>}
-                                    <span className="timestamp">{new Date(result.timestamp).toLocaleTimeString()}</span>
+                                    <span className="timestamp">{formatTimeIST(result.timestamp) || '-'}</span>
                                 </div>
                             </div>
 

@@ -6,6 +6,7 @@ import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { generateClickId } from '../utils/urlGenerator.js';
 import { createOfferSchema, updateOfferStatusSchema } from '../validators/offerValidator.js';
 import { updateOfferSchema } from '../validators/offerValidator.js';
 import { createPublisherSchema, updatePublisherSchema } from '../validators/publisherValidator.js';
@@ -1243,9 +1244,8 @@ export class AdminController {
         });
       }
 
-      // Generate test conversion
-      const { v4: uuidv4 } = await import('uuid');
-      const conversionId = uuidv4();
+      // Generate test conversion with the same long conversion UUID format used elsewhere
+      const conversionId = generateClickId(tenantId || 0, offerId || 0, pubId || 0, 96);
       const affiliateClickId = click.tid || click.click_uuid;
 
 

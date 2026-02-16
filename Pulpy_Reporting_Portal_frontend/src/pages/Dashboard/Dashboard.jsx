@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
+import { formatDateIST } from '../../utils/dateTime';
 import './Dashboard.css';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -342,9 +343,12 @@ function Dashboard() {
 
     const cardsData = cards || {};
 
-    const todayStr = new Date().toLocaleDateString('en-US', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-    });
+    const todayStr = formatDateIST(new Date(), {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    }, 'en-US');
 
     return (
         <div className="dashboard">

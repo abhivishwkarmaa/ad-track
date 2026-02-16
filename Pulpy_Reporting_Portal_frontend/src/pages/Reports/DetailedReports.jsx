@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI, authAPI, getAccessToken } from '../../services/api';
+import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './Reports.css';
 
@@ -231,9 +232,9 @@ function DetailedReports() {
     const formatDate = (dateString, dim) => {
         if (!dateString) return '-';
         if (dim === 'hour') return `${dateString}:00`;
-        if (dim === 'date') return new Date(dateString).toLocaleDateString();
+        if (dim === 'date') return formatDateIST(dateString) || dateString;
         try {
-            return new Date(dateString).toLocaleString();
+            return formatDateTimeIST(dateString) || dateString;
         } catch (e) { return dateString; }
     };
 

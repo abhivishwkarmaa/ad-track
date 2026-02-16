@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI } from '../../services/api';
+import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
 
@@ -305,8 +306,8 @@ function OfferList() {
                                     <td>{offer.country || '-'}</td>
                                     <td>{offer.offer_currency} {offer.advertiser_amount || '0.00'}</td>
                                     <td>{offer.offer_currency} {offer.affiliate_amount || '0.00'}</td>
-                                    <td>{offer.start_date ? new Date(offer.start_date).toLocaleDateString() : '-'}</td>
-                                    <td>{offer.end_date ? new Date(offer.end_date).toLocaleDateString() : '-'}</td>
+                                    <td>{offer.start_date ? formatDateIST(offer.start_date) : '-'}</td>
+                                    <td>{offer.end_date ? formatDateIST(offer.end_date) : '-'}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             {offer.status.toLowerCase() === 'archived' ? (

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
 
@@ -109,7 +110,7 @@ const LiveLogs = () => {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleString();
+        return formatDateTimeIST(dateString) || '-';
     };
 
     return (

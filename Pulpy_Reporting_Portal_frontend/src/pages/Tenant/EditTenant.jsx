@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
+import { formatDateTimeInputIST, inputISTToISO } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
 
@@ -55,20 +56,13 @@ function EditTenant() {
         }
     };
 
-    const toInputDateTime = (value) => {
-        if (!value) return '';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return '';
-        return date.toISOString().slice(0, 16);
-    };
-
     const fetchSubscriptionStatus = async () => {
         try {
             const response = await adminSubscriptionAPI.getTenantStatus(id);
             if (response.success) {
                 setSubscriptionForm({
-                    start_date: toInputDateTime(response.data.tenant.subscription_start_at),
-                    end_date: toInputDateTime(response.data.tenant.subscription_end_at),
+                    start_date: formatDateTimeInputIST(response.data.tenant.subscription_start_at),
+                    end_date: formatDateTimeInputIST(response.data.tenant.subscription_end_at),
                     plan: response.data.tenant.subscription_plan || 'basic',
                     billing_email: response.data.tenant.billing_email || '',
                 });
@@ -137,14 +131,27 @@ function EditTenant() {
 
         setSubscriptionSaving(true);
         try {
+            const endDateIso = inputISTToISO(subscriptionForm.end_date);
+            if (!endDateIso) {
+                toast.error('Invalid subscription end date');
+                setSubscriptionSaving(false);
+                return;
+            }
+
             const payload = {
-                end_date: new Date(subscriptionForm.end_date).toISOString(),
+                end_date: endDateIso,
                 plan: subscriptionForm.plan || 'basic',
                 billing_email: subscriptionForm.billing_email || undefined,
             };
 
             if (subscriptionForm.start_date) {
-                payload.start_date = new Date(subscriptionForm.start_date).toISOString();
+                const startDateIso = inputISTToISO(subscriptionForm.start_date);
+                if (!startDateIso) {
+                    toast.error('Invalid subscription start date');
+                    setSubscriptionSaving(false);
+                    return;
+                }
+                payload.start_date = startDateIso;
             }
 
             const response = await adminSubscriptionAPI.activateSubscription(id, payload);
@@ -231,7 +238,7 @@ function EditTenant() {
                     <h3>Subscription Settings</h3>
                     <div className="tenant-detail-grid">
                         <div className="tenant-detail-card">
-                            <label>Subscription Start (UTC)</label>
+                            <label>Subscription Start (IST)</label>
                             <input
                                 className="tenant-subscription-input"
                                 type="datetime-local"
@@ -242,7 +249,7 @@ function EditTenant() {
                             />
                         </div>
                         <div className="tenant-detail-card">
-                            <label>Subscription End (UTC)</label>
+                            <label>Subscription End (IST)</label>
                             <input
                                 className="tenant-subscription-input"
                                 type="datetime-local"

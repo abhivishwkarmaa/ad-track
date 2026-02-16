@@ -6,6 +6,7 @@ import SubscriptionExpiryModal from './SubscriptionExpiryModal';
 import { DataProvider } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { subscriptionAPI } from '../../services/api';
+import { formatDateTimeIST } from '../../utils/dateTime';
 import { isSubscriptionExpired } from '../../utils/subscription';
 import './Layout.css';
 
@@ -28,21 +29,6 @@ function Layout() {
 
     const toggleMobileMenu = () => {
         setMobileMenuOpen(!mobileMenuOpen);
-    };
-
-    const formatUtcDateTime = (value) => {
-        if (!value) return null;
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return null;
-        return date.toLocaleString('en-US', {
-            timeZone: 'UTC',
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-        });
     };
 
     const formatTimeRemaining = (endDate) => {
@@ -71,20 +57,27 @@ function Layout() {
 
         const endDate = subscription.end_date;
         const remaining = formatTimeRemaining(endDate);
-        const endDateUtc = formatUtcDateTime(endDate);
-        if (!remaining || !endDateUtc) {
+        const endDateIst = formatDateTimeIST(endDate, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true,
+        }, 'en-US');
+        if (!remaining || !endDateIst) {
             return null;
         }
 
         if (subscription.is_trial) {
-            return `Trial: ${remaining} left (UTC ${endDateUtc})`;
+            return `Trial: ${remaining} left (IST ${endDateIst})`;
         }
 
         if (!subscription.is_warning) {
             return null;
         }
 
-        return `Subscription expires in ${remaining} (UTC ${endDateUtc})`;
+        return `Subscription expires in ${remaining} (IST ${endDateIst})`;
     };
 
     const handleCloseExpiryModal = () => {

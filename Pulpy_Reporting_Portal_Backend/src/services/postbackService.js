@@ -2,7 +2,7 @@ import pool, { queryWithTimeout } from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
-import { replaceMacros } from '../utils/urlGenerator.js';
+import { replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import https from 'https';
 import http from 'http';
@@ -178,6 +178,10 @@ const buildApprovalKeys = ({ tenantId, offerId, publisherId, assignmentId }) => 
     approvedKey: `${base}:approved`,
     percentageKey: `${base}:percentage`,
   };
+};
+
+const generateConversionUuid = (tenantId, offerId, publisherId) => {
+  return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
 };
 
 export class PostbackService {
@@ -713,7 +717,7 @@ export class PostbackService {
 
       // ✅ CRITICAL: Check assignment-level capping (budget) with tenant_id
       if (assignment && await this.isAssignmentBudgetCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = uuidv4();
+        const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
         await pool.query(
           `INSERT INTO conversions (
             conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
@@ -744,7 +748,7 @@ export class PostbackService {
 
       // ✅ CRITICAL: Check assignment-level capping (conversions) with tenant_id
       if (assignment && await this.isAssignmentConversionCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = uuidv4();
+        const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
         await pool.query(
           `INSERT INTO conversions (
             conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
@@ -777,7 +781,7 @@ export class PostbackService {
       const capExceeded = await this.isCapExceeded(offer, tenantId);
       if (capExceeded) {
         // Insert rejected_cap record (no payout, no stats)
-        const conversionUuid = uuidv4();
+        const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
         await pool.query(
           `INSERT INTO conversions (
             conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
@@ -808,7 +812,7 @@ export class PostbackService {
       }
 
       // Insert conversion
-      const conversionUuid = uuidv4();
+      const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
       const [insertResult] = await pool.query(
         `INSERT INTO conversions (
           conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,

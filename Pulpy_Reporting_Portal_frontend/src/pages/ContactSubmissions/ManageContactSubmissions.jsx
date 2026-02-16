@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { contactSubmissionsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
+import { formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './ContactSubmissions.css';
 
@@ -162,7 +163,7 @@ function ManageContactSubmissions() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleString();
+        return formatDateTimeIST(dateString) || '-';
     };
 
     const copyEmail = (email) => {
