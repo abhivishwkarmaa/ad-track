@@ -10,7 +10,24 @@ import { formatDateTimeIST } from '../../utils/dateTime';
 import { isSubscriptionExpired } from '../../utils/subscription';
 import './Layout.css';
 
-const SUBSCRIPTION_POPUP_SHOWN_KEY = 'subscription_popup_shown';
+const EXPIRED_MODAL_REPEAT_INTERVAL_MS = 30 * 60 * 1000;
+const EXPIRED_MODAL_LAST_SHOWN_AT_KEY = 'expired_modal_last_shown_at';
+
+const getExpiredModalLastShownAt = () => {
+    const rawValue = localStorage.getItem(EXPIRED_MODAL_LAST_SHOWN_AT_KEY);
+    const parsedValue = Number(rawValue);
+    return Number.isFinite(parsedValue) ? parsedValue : 0;
+};
+
+const shouldShowExpiredModal = () => {
+    const lastShownAt = getExpiredModalLastShownAt();
+    if (!lastShownAt) return true;
+    return Date.now() - lastShownAt >= EXPIRED_MODAL_REPEAT_INTERVAL_MS;
+};
+
+const markExpiredModalShownNow = () => {
+    localStorage.setItem(EXPIRED_MODAL_LAST_SHOWN_AT_KEY, String(Date.now()));
+};
 
 function Layout() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -20,7 +37,6 @@ function Layout() {
     const [subscriptionStatus, setSubscriptionStatus] = useState(null);
     const [isExpired, setIsExpired] = useState(false);
     const [showExpiryModal, setShowExpiryModal] = useState(false);
-    const [isBannerDismissed, setIsBannerDismissed] = useState(false);
     const { user } = useAuth();
 
     const toggleSidebar = () => {
@@ -82,7 +98,6 @@ function Layout() {
 
     const handleCloseExpiryModal = () => {
         setShowExpiryModal(false);
-        localStorage.setItem(SUBSCRIPTION_POPUP_SHOWN_KEY, 'true');
     };
 
     // Fetch subscription status on mount
@@ -104,12 +119,13 @@ function Layout() {
 
                     if (!expired) {
                         setShowExpiryModal(false);
-                        setIsBannerDismissed(false);
-                        localStorage.removeItem(SUBSCRIPTION_POPUP_SHOWN_KEY);
+                        localStorage.removeItem(EXPIRED_MODAL_LAST_SHOWN_AT_KEY);
                     } else {
-                        const popupAlreadyShown = localStorage.getItem(SUBSCRIPTION_POPUP_SHOWN_KEY) === 'true';
-                        setShowExpiryModal(!popupAlreadyShown);
-                        setIsBannerDismissed(false);
+                        // Show on login only if 30 minutes cooldown has passed.
+                        if (shouldShowExpiredModal()) {
+                            setShowExpiryModal(true);
+                            markExpiredModalShownNow();
+                        }
                     }
                 } else {
                     setSubscriptionStatus(null);
@@ -132,6 +148,36 @@ function Layout() {
 
         checkTenantStatus();
     }, [user?.tenant_id]);
+
+    useEffect(() => {
+        if (!isExpired) {
+            return undefined;
+        }
+
+        const showExpiredModalIfDue = () => {
+            if (!shouldShowExpiredModal()) {
+                return;
+            }
+            setShowExpiryModal(true);
+            markExpiredModalShownNow();
+        };
+
+        const timeSinceLastShown = Date.now() - getExpiredModalLastShownAt();
+        const initialDelayMs = Math.max(EXPIRED_MODAL_REPEAT_INTERVAL_MS - timeSinceLastShown, 0);
+
+        let intervalId;
+        const timeoutId = setTimeout(() => {
+            showExpiredModalIfDue();
+            intervalId = setInterval(showExpiredModalIfDue, EXPIRED_MODAL_REPEAT_INTERVAL_MS);
+        }, initialDelayMs);
+
+        return () => {
+            clearTimeout(timeoutId);
+            if (intervalId) {
+                clearInterval(intervalId);
+            }
+        };
+    }, [isExpired]);
 
     // Show loading while checking status
     if (checkingStatus) {
@@ -175,8 +221,7 @@ function Layout() {
                         onToggleSidebar={toggleSidebar}
                         onToggleMobileMenu={toggleMobileMenu}
                         subscriptionAlert={!isExpired ? getExpiringAlert(subscriptionStatus) : null}
-                        expiredWarningAlert={isExpired && !isBannerDismissed ? '⚠ Your subscription has expired. Please renew your plan.' : null}
-                        onDismissExpiredWarning={() => setIsBannerDismissed(true)}
+                        expiredWarningAlert={isExpired ? '⚠ Your subscription has expired. Please renew your plan.' : null}
                     />
                     <main className="layout-content">
                         <Outlet />

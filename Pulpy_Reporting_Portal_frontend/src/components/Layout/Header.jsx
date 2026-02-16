@@ -43,8 +43,7 @@ function Header({
     onToggleSidebar,
     onToggleMobileMenu,
     subscriptionAlert,
-    expiredWarningAlert,
-    onDismissExpiredWarning
+    expiredWarningAlert
 }) {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -82,19 +81,6 @@ function Header({
                         <span className="header-subscription-alert-text">
                             {expiredWarningAlert || subscriptionAlert}
                         </span>
-                        {expiredWarningAlert && (
-                            <button
-                                type="button"
-                                className="header-subscription-alert-close"
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    onDismissExpiredWarning?.();
-                                }}
-                                aria-label="Dismiss subscription warning"
-                            >
-                                ×
-                            </button>
-                        )}
                     </div>
                 )}
                 <button 

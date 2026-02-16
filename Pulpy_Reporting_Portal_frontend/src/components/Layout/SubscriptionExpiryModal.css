@@ -20,23 +20,6 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
 }
 
-.subscription-expiry-modal-close {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    border: none;
-    background: transparent;
-    color: #6b7280;
-    font-size: 22px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 4px;
-}
-
-.subscription-expiry-modal-close:hover {
-    color: #111827;
-}
-
 .subscription-expiry-modal-card h3 {
     margin: 0 0 10px;
     font-size: 22px;
@@ -68,4 +51,10 @@
 
 .subscription-expiry-modal-ok:hover {
     background: #e95c29;
+}
+
+.subscription-expiry-modal-ok:disabled {
+    background: #d1d5db;
+    color: #4b5563;
+    cursor: not-allowed;
 }
