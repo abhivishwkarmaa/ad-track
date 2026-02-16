@@ -130,13 +130,39 @@ function OfferDetail() {
             if (!id) return;
             try {
                 setLoadingStats(true);
+
+                // Get date range for last 7 days
+                const endDate = new Date();
+                const startDate = new Date();
+                startDate.setDate(endDate.getDate() - 6);
+
+                const formatDate = (date) => {
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    return `${year}-${month}-${day}`;
+                };
+
                 const [statsRes, dailyRes] = await Promise.all([
                     offersAPI.getOfferStats(id),
-                    offersAPI.getOfferDailyStats(id)
+                    offersAPI.getOfferDailyStats(id, {
+                        start_date: formatDate(startDate),
+                        end_date: formatDate(endDate)
+                    })
                 ]);
 
                 if (statsRes.success) setStats(statsRes.data);
-                if (dailyRes.success) setDailyStats(dailyRes.data);
+                if (dailyRes.success) {
+                    // Frontend filtering as fallback in case backend ignores params
+                    const cutoffDate = formatDate(startDate);
+                    // Filter where date is greater than or equal to cutoff date
+                    // Assumes date is in ISO format YYYY-MM-DD or similar sortable string
+                    const filteredData = dailyRes.data.filter(item => {
+                        const itemDate = item.date.substring(0, 10); // Ensure YYYY-MM-DD
+                        return itemDate >= cutoffDate;
+                    });
+                    setDailyStats(filteredData);
+                }
             } catch (error) {
                 console.error('Error fetching stats:', error);
             } finally {
@@ -436,7 +462,7 @@ function OfferDetail() {
             {/* Daily Activity */}
             {dailyStats && dailyStats.length > 0 && (
                 <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
-                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Daily Activity</h2>
+                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Daily Activity (Last 7 Days)</h2>
                     <div className="table-responsive">
                         <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>

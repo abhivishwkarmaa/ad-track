@@ -149,10 +149,47 @@
     background: rgba(255, 255, 255, 0.08);
 }
 
+/* Password Toggle Styles */
+.password-input-wrapper {
+    position: relative;
+}
+
+.password-input-wrapper input {
+    padding-right: 48px;
+    /* Make space for eye icon */
+}
+
+.password-toggle-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: color var(--transition-fast);
+}
+
+.password-toggle-btn:hover {
+    color: var(--primary-color);
+}
+
+.password-toggle-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
 .login-options {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    /* Centered as requested */
     margin-bottom: 24px;
 }
 
@@ -369,7 +406,8 @@
 
     .login-options {
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
+        /* Center in mobile too */
         gap: 12px;
         margin-bottom: 20px;
     }

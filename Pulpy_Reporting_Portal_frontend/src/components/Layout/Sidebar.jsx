@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import logoImage from '../../assets/logo.png';
+import LogoutConfirmationModal from './LogoutConfirmationModal';
 import './Sidebar.css';
 
 // Icons as SVG components - matching the image style (outline icons)
@@ -114,6 +115,7 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
     const { user, logout } = useAuth();
     const location = useLocation();
     const navigate = useNavigate();
+    const [showLogoutModal, setShowLogoutModal] = useState(false);
 
     // Check if on admin subdomain
     const hostname = window.location.hostname;
@@ -216,9 +218,14 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
         }
     ];
 
-    const handleLogout = () => {
+    const handleLogoutClick = () => {
+        setShowLogoutModal(true);
+    };
+
+    const confirmLogout = () => {
         logout();
         onCloseMobile();
+        setShowLogoutModal(false);
     };
 
     return (
@@ -274,7 +281,7 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                     </div>
                     <div
                         className="nav-item"
-                        onClick={handleLogout}
+                        onClick={handleLogoutClick}
                         style={{ marginTop: '12px', cursor: 'pointer' }}
                         data-tooltip="Logout"
                     >
@@ -283,6 +290,12 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                     </div>
                 </div>
             </aside>
+
+            <LogoutConfirmationModal
+                isOpen={showLogoutModal}
+                onClose={() => setShowLogoutModal(false)}
+                onConfirm={confirmLogout}
+            />
         </>
     );
 }
