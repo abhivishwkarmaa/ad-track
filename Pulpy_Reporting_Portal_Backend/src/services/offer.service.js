@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
+import net from 'node:net';
 
 const jsonFields = [
   'macros_json',
@@ -20,12 +21,87 @@ const toJsonOrNull = (val) =>
   val === undefined || val === null ? null : JSON.stringify(val);
 
 class OfferService {
+  _normalizeIpList(ipList) {
+    if (!ipList || typeof ipList !== 'string') return [];
+
+    return ipList
+      .split(/[\n,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  _isIpInCidr(ip, cidr) {
+    const [network, rawPrefix] = cidr.split('/');
+    const prefix = Number(rawPrefix);
+
+    // Keep CIDR support simple and safe: IPv4 only for now.
+    if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
+    if (net.isIP(ip) !== 4 || net.isIP(network) !== 4) return false;
+
+    const ipToInt = (value) => value
+      .split('.')
+      .map(Number)
+      .reduce((acc, octet) => ((acc << 8) | octet) >>> 0, 0);
+
+    const ipInt = ipToInt(ip);
+    const networkInt = ipToInt(network);
+    const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+
+    return (ipInt & mask) === (networkInt & mask);
+  }
+
+  _ipMatchesRule(ip, rule) {
+    if (!ip || !rule) return false;
+
+    const normalizedIp = ip.trim();
+    const normalizedRule = rule.trim();
+
+    // Exact match
+    if (normalizedRule === normalizedIp) {
+      return true;
+    }
+
+    // Wildcard prefix support, e.g. 192.168.1.*
+    if (normalizedRule.endsWith('*')) {
+      const prefix = normalizedRule.slice(0, -1);
+      return normalizedIp.startsWith(prefix);
+    }
+
+    // CIDR support, e.g. 10.0.0.0/24
+    if (normalizedRule.includes('/')) {
+      return this._isIpInCidr(normalizedIp, normalizedRule);
+    }
+
+    return false;
+  }
+
+  _isIpAllowed(offer, ip) {
+    const action = String(offer?.ip_action || '').trim().toLowerCase();
+    if (!action) return true;
+
+    const rules = this._normalizeIpList(offer?.ip_list);
+    if (rules.length === 0) return true;
+
+    const hasMatch = rules.some((rule) => this._ipMatchesRule(ip, rule));
+
+    if (['block', 'blacklist', 'deny', 'blocked'].includes(action)) {
+      return !hasMatch;
+    }
+
+    if (['allow', 'whitelist'].includes(action)) {
+      return hasMatch;
+    }
+
+    return true;
+  }
+
   /**
    * Check if offer is valid for operations (clicks, conversions, etc.)
    * @param {Object} offer - Offer object from database
+   * @param {Object} context - Runtime context (e.g. ip)
    * @returns {Object} - { valid: boolean, message: string, error_type: string }
    */
-  checkOfferValidity(offer) {
+  checkOfferValidity(offer, context = {}) {
     if (!offer) {
       return {
         valid: false,
@@ -71,6 +147,15 @@ class OfferService {
           error_type: 'offer_not_started'
         };
       }
+    }
+
+    // Check IP allow/block rules
+    if (context.ip && !this._isIpAllowed(offer, context.ip)) {
+      return {
+        valid: false,
+        message: 'This offer is not available for your network.',
+        error_type: 'ip_blocked'
+      };
     }
 
     return {

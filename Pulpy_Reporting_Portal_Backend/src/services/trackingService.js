@@ -75,18 +75,6 @@ export class TrackingService {
       // If we saw this exact same User+IP+Offer+Tenant in the last 5 seconds, 
       // return the cached redirect immediately without recording a new click.
       const cachedRedirect = await redis.get(redirectCacheKey);
-      if (cachedRedirect) {
-        logger.info('[CLICK] Duplicate click detected - returning cached redirect', {
-          tenant_id: tenantId,
-          public_offer_id: publicOfferId,
-          ip,
-          cache_key: redirectCacheKey
-        });
-        return {
-          redirect: cachedRedirect,
-          clickId: 'duplicate'
-        };
-      }
       // ✅ NOTE: Tenant already resolved above
       // Tenant identity MUST come from subdomain (Host header)
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
@@ -284,11 +272,25 @@ export class TrackingService {
       let redirectUrl = '';
 
       // Validation
-      const offerValidation = offerService.checkOfferValidity(offer);
+      const offerValidation = offerService.checkOfferValidity(offer, { ip });
       if (!offerValidation.valid) {
         return {
           html: generateOfferErrorPage(offerValidation.message, offerValidation.error_type),
           clickId: null
+        };
+      }
+
+      // Only return cached redirect after all security/business validations pass.
+      if (cachedRedirect) {
+        logger.info('[CLICK] Duplicate click detected - returning cached redirect', {
+          tenant_id: tenantId,
+          public_offer_id: publicOfferId,
+          ip,
+          cache_key: redirectCacheKey
+        });
+        return {
+          redirect: cachedRedirect,
+          clickId: 'duplicate'
         };
       }
 
