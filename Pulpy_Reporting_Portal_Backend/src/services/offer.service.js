@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
+import cacheService from './cacheService.js';
 
 const jsonFields = [
   'macros_json',
@@ -251,10 +252,10 @@ class OfferService {
         toJsonOrNull(data.isp_targeting_json),
         toJsonOrNull(data.carrier_targeting_json),
         toJsonOrNull(data.city_targeting_json),
-        data.capping_type || 'none',
+        (data.capping_type && data.capping_type !== 'none') ? data.capping_type : null,
         data.capping_duration || null,
         data.capping_action || 'stop',
-        data.fallback_type || 'none',
+        (data.fallback_type && data.fallback_type !== 'none') ? data.fallback_type : null,
 
         data.daily_cap ?? null,
         data.monthly_cap ?? null,
@@ -426,6 +427,8 @@ class OfferService {
             value = toJsonOrNull(value);
           } else if (key === 'fallback_enabled') {
             value = value ? 1 : 0;
+          } else if (key === 'capping_type' || key === 'fallback_type') {
+            value = (value === 'none') ? null : value;
           }
           fields.push(`${key} = ?`);
           params.push(value ?? null);
@@ -451,6 +454,8 @@ class OfferService {
         return null;
       }
 
+      await cacheService.invalidateOffer(internalId, tenantId);
+
       return this.getOfferById(internalId, tenantId);
     } catch (error) {
       logger.error('OfferService.updateOffer error:', error);
@@ -464,11 +469,25 @@ class OfferService {
    */
   async getInternalOfferIdByPublicId(publicOfferId, tenantId) {
     if (publicOfferId == null || !tenantId) return null;
-    const [rows] = await pool.query(
-      'SELECT id FROM offers WHERE tenant_id = ? AND public_offer_id = ? LIMIT 1',
+
+    // 1. Try Public ID or Display ID
+    const [publicRows] = await pool.query(
+      `SELECT id FROM (
+        SELECT id, public_offer_id, 
+        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+        FROM offers o WHERE tenant_id = ?
+      ) t WHERE t.public_offer_id = ? OR t.display_id = ? LIMIT 1`,
+      [tenantId, publicOfferId, publicOfferId]
+    );
+
+    if (publicRows?.[0]?.id) return publicRows[0].id;
+
+    // 2. Fallback to Internal ID
+    const [internalRows] = await pool.query(
+      'SELECT id FROM offers WHERE tenant_id = ? AND id = ? LIMIT 1',
       [tenantId, publicOfferId]
     );
-    return rows?.[0]?.id ?? null;
+    return internalRows?.[0]?.id ?? null;
   }
 
   async getOfferById(id, tenantId = null, internalOnly = false) {

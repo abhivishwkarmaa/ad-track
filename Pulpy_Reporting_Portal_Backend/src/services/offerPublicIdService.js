@@ -207,14 +207,30 @@ class OfferPublicIdService {
      */
     async getPublisherByPublicId(publicPublisherId, tenantId) {
         try {
+            // 1. Try by Public ID first
             const [rows] = await pool.query(
                 'SELECT * FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
                 [tenantId, publicPublisherId]
             );
-            return rows[0] || null;
+            if (rows[0]) return rows[0];
+
+            // 2. Fallback to Internal ID lookup (if integer provided)
+            const [internalRows] = await pool.query(
+                'SELECT * FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
+                [tenantId, publicPublisherId] // Using publicPublisherId as likely internal ID here
+            );
+            return internalRows[0] || null;
+
         } catch (error) {
-            if (error.code === 'ER_BAD_FIELD_ERROR') return null;
-            throw error;
+            // BACKWARD COMPAT: If column missing (unlikely now), try ID
+            if (error.code === 'ER_BAD_FIELD_ERROR') {
+                const [internalRows] = await pool.query(
+                    'SELECT * FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
+                    [tenantId, publicPublisherId]
+                );
+                return internalRows[0] || null;
+            }
+            return null;
         }
     }
 

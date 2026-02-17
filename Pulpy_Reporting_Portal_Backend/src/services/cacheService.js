@@ -276,6 +276,29 @@ export class CacheService {
             logger.warn(`Failed to cache ${key}`, e);
         }
     }
+
+    // --- Invalidation ---
+
+    async invalidateOffer(offerId, tenantId) {
+        const key = tenantId
+            ? `ref:offer:${tenantId}:${offerId}`
+            : `ref:offer:${offerId}`;
+        await redis.del(key);
+    }
+
+    async invalidatePublisher(publisherId, tenantId) {
+        const key = tenantId
+            ? `ref:publisher:${tenantId}:${publisherId}`
+            : `ref:publisher:${publisherId}`;
+        await redis.del(key);
+    }
+
+    async invalidateAssignment(publisherId, offerId, tenantId) {
+        const key = tenantId
+            ? `ref:assign:${tenantId}:${publisherId}:${offerId}`
+            : `ref:assign:${publisherId}:${offerId}`;
+        await redis.del(key);
+    }
 }
 
 export default new CacheService();

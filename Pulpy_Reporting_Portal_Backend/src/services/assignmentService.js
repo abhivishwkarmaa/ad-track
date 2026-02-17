@@ -5,6 +5,7 @@ import offerService from './offer.service.js';
 import { generateTrackingURL, generateAlternativeTrackingURL, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
+import cacheService from './cacheService.js';
 
 export class AssignmentService {
   async create(data, tenantId = null) {
@@ -64,7 +65,8 @@ export class AssignmentService {
         const callbackUrl = pubData.callback_url || null; // Store only if explicitly provided (override)
 
         // Prepare capping data
-        const capType = pubData.capping_type || null;
+        // Convert 'none' to null for DB enum compatibility
+        const capType = (pubData.capping_type && pubData.capping_type !== 'none') ? pubData.capping_type : null;
         const capDuration = pubData.capping_duration || null;
         const capAction = pubData.capping_action || 'stop';
         const capAmount = pubData.capping_amount || 0;
@@ -138,12 +140,15 @@ export class AssignmentService {
            JOIN offers o ON po.offer_id = o.id
            WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
            LIMIT 1`,
-          [pubData.publisher_id, offer_id, tenantId]
+          [publisher.id, offer.id, tenantId]
         );
 
         const assignment = Array.isArray(rows) ? rows[0] : rows;
+
         if (assignment) {
           createdAssignments.push(this.formatAssignment(assignment));
+          // Invalidate cache
+          await cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
         }
       } catch (error) {
         let errorMessage = error.message || 'Failed to create assignment';
@@ -240,6 +245,9 @@ export class AssignmentService {
     );
 
     const assignment = Array.isArray(rows) ? rows[0] : rows;
+    if (assignment) {
+      await cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
+    }
     return this.formatAssignment(assignment);
   }
 
@@ -520,7 +528,7 @@ export class AssignmentService {
 
       if (data.capping_type !== undefined) {
         updateFields.push('capping_type = ?');
-        updateValues.push(data.capping_type);
+        updateValues.push(data.capping_type === 'none' ? null : data.capping_type);
 
         if (data.capping_type === 'budget') {
           updateFields.push('capping_budget_duration = ?', 'capping_budget_amount = ?');
@@ -600,6 +608,8 @@ export class AssignmentService {
 
       logger.info(`Updated assignment (public id ${id}, internal ${dbId})`);
 
+      await cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
+
       return await this.findById(dbId, tenantId, true);
     } catch (error) {
       logger.error('AssignmentService.update error:', error);
@@ -640,6 +650,8 @@ export class AssignmentService {
     if (result.affectedRows === 0) {
       return null;
     }
+    await cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
+
     return existing;
   }
 }

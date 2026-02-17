@@ -355,15 +355,8 @@ export class TrackingService {
       }
 
       // 4B. Check Publisher Cap
-      logger.info('[CAP_DEBUG] Checking Publisher Cap', {
-        assignment_id: assignment.id,
-        capping_type: assignment.capping_type,
-        capping_action: assignment.capping_action,
-        capping_budget_amount: assignment.capping_budget_amount,
-        capping_conversions_amount: assignment.capping_conversions_amount
-      });
+      // 4B. Check Publisher Cap
       const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
-      logger.info('[CAP_DEBUG] Publisher Cap Status Result', pubCapStatus);
       if (pubCapStatus.isHit) {
         logger.info(`[CAP] Publisher Cap HIT`, {
           assignment_id: assignment.id,
@@ -884,7 +877,14 @@ export class TrackingService {
         // We clean the query part to remove old offer_id/pub_id if they might conflict, 
         // but typically just appending works if the endpoint prioritizes the first ones.
         // Safer: construct clean URL.
-        const newUrl = `${protocol}://${host}/click?offer_id=${publicOfferId}&pub_id=${publicPublisherId}${queryPart ? '&' + queryPart : ''}`;
+        const validParams = new URLSearchParams(queryPart);
+        validParams.delete('offer_id');
+        validParams.delete('oid');
+        validParams.delete('pub_id');
+        validParams.delete('a');
+
+        const cleanQuery = validParams.toString();
+        const newUrl = `${protocol}://${host}/click?offer_id=${publicOfferId}&pub_id=${publicPublisherId}${cleanQuery ? '&' + cleanQuery : ''}`;
 
         logger.info('[CAP] Redirecting to fallback offer', {
           original_offer: offer.id,

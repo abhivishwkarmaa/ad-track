@@ -841,9 +841,14 @@ function OfferDetail() {
                                                 )}
                                             </span>
                                             {assignment.capping_type && assignment.capping_type !== 'none' && (
-                                                <span className="meta-badge" style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)' }}>
-                                                    {assignment.capping_type === 'budget' ? 'Budget' : 'Conv'} Cap: {assignment.capping_amount}
-                                                </span>
+                                                <>
+                                                    <span className="meta-badge" style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)' }}>
+                                                        {assignment.capping_type === 'budget' ? 'Budget' : 'Conv'} Cap: {assignment.capping_amount} ({assignment.capping_duration})
+                                                    </span>
+                                                    <span className="meta-badge" style={{ color: '#e91e63', background: 'rgba(233, 30, 99, 0.1)', marginLeft: '6px' }}>
+                                                        Action: {assignment.capping_action}
+                                                    </span>
+                                                </>
                                             )}
                                         </div>
                                     </div>
@@ -986,7 +991,8 @@ function OfferDetail() {
                                                 let trackingUrl = '';
                                                 if (assignment.id) {
                                                     try {
-                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.public_assignment_id, { for_offer_public_id: id });
+                                                        // assignment.id is the public assignment id returned by the backend formatAssignment
+                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
                                                         if (trackingResponse.success) {
                                                             trackingUrl = trackingResponse.data.tracking_url;
                                                         }
