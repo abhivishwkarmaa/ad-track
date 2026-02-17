@@ -88,6 +88,7 @@ function OfferDetail() {
     const [offer, setOffer] = useState(null);
     const [publishers, setPublishers] = useState([]);
     const [loadingPublishers, setLoadingPublishers] = useState(false);
+    const [offers, setOffers] = useState([]);
     const [assignments, setAssignments] = useState([]);
     const [loadingAssignments, setLoadingAssignments] = useState(false);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
@@ -227,13 +228,19 @@ function OfferDetail() {
         const fetchPublishers = async () => {
             try {
                 setLoadingPublishers(true);
-                const response = await publishersAPI.getPublishers({ status: 'active', limit: 100 });
-                if (response.success && response.data) {
-                    setPublishers(response.data);
+                const [publishersRes, offersRes] = await Promise.all([
+                    publishersAPI.getPublishers({ status: 'active', limit: 100 }),
+                    offersAPI.getOffers({ limit: 100 })
+                ]);
+                if (publishersRes.success && publishersRes.data) {
+                    setPublishers(publishersRes.data);
+                }
+                if (offersRes.success && Array.isArray(offersRes.data)) {
+                    setOffers(offersRes.data);
                 }
             } catch (error) {
-                console.error('Error fetching publishers:', error);
-                toast.error('Failed to load publishers');
+                console.error('Error fetching publishers or offers:', error);
+                toast.error('Failed to load publishers or offers');
             } finally {
                 setLoadingPublishers(false);
             }
@@ -265,6 +272,7 @@ function OfferDetail() {
                                 }
                             }
                             return {
+                                offer_id: assignment.offer_id?.toString() || '',
                                 publisher_id: assignment.publisher_id,
                                 publisher_email: assignment.publisher_email,
                                 payout_override: assignment.payout_override || '',
@@ -677,6 +685,47 @@ function OfferDetail() {
                                 return (
                                     <div key={index} className="publisher-row editing">
                                         <div className="edit-form-grid">
+                                            {/* Offer & Publisher selectors to mirror Assignment edit page */}
+                                            <div className="form-group">
+                                                <label className="form-label required">Offer</label>
+                                                <select
+                                                    className="form-control"
+                                                    value={assignment.offer_id || (offer?.id?.toString() || '')}
+                                                    onChange={(e) => {
+                                                        const updated = [...publisherAssignments];
+                                                        updated[index].offer_id = e.target.value;
+                                                        setPublisherAssignments(updated);
+                                                    }}
+                                                >
+                                                    <option value="">Select an offer</option>
+                                                    {offers.map(o => (
+                                                        <option key={o.id} value={o.id}>
+                                                            {o.name} ({o.category})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="form-group">
+                                                <label className="form-label required">Publisher</label>
+                                                <select
+                                                    className="form-control"
+                                                    value={assignment.publisher_id || ''}
+                                                    onChange={(e) => {
+                                                        const updated = [...publisherAssignments];
+                                                        updated[index].publisher_id = e.target.value;
+                                                        setPublisherAssignments(updated);
+                                                    }}
+                                                >
+                                                    <option value="">Select a publisher</option>
+                                                    {publishers.map(p => (
+                                                        <option key={p.id} value={p.public_publisher_id || p.id}>
+                                                            {p.first_name} ({p.email})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
                                             <div className="form-group">
                                                 <label className="form-label">Payout Override</label>
                                                 <input
@@ -933,7 +982,13 @@ function OfferDetail() {
                                     <div className="actions-col">
                                         <button
                                             className="icon-btn"
-                                            onClick={() => setEditingAssignmentIndex(index)}
+                                            onClick={() => {
+                                                if (assignment.assignment_id) {
+                                                    navigate(`/assignment/edit/${assignment.assignment_id}`);
+                                                } else {
+                                                    toast.error('Please save the assignment first before editing.');
+                                                }
+                                            }}
                                             title="Edit Assignment"
                                         >
                                             <EditIcon />
@@ -983,44 +1038,45 @@ function OfferDetail() {
 
                                     // Reload assignments for this offer only (same endpoint as initial load)
                                     const response = await offersAPI.getOfferAssignments(id);
-                                    if (response.success && response.data) {
-                                        setAssignments(response.data);
+                                        if (response.success && response.data) {
+                                            setAssignments(response.data);
 
-                                        const updatedAssignments = await Promise.all(
-                                            response.data.map(async (assignment) => {
-                                                let trackingUrl = '';
-                                                if (assignment.id) {
-                                                    try {
-                                                        // assignment.id is the public assignment id returned by the backend formatAssignment
-                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
-                                                        if (trackingResponse.success) {
-                                                            trackingUrl = trackingResponse.data.tracking_url;
+                                            const updatedAssignments = await Promise.all(
+                                                response.data.map(async (assignment) => {
+                                                    let trackingUrl = '';
+                                                    if (assignment.id) {
+                                                        try {
+                                                            // assignment.id is the public assignment id returned by the backend formatAssignment
+                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
+                                                            if (trackingResponse.success) {
+                                                                trackingUrl = trackingResponse.data.tracking_url;
+                                                            }
+                                                        } catch (error) {
+                                                            console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
                                                         }
-                                                    } catch (error) {
-                                                        console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
                                                     }
-                                                }
-                                                return {
-                                                    publisher_id: assignment.publisher_id,
-                                                    publisher_email: assignment.publisher_email,
-                                                    payout_override: assignment.payout_override || '',
-                                                    conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                                    capping_type: assignment.capping_type || 'none',
-                                                    capping_duration: assignment.capping_duration || 'daily',
-                                                    capping_amount: assignment.capping_amount || '',
-                                                    capping_action: assignment.capping_action || 'stop',
-                                                    callback_url: assignment.callback_url || '',
-                                                    offer_url: assignment.destination_url || assignment.offer_url || '',
-                                                    notes: assignment.notes || '',
-                                                    status: assignment.status || 'active',
-                                                    assignment_id: assignment.id,
-                                                    tracking_url: trackingUrl,
-                                                    selectedTokens: []
-                                                };
-                                            })
-                                        );
-                                        setPublisherAssignments(updatedAssignments);
-                                    }
+                                                    return {
+                                                        offer_id: assignment.offer_id?.toString() || id?.toString(),
+                                                        publisher_id: assignment.publisher_id,
+                                                        publisher_email: assignment.publisher_email,
+                                                        payout_override: assignment.payout_override || '',
+                                                        conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+                                                        capping_type: assignment.capping_type || 'none',
+                                                        capping_duration: assignment.capping_duration || 'daily',
+                                                        capping_amount: assignment.capping_amount || '',
+                                                        capping_action: assignment.capping_action || 'stop',
+                                                        callback_url: assignment.callback_url || '',
+                                                        offer_url: assignment.destination_url || assignment.offer_url || '',
+                                                        notes: assignment.notes || '',
+                                                        status: assignment.status || 'active',
+                                                        assignment_id: assignment.id,
+                                                        tracking_url: trackingUrl,
+                                                        selectedTokens: []
+                                                    };
+                                                })
+                                            );
+                                            setPublisherAssignments(updatedAssignments);
+                                        }
                                 } catch (error) {
                                     console.error('Error saving assignments:', error);
                                     toast.error(error.message || 'Failed to save assignments');
