@@ -269,8 +269,10 @@ function OfferDetail() {
                                 publisher_email: assignment.publisher_email,
                                 payout_override: assignment.payout_override || '',
                                 conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
-                                capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
+                                capping_type: assignment.capping_type || 'none',
+                                capping_duration: assignment.capping_duration || 'daily',
+                                capping_amount: assignment.capping_amount || '',
+                                capping_action: assignment.capping_action || 'stop',
                                 callback_url: assignment.callback_url || '',
                                 offer_url: assignment.destination_url || assignment.offer_url || '',
                                 notes: assignment.notes || '',
@@ -621,8 +623,10 @@ function OfferDetail() {
                                             publisher_email: publisher.email,
                                             payout_override: '',
                                             conversion_approval_percentage: '',
-                                            capping_budget: { duration: 'day', amount: '' },
-                                            capping_conversions: { duration: 'day', amount: '' },
+                                            capping_type: 'none',
+                                            capping_duration: 'daily',
+                                            capping_amount: '',
+                                            capping_action: 'stop',
                                             callback_url: '',
                                             offer_url: '',
                                             notes: '',
@@ -703,65 +707,77 @@ function OfferDetail() {
                                                     placeholder="Default"
                                                 />
                                             </div>
-                                            <div className="form-group">
-                                                <label className="form-label">Budget Cap</label>
-                                                <div className="input-with-action">
-                                                    <input
-                                                        type="number"
-                                                        className="form-control"
-                                                        value={assignment.capping_budget?.amount || ''}
-                                                        onChange={(e) => {
-                                                            const updated = [...publisherAssignments];
-                                                            updated[index].capping_budget = { ...updated[index].capping_budget, amount: e.target.value };
-                                                            setPublisherAssignments(updated);
-                                                        }}
-                                                        placeholder="Amount"
-                                                    />
-                                                    <select
-                                                        className="form-control"
-                                                        style={{ width: '100px' }}
-                                                        value={assignment.capping_budget?.duration || 'day'}
-                                                        onChange={(e) => {
-                                                            const updated = [...publisherAssignments];
-                                                            updated[index].capping_budget = { ...updated[index].capping_budget, duration: e.target.value };
-                                                            setPublisherAssignments(updated);
-                                                        }}
-                                                    >
-                                                        <option value="day">Day</option>
-                                                        <option value="week">Week</option>
-                                                        <option value="month">Month</option>
-                                                    </select>
+                                            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                                                <h4 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '10px', marginTop: '10px', color: '#555' }}>Capping & Budget</h4>
+                                                <div className="offer-form-row three-col" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                                                    <div className="form-group" style={{ marginBottom: 0 }}>
+                                                        <label className="form-label">Capping Type</label>
+                                                        <select
+                                                            className="form-control"
+                                                            value={assignment.capping_type}
+                                                            onChange={(e) => {
+                                                                const updated = [...publisherAssignments];
+                                                                updated[index].capping_type = e.target.value;
+                                                                setPublisherAssignments(updated);
+                                                            }}
+                                                        >
+                                                            <option value="none">None</option>
+                                                            <option value="budget">Budget Cap</option>
+                                                            <option value="conversion">Conversion Cap</option>
+                                                        </select>
+                                                    </div>
+                                                    {assignment.capping_type !== 'none' && (
+                                                        <>
+                                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                                <label className="form-label">Duration</label>
+                                                                <select
+                                                                    className="form-control"
+                                                                    value={assignment.capping_duration}
+                                                                    onChange={(e) => {
+                                                                        const updated = [...publisherAssignments];
+                                                                        updated[index].capping_duration = e.target.value;
+                                                                        setPublisherAssignments(updated);
+                                                                    }}
+                                                                >
+                                                                    <option value="daily">Daily</option>
+                                                                    <option value="weekly">Weekly</option>
+                                                                    <option value="monthly">Monthly</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                                                <label className="form-label">Amount</label>
+                                                                <input
+                                                                    type="number"
+                                                                    className="form-control"
+                                                                    value={assignment.capping_amount}
+                                                                    onChange={(e) => {
+                                                                        const updated = [...publisherAssignments];
+                                                                        updated[index].capping_amount = e.target.value;
+                                                                        setPublisherAssignments(updated);
+                                                                    }}
+                                                                    placeholder="Limit"
+                                                                />
+                                                            </div>
+                                                        </>
+                                                    )}
                                                 </div>
-                                            </div>
-                                            <div className="form-group">
-                                                <label className="form-label">Conv. Cap</label>
-                                                <div className="input-with-action">
-                                                    <input
-                                                        type="number"
-                                                        className="form-control"
-                                                        value={assignment.capping_conversions?.amount || ''}
-                                                        onChange={(e) => {
-                                                            const updated = [...publisherAssignments];
-                                                            updated[index].capping_conversions = { ...updated[index].capping_conversions, amount: e.target.value };
-                                                            setPublisherAssignments(updated);
-                                                        }}
-                                                        placeholder="Amount"
-                                                    />
-                                                    <select
-                                                        className="form-control"
-                                                        style={{ width: '100px' }}
-                                                        value={assignment.capping_conversions?.duration || 'day'}
-                                                        onChange={(e) => {
-                                                            const updated = [...publisherAssignments];
-                                                            updated[index].capping_conversions = { ...updated[index].capping_conversions, duration: e.target.value };
-                                                            setPublisherAssignments(updated);
-                                                        }}
-                                                    >
-                                                        <option value="day">Day</option>
-                                                        <option value="week">Week</option>
-                                                        <option value="month">Month</option>
-                                                    </select>
-                                                </div>
+                                                {assignment.capping_type !== 'none' && (
+                                                    <div className="form-group" style={{ marginTop: '10px' }}>
+                                                        <label className="form-label">Action when Exceeded</label>
+                                                        <select
+                                                            className="form-control"
+                                                            value={assignment.capping_action}
+                                                            onChange={(e) => {
+                                                                const updated = [...publisherAssignments];
+                                                                updated[index].capping_action = e.target.value;
+                                                                setPublisherAssignments(updated);
+                                                            }}
+                                                        >
+                                                            <option value="stop">Stop (Traffic Blocked)</option>
+                                                            <option value="reject">Reject (Conversions Rejected)</option>
+                                                        </select>
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="form-group">
                                                 <label className="form-label">Callback URL</label>
@@ -824,9 +840,9 @@ function OfferDetail() {
                                                     <span className="meta-badge">Default Payout</span>
                                                 )}
                                             </span>
-                                            {(assignment.capping_budget?.amount || assignment.capping_conversions?.amount) && (
+                                            {assignment.capping_type && assignment.capping_type !== 'none' && (
                                                 <span className="meta-badge" style={{ color: '#FF9800', background: 'rgba(255, 152, 0, 0.1)' }}>
-                                                    Has Caps
+                                                    {assignment.capping_type === 'budget' ? 'Budget' : 'Conv'} Cap: {assignment.capping_amount}
                                                 </span>
                                             )}
                                         </div>
@@ -945,14 +961,10 @@ function OfferDetail() {
                                             publisher_id: assignment.publisher_id,
                                             payout_override: assignment.payout_override ? parseFloat(assignment.payout_override) : null,
                                             conversion_approval_percentage: assignment.conversion_approval_percentage ? parseFloat(assignment.conversion_approval_percentage) : null,
-                                            capping_budget: assignment.capping_budget?.amount ? {
-                                                duration: assignment.capping_budget.duration,
-                                                amount: parseFloat(assignment.capping_budget.amount)
-                                            } : null,
-                                            capping_conversions: assignment.capping_conversions?.amount ? {
-                                                duration: assignment.capping_conversions.duration,
-                                                amount: parseInt(assignment.capping_conversions.amount)
-                                            } : null,
+                                            capping_type: assignment.capping_type,
+                                            capping_duration: assignment.capping_duration,
+                                            capping_amount: assignment.capping_amount ? parseFloat(assignment.capping_amount) : null,
+                                            capping_action: assignment.capping_action,
                                             callback_url: assignment.callback_url || null,
                                             offer_url: assignment.offer_url || null,
                                             notes: assignment.notes || null,
@@ -968,12 +980,13 @@ function OfferDetail() {
                                     const response = await offersAPI.getOfferAssignments(id);
                                     if (response.success && response.data) {
                                         setAssignments(response.data);
+
                                         const updatedAssignments = await Promise.all(
                                             response.data.map(async (assignment) => {
                                                 let trackingUrl = '';
                                                 if (assignment.id) {
                                                     try {
-                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.public_assignment_id,);
+                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.public_assignment_id, { for_offer_public_id: id });
                                                         if (trackingResponse.success) {
                                                             trackingUrl = trackingResponse.data.tracking_url;
                                                         }
@@ -986,8 +999,10 @@ function OfferDetail() {
                                                     publisher_email: assignment.publisher_email,
                                                     payout_override: assignment.payout_override || '',
                                                     conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                                    capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
-                                                    capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
+                                                    capping_type: assignment.capping_type || 'none',
+                                                    capping_duration: assignment.capping_duration || 'daily',
+                                                    capping_amount: assignment.capping_amount || '',
+                                                    capping_action: assignment.capping_action || 'stop',
                                                     callback_url: assignment.callback_url || '',
                                                     offer_url: assignment.destination_url || assignment.offer_url || '',
                                                     notes: assignment.notes || '',

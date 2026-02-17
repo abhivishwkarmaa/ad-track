@@ -42,8 +42,10 @@ function NewAssignment() {
                 publisher_id: publisher.id,
                 payout_override: '',
                 conversion_approval_percentage: '',
-                capping_budget: { duration: 'day', amount: '' },
-                capping_conversions: { duration: 'day', amount: '' },
+                capping_type: 'none',
+                capping_duration: 'daily',
+                capping_amount: '',
+                capping_action: 'stop',
                 callback_url: '',
                 offer_url: '',
                 notes: '',
@@ -58,14 +60,7 @@ function NewAssignment() {
 
     const handlePublisherChange = (index, field, value) => {
         const updated = [...publisherAssignments];
-        if (field === 'capping_budget' || field === 'capping_conversions') {
-            updated[index][field] = {
-                ...updated[index][field],
-                ...value
-            };
-        } else {
-            updated[index][field] = value;
-        }
+        updated[index][field] = value;
         setPublisherAssignments(updated);
     };
 
@@ -88,14 +83,13 @@ function NewAssignment() {
                     publisher_id: assignment.publisher_id,
                     payout_override: assignment.payout_override ? parseFloat(assignment.payout_override) : null,
                     conversion_approval_percentage: assignment.conversion_approval_percentage ? parseFloat(assignment.conversion_approval_percentage) : null,
-                    capping_budget: assignment.capping_budget?.amount ? {
-                        duration: assignment.capping_budget.duration,
-                        amount: parseFloat(assignment.capping_budget.amount)
-                    } : null,
-                    capping_conversions: assignment.capping_conversions?.amount ? {
-                        duration: assignment.capping_conversions.duration,
-                        amount: parseInt(assignment.capping_conversions.amount)
-                    } : null,
+
+                    // Unified Capping
+                    capping_type: assignment.capping_type,
+                    capping_duration: assignment.capping_duration,
+                    capping_action: assignment.capping_action,
+                    capping_amount: assignment.capping_type !== 'none' && assignment.capping_amount ? parseFloat(assignment.capping_amount) : null,
+
                     callback_url: assignment.callback_url || null,
                     offer_url: assignment.offer_url || null,
                     notes: assignment.notes || null,
@@ -220,55 +214,60 @@ function NewAssignment() {
                                                     </div>
                                                 </div>
 
-                                                <div className="assignment-form-row two-col">
-                                                    <div className="form-group">
-                                                        <label className="form-label">Capping Budget Duration</label>
+                                                {/* Unified Capping UI */}
+                                                <div className="assignment-form-row">
+                                                    <div className="form-group" style={{ flex: 1 }}>
+                                                        <label className="form-label">Capping Type</label>
                                                         <select
                                                             className="form-control"
-                                                            value={assignment.capping_budget?.duration || 'day'}
-                                                            onChange={(e) => handlePublisherChange(index, 'capping_budget', { duration: e.target.value })}
+                                                            value={assignment.capping_type}
+                                                            onChange={(e) => handlePublisherChange(index, 'capping_type', e.target.value)}
                                                         >
-                                                            <option value="day">Day</option>
-                                                            <option value="week">Week</option>
-                                                            <option value="month">Month</option>
+                                                            <option value="none">No Capping</option>
+                                                            <option value="budget">Budget Cap ($)</option>
+                                                            <option value="conversion">Conversion Cap (Count)</option>
                                                         </select>
                                                     </div>
-                                                    <div className="form-group">
-                                                        <label className="form-label">Capping Budget Amount</label>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            className="form-control"
-                                                            value={assignment.capping_budget?.amount || ''}
-                                                            onChange={(e) => handlePublisherChange(index, 'capping_budget', { amount: e.target.value })}
-                                                            placeholder="Leave empty for no cap"
-                                                        />
-                                                    </div>
-                                                </div>
 
-                                                <div className="assignment-form-row two-col">
-                                                    <div className="form-group">
-                                                        <label className="form-label">Capping Conversions Duration</label>
-                                                        <select
-                                                            className="form-control"
-                                                            value={assignment.capping_conversions?.duration || 'day'}
-                                                            onChange={(e) => handlePublisherChange(index, 'capping_conversions', { duration: e.target.value })}
-                                                        >
-                                                            <option value="day">Day</option>
-                                                            <option value="week">Week</option>
-                                                            <option value="month">Month</option>
-                                                        </select>
-                                                    </div>
-                                                    <div className="form-group">
-                                                        <label className="form-label">Capping Conversions Amount</label>
-                                                        <input
-                                                            type="number"
-                                                            className="form-control"
-                                                            value={assignment.capping_conversions?.amount || ''}
-                                                            onChange={(e) => handlePublisherChange(index, 'capping_conversions', { amount: e.target.value })}
-                                                            placeholder="Leave empty for no cap"
-                                                        />
-                                                    </div>
+                                                    {assignment.capping_type !== 'none' && (
+                                                        <>
+                                                            <div className="form-group" style={{ flex: 1 }}>
+                                                                <label className="form-label">Duration</label>
+                                                                <select
+                                                                    className="form-control"
+                                                                    value={assignment.capping_duration}
+                                                                    onChange={(e) => handlePublisherChange(index, 'capping_duration', e.target.value)}
+                                                                >
+                                                                    <option value="daily">Daily</option>
+                                                                    <option value="weekly">Weekly</option>
+                                                                    <option value="monthly">Monthly</option>
+                                                                </select>
+                                                            </div>
+                                                            <div className="form-group" style={{ flex: 1 }}>
+                                                                <label className="form-label required">Limit</label>
+                                                                <input
+                                                                    type="number"
+                                                                    step={assignment.capping_type === 'budget' ? "0.01" : "1"}
+                                                                    className="form-control"
+                                                                    value={assignment.capping_amount}
+                                                                    onChange={(e) => handlePublisherChange(index, 'capping_amount', e.target.value)}
+                                                                    placeholder={assignment.capping_type === 'budget' ? "100.00" : "50"}
+                                                                    required
+                                                                />
+                                                            </div>
+                                                            <div className="form-group" style={{ flex: 1 }}>
+                                                                <label className="form-label">Action</label>
+                                                                <select
+                                                                    className="form-control"
+                                                                    value={assignment.capping_action}
+                                                                    onChange={(e) => handlePublisherChange(index, 'capping_action', e.target.value)}
+                                                                >
+                                                                    <option value="stop">Stop Traffic</option>
+                                                                    <option value="reject">Reject Conversions</option>
+                                                                </select>
+                                                            </div>
+                                                        </>
+                                                    )}
                                                 </div>
 
                                                 <div className="form-group">

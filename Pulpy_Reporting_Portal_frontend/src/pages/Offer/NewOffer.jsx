@@ -220,6 +220,10 @@ function NewOffer() {
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
 
+    // Offers for Fallback
+    const [offers, setOffers] = useState([]);
+    const [loadingOffers, setLoadingOffers] = useState(false);
+
     // Get default dates on component initialization
     const defaultDates = getDefaultDates();
     const [formData, setFormData] = useState({
@@ -244,42 +248,33 @@ function NewOffer() {
         start_time: defaultDates.startTime,
         end_date: defaultDates.endDate,
         end_time: defaultDates.endTime,
-        capping_type: 'none',
-        daily_cap: '',
-        weekly_cap: '',
-        monthly_cap: '',
-        total_cap: '',
-        conversion_cap: '',
-        budget_cap: '',
-        cap_action: 'pause',
-        // IP Targeting
+        start_time: defaultDates.startTime,
+        end_date: defaultDates.endDate,
+        end_time: defaultDates.endTime,
+
+        // Capping (Unified)
+        capping_type: 'none', // none, budget, conversion
+        capping_duration: 'daily', // daily, weekly, monthly
+        capping_amount: '',
+        capping_action: 'stop', // stop, reject, fallback
+
+        // Fallback
+        fallback_type: 'offer', // offer, custom
+        fallback_url: '',
+        fallback_offer_id: '',
+
+        // Targetings
         ip_action: 'ALLOW',
         ip_list: '',
-        // Browser Targeting
         browser_action: 'ALLOW',
         browser_targeting: [],
-        // Device Targeting
         device_action: 'ALLOW',
         device_targeting: [],
-        // OS Targeting
         os_action: 'ALLOW',
         os_targeting: [],
-        // Capping Budget
-        advertiser_capping_budget_duration: 'nocap',
-        advertiser_capping_budget_amount: '',
-        // Capping Conversions
-        capping_conversions_duration: 'nocap',
-        capping_conversions: '',
-        // Over Capping
-        advertiser_over_capping: 'STOP',
-        affiliate_over_capping: 'STOP',
-        // Fallback
-        fallback_enabled: false,
-        fallback_url: '',
-        fallback_offer_id: ''
     });
 
-    // Fetch advertisers from API
+    // Fetch advertisers and offers from API
     useEffect(() => {
         const fetchAdvertisers = async () => {
             try {
@@ -296,8 +291,23 @@ function NewOffer() {
             }
         };
 
+        const fetchOffers = async () => {
+            try {
+                setLoadingOffers(true);
+                // Fetch basic offer list for fallback dropdown
+                const response = await offersAPI.getOffers({ limit: 1000, status: 'live' });
+                if (response.success && response.data && Array.isArray(response.data.offers)) {
+                    setOffers(response.data.offers);
+                }
+            } catch (error) {
+                console.error('Error fetching offers:', error);
+            } finally {
+                setLoadingOffers(false);
+            }
+        }
+
         fetchAdvertisers();
-        fetchAdvertisers();
+        fetchOffers();
     }, [toast, refreshKey]);
 
     // Function to build preview URL with tokens
@@ -516,23 +526,15 @@ function NewOffer() {
                     : null,
                 // Capping
                 capping_type: formData.capping_type,
-                daily_cap: formData.capping_type === 'daily' && formData.daily_cap ? parseInt(formData.daily_cap) : null,
-                weekly_cap: formData.capping_type === 'weekly' && formData.weekly_cap ? parseInt(formData.weekly_cap) : null,
-                monthly_cap: formData.capping_type === 'monthly' && formData.monthly_cap ? parseInt(formData.monthly_cap) : null,
-                conversion_cap: formData.capping_type === 'none' && formData.conversion_cap ? parseInt(formData.conversion_cap) : null,
-                budget_cap: formData.budget_cap ? parseFloat(formData.budget_cap) : null,
-                cap_action: formData.cap_action || 'pause',
-                // Additional capping fields for backward compatibility
-                capping_conversions: formData.capping_conversions && formData.capping_conversions_duration !== 'nocap'
-                    ? parseInt(formData.capping_conversions)
-                    : null,
-                advertiser_capping_budget_amount: formData.advertiser_capping_budget_amount && formData.advertiser_capping_budget_duration !== 'nocap'
-                    ? parseFloat(formData.advertiser_capping_budget_amount)
-                    : null,
+                capping_duration: formData.capping_duration,
+                capping_action: formData.capping_action,
+                capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+
                 // Fallback
-                fallback_enabled: formData.fallback_enabled ? 1 : 0,
+                fallback_type: formData.fallback_type,
                 fallback_url: formData.fallback_url || null,
-                fallback_offer_id: formData.fallback_offer_id ? parseInt(formData.fallback_offer_id) : null
+                fallback_offer_id: formData.fallback_offer_id ? parseInt(formData.fallback_offer_id) : null,
+                fallback_enabled: formData.capping_action === 'fallback' ? 1 : 0 // Auto-enable if action is fallback
             };
 
             await offersAPI.createOffer(offerData);
@@ -1212,7 +1214,7 @@ function NewOffer() {
 
                     {/* Capping */}
                     <div className="offer-form-section">
-                        <h3 className="offer-form-section-title">Capping</h3>
+                        <h3 className="offer-form-section-title">Capping & Budget</h3>
                         <div className="offer-form-row three-col">
                             <div className="form-group">
                                 <label className="form-label">Capping Type</label>
@@ -1222,250 +1224,113 @@ function NewOffer() {
                                     value={formData.capping_type}
                                     onChange={handleChange}
                                 >
-                                    <option value="none">None</option>
-                                    <option value="daily">Daily</option>
-                                    <option value="weekly">Weekly</option>
-                                    <option value="monthly">Monthly</option>
-                                    <option value="total">Total</option>
+                                    <option value="none">No Capping</option>
+                                    <option value="budget">Budget Cap (Revenue)</option>
+                                    <option value="conversion">Conversion Cap (Count)</option>
                                 </select>
                             </div>
 
-                            {formData.capping_type === 'daily' && (
-                                <div className="form-group">
-                                    <label className="form-label">Daily Cap</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="daily_cap"
-                                        value={formData.daily_cap}
-                                        onChange={handleChange}
-                                        placeholder="1000"
-                                    />
-                                </div>
+                            {formData.capping_type !== 'none' && (
+                                <>
+                                    <div className="form-group">
+                                        <label className="form-label">Duration</label>
+                                        <select
+                                            className="form-control"
+                                            name="capping_duration"
+                                            value={formData.capping_duration}
+                                            onChange={handleChange}
+                                        >
+                                            <option value="daily">Daily</option>
+                                            <option value="weekly">Weekly</option>
+                                            <option value="monthly">Monthly</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label required">
+                                            {formData.capping_type === 'budget' ? 'Budget Amount ($)' : 'Conversion Limit (Count)'}
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step={formData.capping_type === 'budget' ? "0.01" : "1"}
+                                            className="form-control"
+                                            name="capping_amount"
+                                            value={formData.capping_amount}
+                                            onChange={handleChange}
+                                            placeholder={formData.capping_type === 'budget' ? "1000.00" : "100"}
+                                            required
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Action if Exceeded</label>
+                                        <select
+                                            className="form-control"
+                                            name="capping_action"
+                                            value={formData.capping_action}
+                                            onChange={handleChange}
+                                        >
+                                            <option value="stop">Stop Traffic (Redirect to 404)</option>
+                                            <option value="reject">Reject (Track as Rejected, Payout 0)</option>
+                                            <option value="fallback">Fallback (Redirect)</option>
+                                        </select>
+                                    </div>
+                                </>
                             )}
-
-                            {formData.capping_type === 'weekly' && (
-                                <div className="form-group">
-                                    <label className="form-label">Weekly Cap</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="weekly_cap"
-                                        value={formData.weekly_cap || ''}
-                                        onChange={handleChange}
-                                        placeholder="5000"
-                                    />
-                                </div>
-                            )}
-
-                            {formData.capping_type === 'monthly' && (
-                                <div className="form-group">
-                                    <label className="form-label">Monthly Cap</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="monthly_cap"
-                                        value={formData.monthly_cap}
-                                        onChange={handleChange}
-                                        placeholder="20000"
-                                    />
-                                </div>
-                            )}
-
-                            {formData.capping_type === 'total' && (
-                                <div className="form-group">
-                                    <label className="form-label">Total Cap</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="total_cap"
-                                        value={formData.total_cap}
-                                        onChange={handleChange}
-                                        placeholder="50000"
-                                    />
-                                </div>
-                            )}
-
-                            {formData.capping_type === 'none' && (
-                                <div className="form-group">
-                                    <label className="form-label">Conversion Cap</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="conversion_cap"
-                                        value={formData.conversion_cap || ''}
-                                        onChange={handleChange}
-                                        placeholder="10000"
-                                    />
-                                </div>
-                            )}
-
-                            <div className="form-group">
-                                <label className="form-label">Budget Cap</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    className="form-control"
-                                    name="budget_cap"
-                                    value={formData.budget_cap || ''}
-                                    onChange={handleChange}
-                                    placeholder="100000.00"
-                                />
-                            </div>
-
-                            <div className="form-group">
-                                <label className="form-label">Cap Action</label>
-                                <select
-                                    className="form-control"
-                                    name="cap_action"
-                                    value={formData.cap_action || 'pause'}
-                                    onChange={handleChange}
-                                >
-                                    <option value="pause">Pause</option>
-                                    <option value="alert">Alert</option>
-                                    <option value="reject">Reject</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        {/* Advertiser Capping Budget and Capping Conversions in same row */}
-                        <div className="offer-form-row" style={{ display: 'flex', gap: '20px', alignItems: 'flex-end', marginTop: '20px' }}>
-                            {/* Advertiser Capping Budget */}
-                            <div className="form-group" style={{ flex: '1', display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                                <div style={{ flex: '0 0 60%' }}>
-                                    <label className="form-label">Advertiser Capping Budget</label>
-                                    <select
-                                        className="form-control"
-                                        name="advertiser_capping_budget_duration"
-                                        value={formData.advertiser_capping_budget_duration}
-                                        onChange={handleChange}
-                                    >
-                                        <option value="nocap">No Capping</option>
-                                        <option value="daily">daily</option>
-                                        <option value="weekly">weekly</option>
-                                        <option value="monthly">monthly</option>
-                                    </select>
-                                </div>
-                                <div style={{ flex: '0 0 38%' }}>
-                                    <label className="form-label">Budget Amount</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        className="form-control"
-                                        name="advertiser_capping_budget_amount"
-                                        value={formData.advertiser_capping_budget_amount}
-                                        onChange={handleChange}
-                                        placeholder="00.00"
-                                        disabled={formData.advertiser_capping_budget_duration === 'nocap'}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Capping Conversions */}
-                            <div className="form-group" style={{ flex: '1', display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                                <div style={{ flex: '0 0 60%' }}>
-                                    <label className="form-label">Capping Conversions</label>
-                                    <select
-                                        className="form-control"
-                                        name="capping_conversions_duration"
-                                        value={formData.capping_conversions_duration}
-                                        onChange={handleChange}
-                                    >
-                                        <option value="nocap">No Capping</option>
-                                        <option value="daily">daily</option>
-                                        <option value="weekly">weekly</option>
-                                        <option value="monthly">monthly</option>
-                                    </select>
-                                </div>
-                                <div style={{ flex: '0 0 38%' }}>
-                                    <label className="form-label">Conversion Count</label>
-                                    <input
-                                        type="number"
-                                        className="form-control"
-                                        name="capping_conversions"
-                                        value={formData.capping_conversions}
-                                        onChange={handleChange}
-                                        placeholder="00.00"
-                                        disabled={formData.capping_conversions_duration === 'nocap'}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Advertiser Over Capping and Affiliate Over Capping in same row */}
-                        <div className="offer-form-row two-col" style={{ marginTop: '20px' }}>
-                            <div className="form-group">
-                                <label className="form-label">Advertiser Over Capping</label>
-                                <select
-                                    className="form-control"
-                                    name="advertiser_over_capping"
-                                    value={formData.advertiser_over_capping}
-                                    onChange={handleChange}
-                                >
-                                    <option value="STOP">Stop Offer</option>
-                                    <option value="ENABLEFALLBACK">Enable Fallback</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Publisher Over Capping</label>
-                                <select
-                                    className="form-control"
-                                    name="affiliate_over_capping"
-                                    value={formData.affiliate_over_capping}
-                                    onChange={handleChange}
-                                >
-                                    <option value="STOP">Stop Offer for publisher</option>
-                                    <option value="ENABLEFALLBACK">Enable Fallback for publisher</option>
-                                </select>
-                            </div>
                         </div>
                     </div>
 
-                    {/* Fallback */}
-                    <div className="offer-form-section">
-                        <h3 className="offer-form-section-title">Fallback</h3>
-                        <div className="offer-form-row">
-                            <div className="form-group">
-                                <label className="form-label">Enable Fallback</label>
-                                <select
-                                    className="form-control"
-                                    name="fallback_enabled"
-                                    value={formData.fallback_enabled ? 'true' : 'false'}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, fallback_enabled: e.target.value === 'true' }))}
-                                >
-                                    <option value="false">Disabled</option>
-                                    <option value="true">Enable</option>
-                                </select>
+                    {/* Fallback Configuration - Visible if Fallback Action selected or explicitly enabled */}
+                    {(formData.capping_action === 'fallback') && (
+                        <div className="offer-form-section">
+                            <h3 className="offer-form-section-title">Fallback Configuration</h3>
+                            <div className="offer-form-row two-col">
+                                <div className="form-group">
+                                    <label className="form-label">Fallback Type</label>
+                                    <select
+                                        className="form-control"
+                                        name="fallback_type"
+                                        value={formData.fallback_type}
+                                        onChange={handleChange}
+                                    >
+                                        <option value="offer">Fallback to Offer</option>
+                                        <option value="custom">Custom URL</option>
+                                    </select>
+                                </div>
+
+                                {formData.fallback_type === 'custom' ? (
+                                    <div className="form-group">
+                                        <label className="form-label required">Destination URL</label>
+                                        <input
+                                            type="url"
+                                            className="form-control"
+                                            name="fallback_url"
+                                            value={formData.fallback_url}
+                                            onChange={handleChange}
+                                            placeholder="https://example.com/fallback"
+                                            required={formData.capping_action === 'fallback'}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="form-group">
+                                        <label className="form-label required">Select Fallback Offer</label>
+                                        <select
+                                            className="form-control"
+                                            name="fallback_offer_id"
+                                            value={formData.fallback_offer_id}
+                                            onChange={handleChange}
+                                            required={formData.capping_action === 'fallback'}
+                                        >
+                                            <option value="">Select Offer...</option>
+                                            {offers.map(offer => (
+                                                <option key={offer.id} value={offer.id}>
+                                                    #{offer.public_offer_id} - {offer.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
                         </div>
-                        <div className="offer-form-row two-col">
-                            <div className="form-group">
-                                <label className="form-label">Fallback to URL</label>
-                                <input
-                                    type="url"
-                                    className="form-control"
-                                    name="fallback_url"
-                                    value={formData.fallback_url}
-                                    onChange={handleChange}
-                                    placeholder="https://example.com/fallback"
-                                    disabled={!formData.fallback_enabled}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Fallback to Offer</label>
-                                <select
-                                    className="form-control"
-                                    name="fallback_offer_id"
-                                    value={formData.fallback_offer_id}
-                                    onChange={handleChange}
-                                    disabled={!formData.fallback_enabled}
-                                >
-                                    <option value="">Select Offer</option>
-                                    {/* Offers would be loaded from API */}
-                                </select>
-                            </div>
-                        </div>
-                    </div>
+                    )}
 
                     {/* Actions */}
                     <div className="offer-form-actions">

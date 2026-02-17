@@ -21,8 +21,10 @@ function EditAssignment() {
         publisher_id: '',
         payout_override: '',
         conversion_approval_percentage: '',
-        capping_budget: { duration: 'day', amount: '' },
-        capping_conversions: { duration: 'day', amount: '' },
+        capping_type: 'none',
+        capping_duration: 'daily',
+        capping_amount: '',
+        capping_action: 'stop',
         callback_url: '',
         offer_url: '',
         notes: '',
@@ -60,8 +62,10 @@ function EditAssignment() {
                         publisher_id: data.publisher_id?.toString() || '',
                         payout_override: data.payout_override || '',
                         conversion_approval_percentage: data.conversion_approval_percentage || '',
-                        capping_budget: data.capping_budget || { duration: 'day', amount: '' },
-                        capping_conversions: data.capping_conversions || { duration: 'day', amount: '' },
+                        capping_type: data.capping_type || 'none',
+                        capping_duration: data.capping_duration || 'daily',
+                        capping_action: data.capping_action || 'stop',
+                        capping_amount: data.capping_type !== 'none' ? data.capping_amount : '',
                         callback_url: data.callback_url || '',
                         offer_url: data.offer_url || '',
                         notes: data.notes || '',
@@ -94,17 +98,7 @@ function EditAssignment() {
     }, [id, navigate, toast, refreshKey]);
 
     const handleChange = (field, value) => {
-        if (field === 'capping_budget' || field === 'capping_conversions') {
-            setFormData(prev => ({
-                ...prev,
-                [field]: {
-                    ...prev[field],
-                    ...value
-                }
-            }));
-        } else {
-            setFormData(prev => ({ ...prev, [field]: value }));
-        }
+        setFormData(prev => ({ ...prev, [field]: value }));
     };
 
     const handleSubmit = async (e) => {
@@ -117,14 +111,13 @@ function EditAssignment() {
                     publisher_id: parseInt(formData.publisher_id),
                     payout_override: formData.payout_override ? parseFloat(formData.payout_override) : null,
                     conversion_approval_percentage: formData.conversion_approval_percentage ? parseFloat(formData.conversion_approval_percentage) : null,
-                    capping_budget: formData.capping_budget?.amount ? {
-                        duration: formData.capping_budget.duration,
-                        amount: parseFloat(formData.capping_budget.amount)
-                    } : null,
-                    capping_conversions: formData.capping_conversions?.amount ? {
-                        duration: formData.capping_conversions.duration,
-                        amount: parseInt(formData.capping_conversions.amount)
-                    } : null,
+
+                    // Unified Capping
+                    capping_type: formData.capping_type,
+                    capping_duration: formData.capping_duration,
+                    capping_action: formData.capping_action,
+                    capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+
                     callback_url: formData.callback_url || null,
                     offer_url: formData.offer_url || null,
                     notes: formData.notes || null,
@@ -223,55 +216,60 @@ function EditAssignment() {
                             </div>
                         </div>
 
-                        <div className="assignment-form-row two-col">
-                            <div className="form-group">
-                                <label className="form-label">Capping Budget Duration</label>
+                        {/* Unified Capping UI */}
+                        <div className="assignment-form-row">
+                            <div className="form-group" style={{ flex: 1 }}>
+                                <label className="form-label">Capping Type</label>
                                 <select
                                     className="form-control"
-                                    value={formData.capping_budget?.duration || 'day'}
-                                    onChange={(e) => handleChange('capping_budget', { duration: e.target.value })}
+                                    value={formData.capping_type}
+                                    onChange={(e) => handleChange('capping_type', e.target.value)}
                                 >
-                                    <option value="day">Day</option>
-                                    <option value="week">Week</option>
-                                    <option value="month">Month</option>
+                                    <option value="none">No Capping</option>
+                                    <option value="budget">Budget Cap ($)</option>
+                                    <option value="conversion">Conversion Cap (Count)</option>
                                 </select>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Capping Budget Amount</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    className="form-control"
-                                    value={formData.capping_budget?.amount || ''}
-                                    onChange={(e) => handleChange('capping_budget', { amount: e.target.value })}
-                                    placeholder="Leave empty for no cap"
-                                />
-                            </div>
-                        </div>
 
-                        <div className="assignment-form-row two-col">
-                            <div className="form-group">
-                                <label className="form-label">Capping Conversions Duration</label>
-                                <select
-                                    className="form-control"
-                                    value={formData.capping_conversions?.duration || 'day'}
-                                    onChange={(e) => handleChange('capping_conversions', { duration: e.target.value })}
-                                >
-                                    <option value="day">Day</option>
-                                    <option value="week">Week</option>
-                                    <option value="month">Month</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Capping Conversions Amount</label>
-                                <input
-                                    type="number"
-                                    className="form-control"
-                                    value={formData.capping_conversions?.amount || ''}
-                                    onChange={(e) => handleChange('capping_conversions', { amount: e.target.value })}
-                                    placeholder="Leave empty for no cap"
-                                />
-                            </div>
+                            {formData.capping_type !== 'none' && (
+                                <>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label className="form-label">Duration</label>
+                                        <select
+                                            className="form-control"
+                                            value={formData.capping_duration}
+                                            onChange={(e) => handleChange('capping_duration', e.target.value)}
+                                        >
+                                            <option value="daily">Daily</option>
+                                            <option value="weekly">Weekly</option>
+                                            <option value="monthly">Monthly</option>
+                                        </select>
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label className="form-label required">Limit</label>
+                                        <input
+                                            type="number"
+                                            step={formData.capping_type === 'budget' ? "0.01" : "1"}
+                                            className="form-control"
+                                            value={formData.capping_amount}
+                                            onChange={(e) => handleChange('capping_amount', e.target.value)}
+                                            placeholder={formData.capping_type === 'budget' ? "100.00" : "50"}
+                                            required
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ flex: 1 }}>
+                                        <label className="form-label">Action</label>
+                                        <select
+                                            className="form-control"
+                                            value={formData.capping_action}
+                                            onChange={(e) => handleChange('capping_action', e.target.value)}
+                                        >
+                                            <option value="stop">Stop Traffic</option>
+                                            <option value="reject">Reject Conversions</option>
+                                        </select>
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div className="form-group">
