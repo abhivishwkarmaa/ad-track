@@ -193,8 +193,16 @@ async function processConversionBatch(entries) {
 
                 let rejected = false;
 
-                // 1. Check Offer Cap
-                if (offer) {
+                // 1. Check Offer Cap (or Force Reject from Click)
+                if (c.force_reject === 'true' || c.force_reject === true) {
+                    c.status = 'rejected_cap';
+                    c.payout = 0;
+                    rejected = true;
+                    logger.info(`[WORKER] Conversion rejected (Force Reject from Click)`, {
+                        click_uuid: c.click_uuid,
+                        offer_id: c.offer_id
+                    });
+                } else if (offer) {
                     const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, c.tenant_id);
                     if (offerCapStatus.isHit) {
                         c.status = 'rejected_cap';

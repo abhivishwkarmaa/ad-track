@@ -119,7 +119,10 @@ export class TrackingService {
           public_offer_id: publicOfferId,
           tenant_id: tenantId
         });
-        throw new Error(`Offer with public ID ${publicOfferId} not found or does not belong to tenant ${tenantId}`);
+        return {
+          html: generateOfferErrorPage(`Offer with public ID ${publicOfferId} not found or does not belong to tenant`, 'offer_not_found'),
+          clickId: null
+        };
       }
 
       if (!publisher) {
@@ -127,7 +130,10 @@ export class TrackingService {
           public_publisher_id: publicPublisherId,
           tenant_id: tenantId
         });
-        throw new Error(`Publisher ${publicPublisherId} not found or does not belong to tenant ${tenantId}`);
+        return {
+          html: generateOfferErrorPage(`Publisher ${publicPublisherId} not found or does not belong to tenant`, 'offer_not_found'),
+          clickId: null
+        };
       }
 
       logger.info('[CLICK] Resolved entities', {
@@ -139,7 +145,10 @@ export class TrackingService {
       });
 
       if (publisher.status !== 'active') {
-        throw new Error('Publisher is not active');
+        return {
+          html: generateOfferErrorPage('Publisher is not active', 'offer_not_live'),
+          clickId: null
+        };
       }
 
       // ✅ STEP 4: HARD VALIDATION - Ensure business data belongs to resolved tenant
@@ -336,11 +345,25 @@ export class TrackingService {
       }
 
       if (isCapErr) {
-        throw new Error('Offer Cap Exceeded - Traffic Stopped');
+        const detail = offer.capping_type === 'budget'
+          ? `Budget: ${offer.offer_currency || '$'}${offerCapStatus.limit}`
+          : `Conversions: ${offerCapStatus.limit}`;
+        return {
+          html: generateOfferErrorPage(`Offer Cap Hit (${detail}) - Traffic Stopped`, 'offer_cap_hit'),
+          clickId: null
+        };
       }
 
       // 4B. Check Publisher Cap
+      logger.info('[CAP_DEBUG] Checking Publisher Cap', {
+        assignment_id: assignment.id,
+        capping_type: assignment.capping_type,
+        capping_action: assignment.capping_action,
+        capping_budget_amount: assignment.capping_budget_amount,
+        capping_conversions_amount: assignment.capping_conversions_amount
+      });
       const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
+      logger.info('[CAP_DEBUG] Publisher Cap Status Result', pubCapStatus);
       if (pubCapStatus.isHit) {
         logger.info(`[CAP] Publisher Cap HIT`, {
           assignment_id: assignment.id,
@@ -350,9 +373,19 @@ export class TrackingService {
 
         const actionResult = await this.applyPublisherCapAction(assignment);
         if (actionResult.stop) {
-          throw new Error('Publisher Cap Exceeded - Traffic Stopped');
+          const detail = assignment.capping_type === 'budget'
+            ? `Daily Budget: ${offer.offer_currency || '$'}${pubCapStatus.limit}`
+            : `Daily Conversions: ${pubCapStatus.limit}`;
+          return {
+            html: generateOfferErrorPage(`Publisher Cap Hit (${detail}) - Traffic Stopped`, 'publisher_cap_hit'),
+            clickId: null
+          };
         }
-        // If REJECT: Continue normally.
+
+        if (actionResult.reject_conversion) {
+          // Allow traffic but mark for rejection
+          isCapErr = false; // ensure we don't stop
+        }
       }
 
       redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
@@ -438,7 +471,11 @@ export class TrackingService {
         tid: query.tid || query.click_id || '', // Affiliate ID
         rcid: query.rcid || '',
         timestamp: new Date().toISOString(), // UTC ENFORCEMENT: Store UTC timestamp only
-        flushed: 'false' // ✅ CRITICAL: Track if click has been inserted into DB
+        flushed: 'false', // ✅ CRITICAL: Track if click has been inserted into DB
+        force_reject: (isCapErr === false && (
+          (offerCapStatus.isHit && offer.capping_action === 'reject') ||
+          (pubCapStatus.isHit && assignment.capping_action === 'reject')
+        )) ? 'true' : 'false'
       };
 
       // DEBUG: Dump clickData to file to verify content
@@ -800,7 +837,7 @@ export class TrackingService {
 
     if (action === 'reject') {
       // Allow click (REJECT means don't count for cap, but allow traffic - usually used for testing or specific rules)
-      return { stop: false };
+      return { stop: false, reject_conversion: true };
     }
 
     if (action === 'fallback') {
@@ -867,7 +904,7 @@ export class TrackingService {
   async applyPublisherCapAction(assignment) {
     const action = assignment.capping_action || 'stop';
     if (action === 'stop') return { stop: true };
-    if (action === 'reject') return { stop: false };
+    if (action === 'reject') return { stop: false, reject_conversion: true };
     return { stop: true };
   }
 

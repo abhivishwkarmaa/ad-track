@@ -3,10 +3,10 @@
  */
 
 export function generateOfferErrorPage(errorMessage, errorType) {
-  const title = getErrorTitle(errorType);
-  const description = getErrorDescription(errorType, errorMessage);
+    const title = getErrorTitle(errorType);
+    const description = getErrorDescription(errorType, errorMessage);
 
-  return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -97,23 +97,27 @@ export function generateOfferErrorPage(errorMessage, errorType) {
 }
 
 function getErrorTitle(errorType) {
-  const titles = {
-    'offer_not_found': 'Offer Not Found',
-    'offer_not_live': 'Offer Not Available',
-    'offer_expired': 'Offer Expired',
-    'offer_not_started': 'Offer Not Started',
-    'offer_time_restricted': 'Offer Temporarily Unavailable',
-  };
-  return titles[errorType] || 'Offer Unavailable';
+    const titles = {
+        'offer_not_found': 'Offer Not Found',
+        'offer_not_live': 'Offer Not Available',
+        'offer_expired': 'Offer Expired',
+        'offer_not_started': 'Offer Not Started',
+        'offer_time_restricted': 'Offer Temporarily Unavailable',
+        'offer_cap_hit': 'Offer Cap Reached',
+        'publisher_cap_hit': 'Daily Limit Reached',
+    };
+    return titles[errorType] || 'Offer Unavailable';
 }
 
 function getErrorDescription(errorType, errorMessage) {
-  const descriptions = {
-    'offer_not_found': 'The offer you are looking for does not exist or has been removed.',
-    'offer_not_live': 'This offer is currently not active. Please check back later or contact support.',
-    'offer_expired': 'This offer has expired and is no longer accepting traffic.',
-    'offer_not_started': 'This offer has not started yet. Please check back later.',
-    'offer_time_restricted': 'This offer is not available at the current time. Please try again during the allowed time window.',
-  };
-  return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
+    const descriptions = {
+        'offer_not_found': 'The offer you are looking for does not exist or has been removed.',
+        'offer_not_live': 'This offer is currently not active. Please check back later or contact support.',
+        'offer_expired': 'This offer has expired and is no longer accepting traffic.',
+        'offer_not_started': 'This offer has not started yet. Please check back later.',
+        'offer_time_restricted': 'This offer is not available at the current time. Please try again during the allowed time window.',
+        'offer_cap_hit': 'This offer has reached its maximum daily budget. Traffic has been paused to ensure quality.',
+        'publisher_cap_hit': 'Your daily allocation for this offer has been reached. Please check back tomorrow.',
+    };
+    return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
 }

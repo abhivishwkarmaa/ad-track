@@ -248,9 +248,7 @@ function NewOffer() {
         start_time: defaultDates.startTime,
         end_date: defaultDates.endDate,
         end_time: defaultDates.endTime,
-        start_time: defaultDates.startTime,
-        end_date: defaultDates.endDate,
-        end_time: defaultDates.endTime,
+
 
         // Capping (Unified)
         capping_type: 'none', // none, budget, conversion

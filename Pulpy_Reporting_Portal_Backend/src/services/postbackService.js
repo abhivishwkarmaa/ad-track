@@ -428,7 +428,9 @@ export class PostbackService {
             timestamp: new Date().toISOString(),
             postback_payload: JSON.stringify({ query, headers: request.headers }),
             callback_url: callbackUrl, // Pass to worker
-            tid: redisClick.tid || ''  // Pass affiliate click ID
+
+            tid: redisClick.tid || '',  // Pass affiliate click ID
+            force_reject: redisClick.force_reject // Pass reject intent from click time
           };
 
           // Save to Redis (Worker will pick this up)

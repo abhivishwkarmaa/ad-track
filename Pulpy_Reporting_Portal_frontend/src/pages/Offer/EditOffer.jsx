@@ -487,10 +487,7 @@ function EditOffer() {
                         start_time: offer.start_time || '00:00:00',
                         end_date: offer.end_date ? offer.end_date.split('T')[0] : '',
                         end_time: offer.end_time || '23:59:59',
-                        capping_type: offer.capping_type || 'daily',
-                        daily_cap: offer.daily_cap || '',
-                        monthly_cap: offer.monthly_cap || '',
-                        total_cap: offer.total_cap || '',
+
                         ip_action: offer.ip_action?.toUpperCase() || 'ALLOW',
                         ip_list: offer.ip_list || '',
                         device_targeting: deviceTargeting.device || [],
