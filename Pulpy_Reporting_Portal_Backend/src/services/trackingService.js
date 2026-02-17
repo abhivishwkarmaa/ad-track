@@ -130,6 +130,14 @@ export class TrackingService {
         throw new Error(`Publisher ${publicPublisherId} not found or does not belong to tenant ${tenantId}`);
       }
 
+      logger.info('[CLICK] Resolved entities', {
+        offer_id: offer?.id,
+        offer_public_id: offer?.public_offer_id,
+        publisher_id: publisher?.id,
+        publisher_public_id: publisher?.public_publisher_id,
+        tenant_id: tenantId
+      });
+
       if (publisher.status !== 'active') {
         throw new Error('Publisher is not active');
       }
@@ -220,6 +228,11 @@ export class TrackingService {
           }
         }
 
+        logger.info('[CLICK] Assignment resolved', {
+          assignment_id: assignment?.id,
+          status: assignment?.status
+        });
+
         if (assignment && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
           logger.error('❌ HARD FAILURE: Assignment tenant mismatch', {
             assignment_id: assignment.id,
@@ -277,10 +290,6 @@ export class TrackingService {
       // 3. LOGIC: VALIDATION & CALCULATIONS (Zero DB)
       // ============================================
 
-      // Fallback Logic
-      let fallbackRedirect = await this.getFallbackRedirect(offer, request);
-      if (!fallbackRedirect) fallbackRedirect = '/error?message=offer_unavailable';
-
       let redirectUrl = '';
 
       // Validation
@@ -292,30 +301,61 @@ export class TrackingService {
         };
       }
 
-      // ============================================
-      // 4. REDIS: CHECK CAPS (Zero DB)
+
+
+      // ✅ 4. REDIS: CHECK OFFER & PUBLISHER CAPS (Zero DB)
       // ============================================
 
-      // ✅ CRITICAL: Generate click_id as hash of tenant_id + offer_id + publisher_id + timestamp + random salt
-      // This ensures unique click identity across publishers and tenants
-      // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for click UUID generation
       const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
+      let isCapErr = false;
 
-      // Check Global Offer Caps (Daily/Total Conversions)
-      // We READ the current counter from Redis. We do NOT increment here (only on conversion).
+      // 4A. Check Offer Cap
+      const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, tenantId);
+      if (offerCapStatus.isHit) {
+        logger.info(`[CAP] Offer Cap HIT`, {
+          offer_id: offer.id,
+          type: offer.capping_type,
+          action: offer.capping_action,
+          limit: offerCapStatus.limit
+        });
 
-      // ✅ CRITICAL: Check caps with tenant_id filtering
-      // 🔥 CHANGED: Use offer.id (internal DB ID) for cap checks
-      const isDailyCapHit = offer.daily_cap > 0 && !(await cacheService.checkAndIncrementCap(offer.id, 'daily', offer.daily_cap, false, tenantId));
-      const isTotalCapHit = offer.total_cap > 0 && !(await cacheService.checkAndIncrementCap(offer.id, 'total', offer.total_cap, false, tenantId));
+        const actionResult = await this.applyOfferCapAction(offer, assignment, request, tenantId);
 
-      if (isDailyCapHit || isTotalCapHit) {
-        const capAction = await this.applyCapAction(offer, fallbackRedirect);
-        redirectUrl = capAction.redirect;
-        // Continue to persist click...
-      } else {
-        redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+        if (actionResult.stop) {
+          isCapErr = true;
+          // Fall through to error
+        } else if (actionResult.redirect) {
+          // Fallback (Offer or Custom URL)
+          // Return redirect immediately - DO NOT persist this click for the primary offer
+          return {
+            redirect: actionResult.redirect,
+            clickId: null
+          };
+        }
+        // If REJECT: Continue normally.
       }
+
+      if (isCapErr) {
+        throw new Error('Offer Cap Exceeded - Traffic Stopped');
+      }
+
+      // 4B. Check Publisher Cap
+      const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
+      if (pubCapStatus.isHit) {
+        logger.info(`[CAP] Publisher Cap HIT`, {
+          assignment_id: assignment.id,
+          type: assignment.capping_type,
+          action: assignment.capping_action
+        });
+
+        const actionResult = await this.applyPublisherCapAction(assignment);
+        if (actionResult.stop) {
+          throw new Error('Publisher Cap Exceeded - Traffic Stopped');
+        }
+        // If REJECT: Continue normally.
+      }
+
+      redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
 
       // Assignment Caps? (omitted for brevity, can implement similar pattern in CacheService)
 
@@ -565,7 +605,7 @@ export class TrackingService {
       };
 
     } catch (error) {
-      logger.error('TrackingService.trackClick error:', error);
+      logger.error({ message: error.message, stack: error.stack }, 'TrackingService.trackClick error:');
       throw error;
     }
   }
@@ -751,131 +791,84 @@ export class TrackingService {
 
 
 
-  async isTotalCapHit(offer, tenantId) {
-    if (!offer.total_cap || offer.total_cap <= 0) return false;
+  async applyOfferCapAction(offer, assignment, request, tenantId) {
+    const action = offer.capping_action || 'stop';
 
-    // Handle tenant_id gracefully (may be null or column may not exist)
-    let query = 'SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ?';
-    const params = [offer.id];
-
-    if (tenantId) {
-      try {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      } catch (e) {
-        // tenant_id column doesn't exist, use query without it
-        if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
-      }
+    if (action === 'stop') {
+      return { stop: true };
     }
 
-    const [rows] = await pool.query(query, params);
-    const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-    return count >= offer.total_cap;
-  }
-
-  async isCappingTypeHit(offer, tenantId) {
-    const capType = offer.capping_type || 'none';
-    if (capType === 'none') return false;
-
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
-    let sql = '';
-    const params = [offer.id];
-
-    // Add tenant_id to query if available
-    if (tenantId) {
-      params.push(tenantId);
+    if (action === 'reject') {
+      // Allow click (REJECT means don't count for cap, but allow traffic - usually used for testing or specific rules)
+      return { stop: false };
     }
 
-    if (capType === 'daily' && offer.daily_cap != null && offer.daily_cap > 0) {
-      // Build query with or without tenant_id
-      if (tenantId) {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      } else {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      }
-      const [rows] = await pool.query(sql, params);
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      return count >= offer.daily_cap;
-    }
-
-    if (capType === 'monthly' && offer.monthly_cap != null && offer.monthly_cap > 0) {
-      if (tenantId) {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND tenant_id = ? AND YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      } else {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      }
-      const [rows] = await pool.query(sql, params);
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      return count >= offer.monthly_cap;
-    }
-
-    if (capType === 'weekly' && offer.total_cap != null && offer.total_cap > 0) {
-      if (tenantId) {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND tenant_id = ? AND YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-      } else {
-        sql = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-      }
-      const [rows] = await pool.query(sql, params);
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      return count >= offer.total_cap;
-    }
-
-    return false;
-  }
-
-  async applyCapAction(offer, fallbackRedirect) {
-    const action = offer.cap_action || 'fallback';
-    if (action === 'pause') {
-      await pool.query('UPDATE offers SET status = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', ['paused', offer.id]);
-    }
-    return {
-      redirect: fallbackRedirect,
-      clickId: null,
-    };
-  }
-
-  async getFallbackRedirect(offer, request) {
-    // Never return offer.offer_url as fallback - only return actual fallback URLs
-    if (offer.fallback_url) return offer.fallback_url;
-    if (offer.fallback_offer_id) {
-      // 🔒 STRICT: Tenant must come from subdomain - NO FALLBACKS
-      const tenantId = request ? getTenantIdFromRequest(request) : null;
-
-      if (!tenantId) {
-        logger.warn('Cannot get fallback offer: no tenant context from subdomain');
-        return null;
+    if (action === 'fallback') {
+      // Custom URL Fallback
+      if (offer.fallback_type === 'custom' && offer.fallback_url) {
+        return { stop: false, redirect: offer.fallback_url };
       }
 
-      // ✅ Validate fallback offer belongs to resolved tenant
-      // (This will be validated when fetching the fallback offer)
-
-      if (tenantId) {
-        try {
-          const [rows] = await pool.query(
-            'SELECT offer_url FROM offers WHERE id = ? AND tenant_id = ? LIMIT 1',
-            [offer.fallback_offer_id, tenantId]
-          );
-          const fb = Array.isArray(rows) ? rows[0] : rows;
-          if (fb?.offer_url) return fb.offer_url;
-        } catch (e) {
-          // If tenant_id column doesn't exist, fall through to non-tenant query
-          if (e.code !== 'ER_BAD_FIELD_ERROR') throw e;
+      // Offer Fallback
+      if (offer.fallback_type === 'offer' && offer.fallback_offer_id) {
+        // Validate fallback offer belongs to tenant
+        const fallbackOffer = await offerService.getOfferById(offer.fallback_offer_id, tenantId, true);
+        if (!fallbackOffer) {
+          logger.warn('[CAP] Fallback offer not found or invalid', { fallback_offer_id: offer.fallback_offer_id, tenant_id: tenantId });
+          return { stop: true };
         }
+
+        // Check if SAME publisher is assigned to fallback offer
+        const fallbackAssignment = await assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
+        if (!fallbackAssignment || fallbackAssignment.status !== 'active') {
+          logger.warn('[CAP] Fallback offer not assigned to publisher or inactive', {
+            pub_id: assignment.publisher_id,
+            fallback_offer: fallbackOffer.id
+          });
+          return { stop: true };
+        }
+
+        // Construct Redirect URL to the fallback offer
+        // Get public IDs for the URL
+        const publicOfferId = fallbackOffer.public_offer_id || fallbackOffer.display_id || fallbackOffer.id;
+
+        // Resolve public publisher ID (if not in assignment, try from request or publisher service)
+        const publicPublisherId = assignment.public_publisher_id ||
+          request.query.pub_id ||
+          request.query.a ||
+          (await (await import('./offerPublicIdService.js')).default.getPublicPublisherId(assignment.publisher_id, tenantId));
+
+        const protocol = request.headers['x-forwarded-proto'] || 'http';
+        const host = request.headers.host;
+        const originalUrl = request.url;
+        const queryPart = originalUrl.includes('?') ? originalUrl.split('?')[1] : '';
+
+        // Rebuild query params with new offer_id
+        // We clean the query part to remove old offer_id/pub_id if they might conflict, 
+        // but typically just appending works if the endpoint prioritizes the first ones.
+        // Safer: construct clean URL.
+        const newUrl = `${protocol}://${host}/click?offer_id=${publicOfferId}&pub_id=${publicPublisherId}${queryPart ? '&' + queryPart : ''}`;
+
+        logger.info('[CAP] Redirecting to fallback offer', {
+          original_offer: offer.id,
+          fallback_offer: fallbackOffer.id,
+          fallback_url: newUrl
+        });
+
+        return { stop: false, redirect: newUrl };
       }
 
-      // Fallback to non-tenant-scoped query (works before migration or if tenant_id not set)
-      const [rows] = await pool.query(
-        'SELECT offer_url FROM offers WHERE id = ? LIMIT 1',
-        [offer.fallback_offer_id]
-      );
-      const fb = Array.isArray(rows) ? rows[0] : rows;
-      if (fb?.offer_url) return fb.offer_url;
+      return { stop: true }; // Fallback configured but missing details
     }
-    // If no fallback is available, return null or a default error page
-    // Never use the original offer URL as fallback
-    return null;
+
+    return { stop: true }; // Default safe
+  }
+
+  async applyPublisherCapAction(assignment) {
+    const action = assignment.capping_action || 'stop';
+    if (action === 'stop') return { stop: true };
+    if (action === 'reject') return { stop: false };
+    return { stop: true };
   }
 
   async trackImpression(query, request) {

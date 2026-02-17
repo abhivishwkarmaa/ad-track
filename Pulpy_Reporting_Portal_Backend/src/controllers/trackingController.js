@@ -22,14 +22,14 @@ export class TrackingController {
       return reply.redirect(result.redirect, 302);
     } catch (error) {
       // ✅ Log full error details server-side
-      logger.error('TrackingController.handleClick error:', {
+      logger.error({
         error: error.message,
         stack: error.stack,
         url: request.url,
         host: request.headers.host,
         ip: request.ip
-      });
-      
+      }, 'TrackingController.handleClick error:');
+
       // ✅ Return minimal response for tracking endpoints
       // Let error handler decide the response format
       throw error;
@@ -48,7 +48,7 @@ export class TrackingController {
           host: request.headers.host,
           ip: request.ip
         });
-        
+
         // ✅ Return minimal response - just 1x1 pixel (silent failure)
         // For tracking pixels, it's better to return pixel than error JSON
         return reply.code(200).type('image/gif').send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
@@ -65,7 +65,7 @@ export class TrackingController {
         host: request.headers.host,
         ip: request.ip
       });
-      
+
       // ✅ For impression tracking, return pixel even on error (silent failure)
       // This prevents breaking tracking pixels with error responses
       return reply.code(200).type('image/gif').send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));

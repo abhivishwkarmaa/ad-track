@@ -64,10 +64,20 @@ export class AssignmentService {
         const callbackUrl = pubData.callback_url || null; // Store only if explicitly provided (override)
 
         // Prepare capping data
-        const cappingBudgetDuration = pubData.capping_budget?.duration || null;
-        const cappingBudgetAmount = pubData.capping_budget?.amount || null;
-        const cappingConversionsDuration = pubData.capping_conversions?.duration || null;
-        const cappingConversionsAmount = pubData.capping_conversions?.amount || null;
+        const capType = pubData.capping_type || null;
+        const capDuration = pubData.capping_duration || null;
+        const capAction = pubData.capping_action || 'stop';
+        const capAmount = pubData.capping_amount || 0;
+
+        let budgetAmount = null;
+        let convAmount = null;
+
+        if (capType === 'budget') budgetAmount = capAmount;
+        if (capType === 'conversion') convAmount = capAmount;
+
+        // Legacy compatibility: Sync legacy duration columns
+        const cappingBudgetDuration = capType === 'budget' ? capDuration : null;
+        const cappingConversionsDuration = capType === 'conversion' ? capDuration : null;
 
         // Generate stable public_assignment_id
         const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
@@ -77,14 +87,18 @@ export class AssignmentService {
           `INSERT INTO publisher_offers (
             publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, 
             conversion_approval_percentage,
+            capping_type, capping_duration, capping_action,
             capping_budget_duration, capping_budget_amount,
             capping_conversions_duration, capping_conversions_amount,
             callback_url, destination_url,
             notes, status, assigned_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
           ON DUPLICATE KEY UPDATE 
             payout_override = VALUES(payout_override),
             conversion_approval_percentage = VALUES(conversion_approval_percentage),
+            capping_type = VALUES(capping_type),
+            capping_duration = VALUES(capping_duration),
+            capping_action = VALUES(capping_action),
             capping_budget_duration = VALUES(capping_budget_duration),
             capping_budget_amount = VALUES(capping_budget_amount),
             capping_conversions_duration = VALUES(capping_conversions_duration),
@@ -100,10 +114,13 @@ export class AssignmentService {
             publicAssignmentId,
             pubData.payout_override || null,
             pubData.conversion_approval_percentage || null,
+            capType,
+            capDuration,
+            capAction,
             cappingBudgetDuration,
-            cappingBudgetAmount,
+            budgetAmount,
             cappingConversionsDuration,
-            cappingConversionsAmount,
+            convAmount,
             callbackUrl,
             destinationUrl,
             pubData.notes || null,
@@ -178,6 +195,10 @@ export class AssignmentService {
     const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
 
     // ✅ CRITICAL: Insert with tenant_id
+    // Prepare capping data (legacy createSingle usually receives explicit fields or old structure, assume old structure for now or map if needed)
+    // If strict new structure, map it. If createSingle is legacy, keep as minimal.
+    // For now, let's just make it work with explicit fields if present, or legacy.
+
     await pool.query(
       `INSERT INTO publisher_offers (
         publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, cap_override, 
@@ -192,8 +213,8 @@ export class AssignmentService {
         notes = VALUES(notes),
         status = VALUES(status)`,
       [
-        publisher.id, // 🔥 Use resolved internal ID
-        offer.id,     // 🔥 Use resolved internal ID
+        publisher.id,
+        offer.id,
         tenantId,
         publicAssignmentId,
         data.payout_override || null,
@@ -235,6 +256,13 @@ export class AssignmentService {
       payout_override: assignment.payout_override,
       cap_override: assignment.cap_override,
       conversion_approval_percentage: assignment.conversion_approval_percentage,
+      capping_type: assignment.capping_type,
+      capping_duration: assignment.capping_duration,
+      capping_action: assignment.capping_action,
+      capping_amount: assignment.capping_type === 'budget'
+        ? assignment.capping_budget_amount
+        : (assignment.capping_type === 'conversion' ? assignment.capping_conversions_amount : null),
+      // Keep legacy structure for backward compat if needed by frontend
       capping_budget: assignment.capping_budget_duration ? {
         duration: assignment.capping_budget_duration,
         amount: assignment.capping_budget_amount,
@@ -487,30 +515,53 @@ export class AssignmentService {
       }
 
       // Prepare update fields
-      const cappingBudgetDuration = data.capping_budget?.duration || null;
-      const cappingBudgetAmount = data.capping_budget?.amount || null;
-      const cappingConversionsDuration = data.capping_conversions?.duration || null;
-      const cappingConversionsAmount = data.capping_conversions?.amount || null;
-
-      // Build update query dynamically based on provided fields
       const updateFields = [];
       const updateValues = [];
 
-      if (data.payout_override !== undefined) {
-        updateFields.push('payout_override = ?');
-        updateValues.push(data.payout_override);
+      if (data.capping_type !== undefined) {
+        updateFields.push('capping_type = ?');
+        updateValues.push(data.capping_type);
+
+        if (data.capping_type === 'budget') {
+          updateFields.push('capping_budget_duration = ?', 'capping_budget_amount = ?');
+          // If type is budget, clear conversion fields? Or keep them?
+          // Safer to clear or ignore. Let's set them.
+          updateValues.push(data.capping_duration || null, data.capping_amount || 0);
+
+          updateFields.push('capping_conversions_duration = ?', 'capping_conversions_amount = ?');
+          updateValues.push(null, null);
+
+        } else if (data.capping_type === 'conversion') {
+          updateFields.push('capping_conversions_duration = ?', 'capping_conversions_amount = ?');
+          updateValues.push(data.capping_duration || null, data.capping_amount || 0);
+
+          updateFields.push('capping_budget_duration = ?', 'capping_budget_amount = ?');
+          updateValues.push(null, null);
+        } else {
+          // Type is none/null
+          updateFields.push('capping_budget_duration = ?', 'capping_budget_amount = ?', 'capping_conversions_duration = ?', 'capping_conversions_amount = ?');
+          updateValues.push(null, null, null, null);
+        }
       }
-      if (data.conversion_approval_percentage !== undefined) {
-        updateFields.push('conversion_approval_percentage = ?');
-        updateValues.push(data.conversion_approval_percentage);
+
+      if (data.capping_duration !== undefined) {
+        updateFields.push('capping_duration = ?');
+        updateValues.push(data.capping_duration);
       }
-      if (data.capping_budget !== undefined) {
+      if (data.capping_action !== undefined) {
+        updateFields.push('capping_action = ?');
+        updateValues.push(data.capping_action);
+      }
+
+      // Legacy support (optional, if frontend sends old structure)
+      if (data.capping_budget !== undefined && data.capping_type === undefined) {
+        // If legacy params are sent without new type, map likely type 'budget'
         updateFields.push('capping_budget_duration = ?', 'capping_budget_amount = ?');
-        updateValues.push(cappingBudgetDuration, cappingBudgetAmount);
+        updateValues.push(data.capping_budget?.duration || null, data.capping_budget?.amount || null);
       }
-      if (data.capping_conversions !== undefined) {
+      if (data.capping_conversions !== undefined && data.capping_type === undefined) {
         updateFields.push('capping_conversions_duration = ?', 'capping_conversions_amount = ?');
-        updateValues.push(cappingConversionsDuration, cappingConversionsAmount);
+        updateValues.push(data.capping_conversions?.duration || null, data.capping_conversions?.amount || null);
       }
       if (data.callback_url !== undefined) {
         updateFields.push('callback_url = ?');

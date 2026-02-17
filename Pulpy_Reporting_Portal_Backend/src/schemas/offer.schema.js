@@ -94,7 +94,13 @@ export const createOfferSchema = {
     carrier_targeting_json: { type: ['object', 'null'] },
     city_targeting_json: { type: ['object', 'null'] },
 
-    capping_type: { type: 'string', enum: ['none', 'daily', 'monthly', 'weekly'], default: 'none' },
+    // Unified Capping
+    capping_type: { type: 'string', enum: ['none', 'budget', 'conversion'], default: 'none' },
+    capping_duration: { type: ['string', 'null'], enum: ['daily', 'weekly', 'monthly'] },
+    capping_amount: { type: ['number', 'null'], minimum: 0 },
+    capping_action: { type: ['string', 'null'], enum: ['stop', 'reject', 'fallback'] },
+
+    // Legacy Capping fields (keep for backward compatibility if needed, but can be ignored)
     daily_cap: { type: ['integer', 'null'], minimum: 0 },
     monthly_cap: { type: ['integer', 'null'], minimum: 0 },
     total_cap: { type: ['integer', 'null'], minimum: 0 },
@@ -107,7 +113,9 @@ export const createOfferSchema = {
     affiliate_over_capping: { type: ['string', 'null'], maxLength: 50 },
     cap_action: { type: ['string', 'null'], enum: ['pause', 'reject', 'alert', 'fallback'] },
 
+    // Fallback
     fallback_enabled: { type: ['integer', 'boolean'], enum: [0, 1, true, false] },
+    fallback_type: { type: ['string', 'null'], enum: ['offer', 'custom'] },
     fallback_url: { type: ['string', 'null'], maxLength: 500 },
     fallback_offer_id: { type: ['integer', 'null'], minimum: 1 },
 
@@ -162,7 +170,13 @@ export const updateOfferSchema = {
     carrier_targeting_json: { type: ['object', 'null'] },
     city_targeting_json: { type: ['object', 'null'] },
 
-    capping_type: { type: 'string', enum: ['none', 'daily', 'monthly', 'weekly'] },
+    // Unified Capping
+    capping_type: { type: 'string', enum: ['none', 'budget', 'conversion'] },
+    capping_duration: { type: ['string', 'null'], enum: ['daily', 'weekly', 'monthly'] },
+    capping_amount: { type: ['number', 'null'], minimum: 0 },
+    capping_action: { type: ['string', 'null'], enum: ['stop', 'reject', 'fallback'] },
+
+    // Legacy Capping fields
     daily_cap: { type: ['integer', 'null'], minimum: 0 },
     monthly_cap: { type: ['integer', 'null'], minimum: 0 },
     total_cap: { type: ['integer', 'null'], minimum: 0 },
@@ -173,9 +187,11 @@ export const updateOfferSchema = {
     advertiser_capping_budget_amount: { type: ['number', 'null'], minimum: 0 },
     advertiser_over_capping: { type: ['string', 'null'], maxLength: 50 },
     affiliate_over_capping: { type: ['string', 'null'], maxLength: 50 },
-    cap_action: { type: ['string', 'null'], enum: ['pause', 'fallback'] },
+    cap_action: { type: ['string', 'null'], enum: ['pause', 'reject', 'alert', 'fallback'] },
 
+    // Fallback
     fallback_enabled: { type: ['integer', 'boolean'], enum: [0, 1, true, false] },
+    fallback_type: { type: ['string', 'null'], enum: ['offer', 'custom'] },
     fallback_url: { type: ['string', 'null'], maxLength: 500 },
     fallback_offer_id: { type: ['integer', 'null'], minimum: 1 },
 

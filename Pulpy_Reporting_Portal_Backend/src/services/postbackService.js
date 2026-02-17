@@ -716,77 +716,74 @@ export class PostbackService {
       };
 
       // ✅ CRITICAL: Check assignment-level capping (budget) with tenant_id
-      if (assignment && await this.isAssignmentBudgetCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            0,
-            0,
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
-        return {
-          success: false,
-          message: 'Conversion rejected due to assignment budget cap exceeded',
-          conversion: null,
-          duplicate: false,
-        };
-      }
+      // ✅ CRITICAL: Check assignment-level capping (Unified Budget/Conversion)
+      if (assignment) {
+        const cacheService = (await import('./cacheService.js')).default;
+        // Publisher Cap Check
+        const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
 
-      // ✅ CRITICAL: Check assignment-level capping (conversions) with tenant_id
-      if (assignment && await this.isAssignmentConversionCapHit(assignment, offerId, publisherId, tenantId)) {
-        const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            0,
-            0,
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
-        return {
-          success: false,
-          message: 'Conversion rejected due to assignment conversion cap exceeded',
-          conversion: null,
-          duplicate: false,
-        };
+        if (pubCapStatus.isHit) {
+          const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
+
+          await pool.query(
+            `INSERT INTO conversions (
+              conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+              rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+            [
+              conversionUuid,
+              click ? click.click_uuid : null,
+              offerId,
+              publisherId,
+              publisherOfferId,
+              tenantId,
+              rcid || click?.rcid || uuidv4(),
+              'rejected_cap',
+              conversionAmount, // ✅ Record Amount (Revenue)
+              0,                // ❌ ZERO Payout
+              ip,
+              JSON.stringify(postbackPayload),
+            ]
+          );
+
+          // Update Stats for "rejected_cap"
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            const statsPipe = redis.pipeline();
+            const statsKeyOffer = `stats:offer:${offerId}:${tenantId || 0}:${today}`;
+            const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantId || 0}:${today}`;
+
+            statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, conversionAmount);
+            statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, conversionAmount);
+            statsPipe.incr(`${statsKeyOffer}:rejected_conversions`);
+            statsPipe.incr(`${statsKeyPub}:rejected_conversions`);
+
+            await statsPipe.exec();
+          } catch (redisErr) {
+            logger.error('Failed to update stats for rejected_cap conversion:', redisErr);
+          }
+
+          await this.updateDailyStats(offerId, conversionAmount, 0, 'rejected_cap');
+
+          return {
+            success: false,
+            message: `Conversion rejected due to publisher cap exceeded (${assignment.capping_type})`,
+            conversion: null,
+            duplicate: false,
+          };
+        }
       }
 
       // ✅ CRITICAL: Cap checks before inserting conversion (offer-level) with tenant_id
       const capExceeded = await this.isCapExceeded(offer, tenantId);
       if (capExceeded) {
-        // Insert rejected_cap record (no payout, no stats)
         const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
+        // REJECTED_CAP: Record Revenue, 0 Payout
         await pool.query(
           `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+             conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+             rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
           [
             conversionUuid,
             click ? click.click_uuid : null,
@@ -796,16 +793,31 @@ export class PostbackService {
             tenantId,
             rcid || click?.rcid || uuidv4(),
             'rejected_cap',
-            0,
-            0,
+            conversionAmount, // ✅ Revenue
+            0,                // ❌ Payout
             ip,
             JSON.stringify(postbackPayload),
           ]
         );
 
+        // Update Stats
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const statsPipe = redis.pipeline();
+          const statsKeyOffer = `stats:offer:${offerId}:${tenantId || 0}:${today}`;
+          const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantId || 0}:${today}`;
+          statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, conversionAmount);
+          statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, conversionAmount);
+          statsPipe.incr(`${statsKeyOffer}:rejected_conversions`);
+          statsPipe.incr(`${statsKeyPub}:rejected_conversions`);
+          await statsPipe.exec();
+        } catch (e) { logger.error('Stats update failed for rejected cap', e); }
+
+        await this.updateDailyStats(offerId, conversionAmount, 0, 'rejected_cap');
+
         return {
           success: false,
-          message: 'Conversion rejected due to cap exceeded',
+          message: 'Conversion rejected due to offer cap exceeded',
           conversion: null,
           duplicate: false,
         };
@@ -873,6 +885,27 @@ export class PostbackService {
         await statsPipe.exec();
       } catch (err) {
         logger.error('Failed to update Redis stats for conversion (postback DB path):', err);
+      }
+
+      // ✅ Increment Unified Capping Counters (DB Path)
+      try {
+        const cacheService = (await import('./cacheService.js')).default;
+        const normalizedStatus = (finalStatus || 'pending').toLowerCase();
+
+        if (['approved', 'pending'].includes(normalizedStatus)) {
+          // Publisher Cap
+          if (assignment && assignment.id) {
+            // Publisher budget uses payout
+            await cacheService.incrementCap('publisher', assignment.id, assignment, payout, tenantId);
+          }
+          // Offer Cap
+          if (offer && offer.id) {
+            // Offer budget uses revenue (amount)
+            await cacheService.incrementCap('offer', offer.id, offer, conversionAmount, tenantId);
+          }
+        }
+      } catch (capErr) {
+        logger.error('Failed to increment capping counters (DB path)', capErr);
       }
 
       // Get publisher by internal id (in-file lookup)
@@ -1501,7 +1534,11 @@ export class PostbackService {
   }
 
   async isCapExceeded(offer, tenantId = null) {
-    // ✅ CRITICAL: Total cap check with tenant_id filtering
+    if (!offer) return false;
+
+    const cacheService = (await import('./cacheService.js')).default;
+
+    // ✅ 1. Legacy Total Cap Check
     if (offer.total_cap && offer.total_cap > 0) {
       let query = 'SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ?';
       const params = [offer.id];
@@ -1516,46 +1553,18 @@ export class PostbackService {
       if (totalCount >= offer.total_cap) return true;
     }
 
-    const capType = offer.capping_type || 'none';
-    if (capType === 'none') return false;
+    // ✅ 2. New Unified Cap Check (Budget/Conversion + Daily/Weekly/Monthly)
+    const capStatus = await cacheService.getCapStatus('offer', offer.id, offer, tenantId);
 
-    const tz = '+05:30';
-
-    if (capType === 'daily' && offer.daily_cap && offer.daily_cap > 0) {
-      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      const params = [offer.id];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
-
-      const [rows] = await pool.query(query, params);
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      if (count >= offer.daily_cap) return true;
-    }
-
-    if (capType === 'monthly' && offer.monthly_cap && offer.monthly_cap > 0) {
-      let query = `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-      const params = [offer.id];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
-
-      const [rows] = await pool.query(query, params);
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      if (count >= offer.monthly_cap) return true;
-    }
-
-    if (capType === 'weekly' && offer.total_cap && offer.total_cap > 0) {
-      const [rows] = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ? AND YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`,
-        [offer.id]
-      );
-      const count = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      if (count >= offer.total_cap) return true;
+    if (capStatus.isHit) {
+      logger.info(`[POSTBACK] Offer Capping Exceeded`, {
+        offer_id: offer.id,
+        type: offer.capping_type,
+        duration: offer.capping_duration,
+        limit: capStatus.limit,
+        current: capStatus.current
+      });
+      return true;
     }
 
     return false;

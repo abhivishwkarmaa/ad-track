@@ -3,6 +3,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateClickId } from '../utils/urlGenerator.js';
+import cacheService from '../services/cacheService.js';
 
 const STREAM_KEY = 'stream:conversions';
 const GROUP_NAME = 'conversion_group';
@@ -180,6 +181,67 @@ async function processConversionBatch(entries) {
 
     // 5. Bulk Insert Conversions
     if (validConversions.length > 0) {
+        // ✅ STRICT CAP CHECK (DB/Worker Level)
+        await Promise.all(validConversions.map(async (v) => {
+            const c = v.data;
+            try {
+                // Fetch assignment & offer to check caps
+                const [assignment, offer] = await Promise.all([
+                    cacheService.getAssignment(c.publisher_id, c.offer_id, c.tenant_id),
+                    cacheService.getOffer(c.offer_id, c.tenant_id)
+                ]);
+
+                let rejected = false;
+
+                // 1. Check Offer Cap
+                if (offer) {
+                    const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, c.tenant_id);
+                    if (offerCapStatus.isHit) {
+                        c.status = 'rejected_cap';
+                        c.payout = 0;
+                        rejected = true;
+                        logger.info(`[WORKER] Conversion rejected (Offer Cap Hit)`, {
+                            click_uuid: c.click_uuid,
+                            offer_id: offer.id
+                        });
+                    }
+                }
+
+                // 2. Check Publisher Cap (if not already rejected)
+                if (!rejected && assignment) {
+                    const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, c.tenant_id);
+                    if (pubCapStatus.isHit) {
+                        c.status = 'rejected_cap';
+                        c.payout = 0;
+                        rejected = true;
+                        logger.info(`[WORKER] Conversion rejected (Publisher Cap Hit)`, {
+                            click_uuid: c.click_uuid,
+                            assignment_id: assignment.id,
+                            cap_type: assignment.capping_type
+                        });
+                    }
+                }
+
+                // 3. Increment Counters (if not rejected & valid status & assignment/offer exists)
+                if (!rejected && ['approved', 'pending'].includes(c.status)) {
+                    const incPromises = [];
+                    if (assignment) {
+                        // Publisher budget uses payout
+                        incPromises.push(cacheService.incrementCap('publisher', assignment.id, assignment, c.payout, c.tenant_id));
+                    }
+                    if (offer) {
+                        // Offer budget uses amount (revenue)
+                        incPromises.push(cacheService.incrementCap('offer', offer.id, offer, c.amount, c.tenant_id));
+                    }
+                    await Promise.all(incPromises);
+                }
+
+            } catch (capErr) {
+                logger.error(`[WORKER] Cap check failed for ${c.click_uuid}`, capErr);
+                // Continue with original status on error (monitor logs)
+            }
+        }));
+
         try {
             await bulkInsertConversions(validConversions);
             // ACK processed

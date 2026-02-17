@@ -39,6 +39,12 @@ const publisherAssignmentSchema = Joi.object({
   conversion_approval_percentage: Joi.number().min(0).max(100).allow(null).optional(),
   capping_budget: cappingSchema.allow(null).optional(),
   capping_conversions: cappingSchema.allow(null).optional(),
+
+  // Unified Capping
+  capping_type: Joi.string().valid('none', 'budget', 'conversion').default('none').optional(),
+  capping_duration: Joi.string().valid('daily', 'weekly', 'monthly').allow(null).optional(),
+  capping_amount: Joi.number().min(0).allow(null).optional(),
+  capping_action: Joi.string().valid('stop', 'reject').default('stop').optional(),
   callback_url: Joi.string().allow('', null).custom((value, helpers) => {
     return validateUrlMacros(value, helpers, 'callback_url');
   }).optional(),
@@ -74,6 +80,12 @@ export const updateAssignmentSchema = Joi.object({
   conversion_approval_percentage: Joi.number().min(0).max(100).allow(null).optional(),
   capping_budget: cappingSchema.allow(null).optional(),
   capping_conversions: cappingSchema.allow(null).optional(),
+
+  // Unified Capping
+  capping_type: Joi.string().valid('none', 'budget', 'conversion').default('none').optional(),
+  capping_duration: Joi.string().valid('daily', 'weekly', 'monthly').allow(null).optional(),
+  capping_amount: Joi.number().min(0).allow(null).optional(),
+  capping_action: Joi.string().valid('stop', 'reject').default('stop').optional(),
   callback_url: Joi.string().allow('', null).custom((value, helpers) => {
     return validateUrlMacros(value, helpers, 'callback_url');
   }).optional(),

@@ -188,7 +188,8 @@ class OfferService {
           os_targeting_json, os_action,
           browser_targeting_json, browser_action,
           isp_targeting_json, carrier_targeting_json, city_targeting_json,
-          capping_type, daily_cap, monthly_cap, total_cap, conversion_cap, capping_conversions_duration,
+          capping_type, capping_duration, capping_action, fallback_type,
+          daily_cap, monthly_cap, total_cap, conversion_cap, capping_conversions_duration,
           budget_cap, advertiser_capping_budget_duration, advertiser_capping_budget_amount,
           advertiser_over_capping, affiliate_over_capping, cap_action,
           fallback_enabled, fallback_url, fallback_offer_id,
@@ -206,7 +207,8 @@ class OfferService {
           ?, ?,
           ?, ?,
           ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
           ?, ?, ?,
           ?, ?, ?,
           ?, ?, ?,
@@ -250,14 +252,20 @@ class OfferService {
         toJsonOrNull(data.carrier_targeting_json),
         toJsonOrNull(data.city_targeting_json),
         data.capping_type || 'none',
+        data.capping_duration || null,
+        data.capping_action || 'stop',
+        data.fallback_type || 'none',
+
         data.daily_cap ?? null,
         data.monthly_cap ?? null,
         data.total_cap ?? null,
-        data.conversion_cap ?? null,
+        (data.capping_type === 'conversion' && data.capping_amount) ? data.capping_amount : (data.conversion_cap ?? null),
         data.capping_conversions_duration || null,
-        data.budget_cap ?? null,
+
+        (data.capping_type === 'budget' && data.capping_amount) ? data.capping_amount : (data.budget_cap ?? null),
         data.advertiser_capping_budget_duration || null,
         data.advertiser_capping_budget_amount ?? null,
+
         data.advertiser_over_capping || null,
         data.affiliate_over_capping || null,
         data.cap_action || null,
@@ -341,6 +349,15 @@ class OfferService {
         throw err;
       }
 
+      // Pre-process capping_amount mapping for update
+      if (data.capping_amount !== undefined) {
+        if (data.capping_type === 'budget' || (data.capping_type === undefined && existingOffer.capping_type === 'budget')) {
+          data.budget_cap = data.capping_amount;
+        } else if (data.capping_type === 'conversion' || (data.capping_type === undefined && existingOffer.capping_type === 'conversion')) {
+          data.conversion_cap = data.capping_amount;
+        }
+      }
+
       const fields = [];
       const params = [];
 
@@ -377,6 +394,9 @@ class OfferService {
         'carrier_targeting_json',
         'city_targeting_json',
         'capping_type',
+        'capping_duration',
+        'capping_action',
+        'fallback_type',
         'daily_cap',
         'monthly_cap',
         'total_cap',

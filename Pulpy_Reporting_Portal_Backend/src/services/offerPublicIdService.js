@@ -12,6 +12,36 @@ import logger from '../utils/logger.js';
 
 class OfferPublicIdService {
     /**
+     * Get public_offer_id by internal ID
+     */
+    async getPublicOfferId(internalOfferId, tenantId) {
+        try {
+            const [rows] = await pool.query(
+                'SELECT public_offer_id FROM offers WHERE id = ? AND tenant_id = ? LIMIT 1',
+                [internalOfferId, tenantId]
+            );
+            return rows[0]?.public_offer_id || internalOfferId;
+        } catch (error) {
+            return internalOfferId;
+        }
+    }
+
+    /**
+     * Get public_publisher_id by internal ID
+     */
+    async getPublicPublisherId(internalPublisherId, tenantId) {
+        try {
+            const [rows] = await pool.query(
+                'SELECT public_publisher_id FROM publishers WHERE id = ? AND tenant_id = ? LIMIT 1',
+                [internalPublisherId, tenantId]
+            );
+            return rows[0]?.public_publisher_id || internalPublisherId;
+        } catch (error) {
+            return internalPublisherId;
+        }
+    }
+
+    /**
      * Generate next public_offer_id for a tenant
      * @param {number} tenantId - Tenant ID
      * @returns {Promise<number>} - Next available public_offer_id
