@@ -351,8 +351,12 @@ function EditOffer() {
                 // Fetch basic offer list for fallback dropdown
                 const response = await offersAPI.getOffers({ limit: 1000 });
                 if (response.success && response.data && Array.isArray(response.data)) {
-                    // Filter out current offer to avoid recursion loop
-                    const otherOffers = response.data.filter(o => String(o.id) !== String(id));
+                    // Filter out current offer to avoid recursion loop.
+                    // Compare against public identity (public_offer_id or display_id) since route id may be public.
+                    const otherOffers = response.data.filter(o => {
+                        const publicId = o.public_offer_id ?? o.display_id ?? o.id;
+                        return String(publicId) !== String(id);
+                    });
                     setOffers(otherOffers);
                 }
             } catch (error) {
