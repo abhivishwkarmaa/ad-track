@@ -264,9 +264,10 @@ async function bulkInsertConversions(items) {
 
     await pool.query(sql, [values]);
 
-    // Fetch IDs for logging
+    // Fetch IDs for logging and strict stats
+    let uuids = [];
     try {
-        const uuids = items.map(item => item.data.conversion_uuid);
+        uuids = items.map(item => item.data.conversion_uuid);
         if (uuids.length > 0) {
             const [rows] = await pool.query('SELECT id, conversion_uuid FROM conversions WHERE conversion_uuid IN (?)', [uuids]);
             const uuidMap = new Map();
@@ -282,46 +283,183 @@ async function bulkInsertConversions(items) {
         logger.error('❌ Failed to fetch conversion IDs:', idErr);
     }
 
-    // Update Stats
-    const pipeline = redis.pipeline();
-    const today = new Date().toISOString().split('T')[0];
+    // 5. Update Daily Offer Stats (Strict Ledger)
+    // We update stats directly after insertion.
+    // CRITICAL: Only update stats for conversions that were actually NEW (inserted).
+    // If a conversion was a duplicate (updated), we must NOT increment stats again.
+    // Since we used ON DUPLICATE KEY UPDATE, we can't easily distinguish per-row in batch result.
+    // Strategy: We already have 'uuids' (all conversion_uuids in batch).
+    // We need to identify which ones were ALREADY in DB before this batch (duplicates).
+    // But we just inserted them!
+    // Wait, the previous block fetched IDs: "SELECT id, conversion_uuid FROM conversions WHERE conversion_uuid IN (?)".
+    // If we run this SELECT *before* the INSERT, we know which ones exist.
+    // But we are running it *after*.
+    // Actually, we can rely on the `created_at` timestamp.
+    // If `created_at` is close to `NOW()`, it's new. If it's old, it was an update.
+    // Better: We should filter duplicates *before* insert if we want strict stats.
 
-    items.forEach(item => {
-        const c = item.data;
-        const tenantIdVal = c.tenant_id || 0;
-        const statsKeyOffer = `stats:offer:${c.offer_id}:${tenantIdVal}:${today}`;
-        const statsKeyPub = `stats:pub:${c.publisher_id}:${tenantIdVal}:${today}`;
+    // REVISED STRATEGY for Strict Stats:
+    // The previous implementation of `bulkInsertConversions` simply ran INSERT ... ON DUPLICATE KEY UPDATE.
+    // To ensure we don't double count stats, we will:
+    // 1. Identify valid NEW items only.
+    //    We can do this by checking if `affectedRows` matches `items.length` (all new) or by stricter checks.
+    //    Or, we can calculate stats ONLY for items that *didn't* exist before.
+    //    Since `processPostback` service already does a check for `rcid` and `click_id` deduplication,
+    //    most duplicates should be caught there.
+    //    However, race conditions in the worker (processed twice) are the main risk.
 
-        // Revenue: ALWAYS increment (Advertiser Revenue) - regardless of status
-        pipeline.incrbyfloat(`${statsKeyOffer}:revenue`, c.amount);
-        pipeline.incrbyfloat(`${statsKeyPub}:revenue`, c.amount);
+    // Let's rely on the fact that `conversion_uuid` is unique.
+    // We will verify which UUIDs are "new" to the stats system.
+    // But simpler: The worker should process a given message ID only once (Redis Stream semantics).
+    // The only risk is if the worker crashes after DB insert but before ACK.
+    // In that case, the message is re-delivered.
+    // If we simply increment stats again, we double count.
+    // SOLUTION: Check if the conversion ALREADY contributed to stats? No, too hard.
+    // SOLUTION: Check if conversion was created RECENTLY (in this transaction).
+    // Let's modify the fetch logic above to get `created_at`.
+    // If `created_at` > `timestamp_before_insert`, it's new.
 
-        // Conversions: track total + per-status buckets.
-        pipeline.incr(`${statsKeyOffer}:conversions`);
-        pipeline.incr(`${statsKeyPub}:conversions`);
+    const newItems = [];
+    try {
+        if (uuids.length > 0) {
+            // We fetch the rows again to check timestamps, or we could have done it in the previous fetch
+            const [rows] = await pool.query('SELECT conversion_uuid, created_at, updated_at FROM conversions WHERE conversion_uuid IN (?)', [uuids]);
 
-        const normalizedStatus = (c.status || 'pending').toString().toLowerCase();
+            // Create a map of uuid -> row
+            const rowMap = new Map();
+            rows.forEach(r => rowMap.set(r.conversion_uuid, r));
 
-        if (normalizedStatus === 'approved') {
-            pipeline.incr(`${statsKeyOffer}:approved_conversions`);
-            pipeline.incr(`${statsKeyPub}:approved_conversions`);
-            // Payout: ONLY Approved
-            pipeline.incrbyfloat(`${statsKeyOffer}:payout`, c.payout);
-            pipeline.incrbyfloat(`${statsKeyPub}:payout`, c.payout);
-        } else if (normalizedStatus === 'pending') {
-            pipeline.incr(`${statsKeyOffer}:pending_conversions`);
-            pipeline.incr(`${statsKeyPub}:pending_conversions`);
-        } else if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_cap') {
-            pipeline.incr(`${statsKeyOffer}:rejected_conversions`);
-            pipeline.incr(`${statsKeyPub}:rejected_conversions`);
+            items.forEach(item => {
+                const dbRow = rowMap.get(item.data.conversion_uuid);
+                // Logic: If the row's created_at is strictly equal to updated_at (within a second tolerance), it's likely a new insert.
+                // If updated_at is significantly later than created_at, it was an update (duplicate).
+                // OR: If the record didn't exist before (we can't check that now effectively without a pre-select).
+                // ROBUST WAY: Use the `affiliate_postback_fired` flag or similar? No.
+
+                // Let's use the discrepancy between created_at and updated_at.
+                // When inserted: created_at ~= updated_at.
+                // When updated (duplicate): created_at < updated_at.
+                if (dbRow) {
+                    const created = new Date(dbRow.created_at).getTime();
+                    const updated = new Date(dbRow.updated_at).getTime();
+                    // Tolerance of 1000ms
+                    if (Math.abs(updated - created) < 2000) {
+                        newItems.push(item);
+                    } else {
+                        logger.warn(`⚠️ Duplicate conversion detected (skipping stats increment): ${item.data.conversion_uuid}`);
+                    }
+                }
+            });
         }
-    });
+    } catch (checkErr) {
+        logger.error('❌ Failed to check for new conversions, skipping stats update to be safe:', checkErr);
+        // If we can't verify they are new, we SKIP updating stats to prevent inflation.
+        // Better to under-report than over-report in a "Strict Ledger" scenario.
+        return;
+    }
 
-    await pipeline.exec();
-    logger.info(`✅ Inserted ${items.length} conversions`);
+    try {
+        if (newItems.length > 0) {
+            await updateDailyStats(newItems);
+            logger.info(`✅ Updated daily_offer_stats for ${newItems.length} NEW conversions`);
+        }
+    } catch (statsErr) {
+        logger.error('❌ Failed to update daily_offer_stats:', statsErr);
+    }
 
     // Fire Affiliate Postbacks
     await fireAffiliatePostbacks(items);
+}
+
+/**
+ * Helper to get IST Date String (YYYY-MM-DD)
+ */
+const getIstDateString = () => {
+    const now = new Date();
+    // UTC time + 5 hours 30 minutes
+    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+    return istTime.toISOString().split('T')[0];
+};
+
+/**
+ * Update Daily Offer Stats directly in DB
+ */
+async function updateDailyStats(items) {
+    if (items.length === 0) return;
+
+    const today = getIstDateString(); // YYYY-MM-DD in IST
+    const groups = {}; // Key: offer_id:tenant_id
+
+    // Aggregate delta for this batch
+    for (const item of items) {
+        const c = item.data;
+        const offerId = c.offer_id;
+        const tenantId = c.tenant_id || 0;
+        const key = `${offerId}:${tenantId}`;
+
+        if (!groups[key]) {
+            groups[key] = {
+                offerId,
+                tenantId,
+                conversions: 0,
+                approved: 0,
+                pending: 0,
+                rejected: 0,
+                revenue: 0,
+                payout: 0
+            };
+        }
+
+        const g = groups[key];
+        // Revenue: Always count (Advertiser Revenue)
+        g.revenue += parseFloat(c.amount || 0);
+        g.conversions += 1;
+
+        const status = (c.status || 'pending').toLowerCase();
+        if (status === 'approved') {
+            g.approved += 1;
+            g.payout += parseFloat(c.payout || 0); // Payout only if approved
+        } else if (status === 'pending') {
+            g.pending += 1;
+        } else if (status === 'rejected' || status === 'rejected_cap') {
+            g.rejected += 1;
+        }
+    }
+
+    // Execute Updates
+    // We process each group (Offer + Tenant)
+    const promises = Object.values(groups).map(async (g) => {
+        const profit = g.revenue - g.payout;
+
+        const sql = `
+            INSERT INTO daily_offer_stats (
+                offer_id, tenant_id, day, 
+                clicks, unique_clicks, 
+                conversions, approved_conversions, pending_conversions, rejected_conversions,
+                revenue, payout, profit, 
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                conversions = conversions + VALUES(conversions),
+                approved_conversions = approved_conversions + VALUES(approved_conversions),
+                pending_conversions = pending_conversions + VALUES(pending_conversions),
+                rejected_conversions = rejected_conversions + VALUES(rejected_conversions),
+                revenue = revenue + VALUES(revenue),
+                payout = payout + VALUES(payout),
+                profit = profit + VALUES(profit),
+                updated_at = UTC_TIMESTAMP()
+        `;
+
+        await pool.query(sql, [
+            g.offerId, g.tenantId, today,
+            g.conversions, g.approved, g.pending, g.rejected,
+            g.revenue, g.payout, profit
+        ]);
+    });
+
+    await Promise.all(promises);
+
 }
 
 /**

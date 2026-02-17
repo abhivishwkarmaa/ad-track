@@ -19,6 +19,7 @@ async function reportRoutes(fastify, options) {
   fastify.get('/dashboard/offer-statistics', dashboardController.getOfferStatistics);
   fastify.get('/dashboard/publisher-statistics', dashboardController.getPublisherStatistics);
   fastify.get('/dashboard/performance-comparison', dashboardController.getPerformanceComparison);
+  fastify.get('/dashboard/performance-summary', dashboardController.getPerformanceSummary);
 
   // Reports
   fastify.get('/summary', reportController.getSummary);

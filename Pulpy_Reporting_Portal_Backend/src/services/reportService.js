@@ -78,8 +78,8 @@ export class ReportService {
         'city': 'c.city',
         'region': 'c.region',
         'tid': 'c.tid',
-        'date': "DATE(CONVERT_TZ(c.created_at, '+00:00', '+05:30'))",
-        'hour': "HOUR(CONVERT_TZ(c.created_at, '+00:00', '+05:30'))",
+        'date': "DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))",
+        'hour': "HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))",
         'user_agent': 'c.user_agent',
         'device_type': 'c.device_type',
         'os': 'c.os',
@@ -273,12 +273,12 @@ export class ReportService {
     }
 
     if (filters.date_from) {
-      clause += ' AND DATE(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) >= ?';
+      clause += ' AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= ?';
       params.push(filters.date_from);
     }
 
     if (filters.date_to) {
-      clause += ' AND DATE(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) <= ?';
+      clause += ' AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= ?';
       params.push(filters.date_to);
     }
 
@@ -348,7 +348,7 @@ export class ReportService {
     }
 
     if (filters.hour !== undefined) {
-      clause += ' AND HOUR(CONVERT_TZ(c.created_at, \'+00:00\', \'+05:30\')) = ?';
+      clause += ' AND HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?';
       params.push(filters.hour);
     }
 
@@ -664,11 +664,11 @@ export class ReportService {
       }
 
       if (filters.date_from) {
-        query += ' AND DATE(CONVERT_TZ(conv.created_at, \'+00:00\', \'+05:30\')) >= ?';
+        query += ' AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?';
         params.push(filters.date_from);
       }
       if (filters.date_to) {
-        query += ' AND DATE(CONVERT_TZ(conv.created_at, \'+00:00\', \'+05:30\')) <= ?';
+        query += ' AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?';
         params.push(filters.date_to);
       }
       if (filters.offer_id) {

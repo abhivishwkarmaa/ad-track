@@ -284,13 +284,13 @@ function Dashboard() {
             .catch(err => mountCheck() && console.error('Performance error:', err))
             .finally(() => mountCheck() && setLoadingPerformance(false));
 
-        dashboardAPI.getSummary(baseParams)
+        dashboardAPI.getPerformanceSummary(baseParams)
             .then(res => mountCheck() && res.success && setSummary(res.data || {}))
             .catch(err => mountCheck() && console.error('Summary error:', err))
             .finally(() => mountCheck() && setLoadingSummary(false));
 
         if (previousRange) {
-            dashboardAPI.getSummary({ date_from: previousRange.from, date_to: previousRange.to })
+            dashboardAPI.getPerformanceSummary({ date_from: previousRange.from, date_to: previousRange.to })
                 .then(res => mountCheck() && res.success && setSummaryPrevious(res.data || null))
                 .catch(err => mountCheck() && console.error('Summary previous error:', err));
         } else {
@@ -479,26 +479,26 @@ function Dashboard() {
                         {loadingPerformance ? (
                             <SkeletonChart />
                         ) : (
-                        <ResponsiveContainer debounce={300}>
-                            <AreaChart data={processedPerformanceChart}>
-                                <defs>
-                                    <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8} />
-                                        <stop offset="95%" stopColor="#8884d8" stopOpacity={0} />
-                                    </linearGradient>
-                                    <linearGradient id="colorConversions" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#82ca9d" stopOpacity={0.8} />
-                                        <stop offset="95%" stopColor="#82ca9d" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="date" />
-                                <YAxis />
-                                <Tooltip />
-                                <Area type="monotone" dataKey="clicks" stroke="#8884d8" strokeWidth={3} fillOpacity={1} fill="url(#colorClicks)" animationDuration={1000} animationEasing="ease-out" />
-                                <Area type="monotone" dataKey="conversions" stroke="#82ca9d" strokeWidth={3} fillOpacity={1} fill="url(#colorConversions)" animationDuration={1000} animationEasing="ease-out" />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                            <ResponsiveContainer debounce={300}>
+                                <AreaChart data={processedPerformanceChart}>
+                                    <defs>
+                                        <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="#8884d8" stopOpacity={0} />
+                                        </linearGradient>
+                                        <linearGradient id="colorConversions" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#82ca9d" stopOpacity={0.8} />
+                                            <stop offset="95%" stopColor="#82ca9d" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="date" />
+                                    <YAxis />
+                                    <Tooltip />
+                                    <Area type="monotone" dataKey="clicks" stroke="#8884d8" strokeWidth={3} fillOpacity={1} fill="url(#colorClicks)" animationDuration={1000} animationEasing="ease-out" />
+                                    <Area type="monotone" dataKey="conversions" stroke="#82ca9d" strokeWidth={3} fillOpacity={1} fill="url(#colorConversions)" animationDuration={1000} animationEasing="ease-out" />
+                                </AreaChart>
+                            </ResponsiveContainer>
                         )}
                     </div>
                 </div>
@@ -612,52 +612,52 @@ function Dashboard() {
                     {loadingSummary ? (
                         <SkeletonSummary />
                     ) : (
-                    <div className="summary-grid summary-kpi-grid">
-                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Clicks</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.unique_clicks)}</span>
-                                {summaryPrevious != null && (
-                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatNumber(summaryPrevious.unique_clicks)}
-                                    </span>
-                                )}
+                        <div className="summary-grid summary-kpi-grid">
+                            <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Unique Clicks</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.unique_clicks)}</span>
+                                    {summaryPrevious != null && (
+                                        <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                            prev: {formatNumber(summaryPrevious.unique_clicks)}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Conversions</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.conversions)}</span>
+                                    {summaryPrevious != null && (
+                                        <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                            prev: {formatNumber(summaryPrevious.conversions)}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Revenue</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.revenue)}</span>
+                                    {summaryPrevious != null && (
+                                        <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                            prev: {formatCurrency(summaryPrevious.revenue)}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Profit</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span className="summary-value profit" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.profit)}</span>
+                                    {summaryPrevious != null && (
+                                        <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                            prev: {formatCurrency(summaryPrevious.profit)}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Conversions</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatNumber(summary.conversions)}</span>
-                                {summaryPrevious != null && (
-                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatNumber(summaryPrevious.conversions)}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Revenue</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span className="summary-value" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.revenue)}</span>
-                                {summaryPrevious != null && (
-                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatCurrency(summaryPrevious.revenue)}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="summary-item" style={{ padding: '12px', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                            <div className="summary-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Profit</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span className="summary-value profit" style={{ fontSize: '20px', fontWeight: 'bold' }}>{formatCurrency(summary.profit)}</span>
-                                {summaryPrevious != null && (
-                                    <span className="summary-previous" style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                        prev: {formatCurrency(summaryPrevious.profit)}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    </div>
                     )}
                 </div>
 

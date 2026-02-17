@@ -234,6 +234,33 @@ export class DashboardController {
     }
   }
 
+  async getPerformanceSummary(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+      };
+
+      const data = await dashboardService.getPerformanceSummary(filters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getPerformanceSummary error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
   async getLiveOffers(request, reply) {
     try {
       const tenantId = getTenantIdFromRequest(request);
@@ -296,7 +323,7 @@ export class DashboardController {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
       };
-
+      console.log(filters)
       const data = await dashboardService.getOfferStatistics(filters, tenantId);
       return reply.send({
         success: true,

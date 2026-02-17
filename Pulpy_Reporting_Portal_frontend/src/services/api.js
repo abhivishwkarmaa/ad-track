@@ -285,6 +285,11 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance?${queryString}`);
     },
+    // Performance summary (matching dashboard cards logic)
+    getPerformanceSummary: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/performance-summary?${queryString}`);
+    },
     // Top countries
     getTopCountries: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
