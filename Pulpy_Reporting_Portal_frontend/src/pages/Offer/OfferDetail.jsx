@@ -1038,45 +1038,45 @@ function OfferDetail() {
 
                                     // Reload assignments for this offer only (same endpoint as initial load)
                                     const response = await offersAPI.getOfferAssignments(id);
-                                        if (response.success && response.data) {
-                                            setAssignments(response.data);
+                                    if (response.success && response.data) {
+                                        setAssignments(response.data);
 
-                                            const updatedAssignments = await Promise.all(
-                                                response.data.map(async (assignment) => {
-                                                    let trackingUrl = '';
-                                                    if (assignment.id) {
-                                                        try {
-                                                            // assignment.id is the public assignment id returned by the backend formatAssignment
-                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
-                                                            if (trackingResponse.success) {
-                                                                trackingUrl = trackingResponse.data.tracking_url;
-                                                            }
-                                                        } catch (error) {
-                                                            console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
+                                        const updatedAssignments = await Promise.all(
+                                            response.data.map(async (assignment) => {
+                                                let trackingUrl = '';
+                                                if (assignment.id) {
+                                                    try {
+                                                        // assignment.id is the public assignment id returned by the backend formatAssignment
+                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
+                                                        if (trackingResponse.success) {
+                                                            trackingUrl = trackingResponse.data.tracking_url;
                                                         }
+                                                    } catch (error) {
+                                                        console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
                                                     }
-                                                    return {
-                                                        offer_id: assignment.offer_id?.toString() || id?.toString(),
-                                                        publisher_id: assignment.publisher_id,
-                                                        publisher_email: assignment.publisher_email,
-                                                        payout_override: assignment.payout_override || '',
-                                                        conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                                        capping_type: assignment.capping_type || 'none',
-                                                        capping_duration: assignment.capping_duration || 'daily',
-                                                        capping_amount: assignment.capping_amount || '',
-                                                        capping_action: assignment.capping_action || 'stop',
-                                                        callback_url: assignment.callback_url || '',
-                                                        offer_url: assignment.destination_url || assignment.offer_url || '',
-                                                        notes: assignment.notes || '',
-                                                        status: assignment.status || 'active',
-                                                        assignment_id: assignment.id,
-                                                        tracking_url: trackingUrl,
-                                                        selectedTokens: []
-                                                    };
-                                                })
-                                            );
-                                            setPublisherAssignments(updatedAssignments);
-                                        }
+                                                }
+                                                return {
+                                                    offer_id: assignment.offer_id?.toString() || id?.toString(),
+                                                    publisher_id: assignment.publisher_id,
+                                                    publisher_email: assignment.publisher_email,
+                                                    payout_override: assignment.payout_override || '',
+                                                    conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+                                                    capping_type: assignment.capping_type || 'none',
+                                                    capping_duration: assignment.capping_duration || 'daily',
+                                                    capping_amount: assignment.capping_amount || '',
+                                                    capping_action: assignment.capping_action || 'stop',
+                                                    callback_url: assignment.callback_url || '',
+                                                    offer_url: assignment.destination_url || assignment.offer_url || '',
+                                                    notes: assignment.notes || '',
+                                                    status: assignment.status || 'active',
+                                                    assignment_id: assignment.id,
+                                                    tracking_url: trackingUrl,
+                                                    selectedTokens: []
+                                                };
+                                            })
+                                        );
+                                        setPublisherAssignments(updatedAssignments);
+                                    }
                                 } catch (error) {
                                     console.error('Error saving assignments:', error);
                                     toast.error(error.message || 'Failed to save assignments');

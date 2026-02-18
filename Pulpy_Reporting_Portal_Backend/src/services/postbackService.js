@@ -54,7 +54,7 @@ async function getAssignmentByInternalId(id, tenantId) {
     conversion_approval_percentage: row.conversion_approval_percentage,
     callback_url: row.callback_url,
     tenant_id: row.tenant_id,
-  };
+  }; 
 }
 
 /** Get publisher by internal id only. Returns row or null. */
