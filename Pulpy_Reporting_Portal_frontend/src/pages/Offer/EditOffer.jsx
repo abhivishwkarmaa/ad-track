@@ -388,7 +388,6 @@ function EditOffer() {
         };
 
         fetchPublishers();
-        fetchPublishers();
     }, [toast, refreshKey]);
 
     // Fetch assignments for this offer
@@ -450,7 +449,6 @@ function EditOffer() {
             }
         };
 
-        fetchAssignments();
         fetchAssignments();
     }, [id, toast, refreshKey]);
 

@@ -46,7 +46,6 @@ function EditAssignment() {
             }
         };
         fetchData();
-        fetchData();
     }, [refreshKey]);
 
     useEffect(() => {
