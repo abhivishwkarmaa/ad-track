@@ -105,27 +105,30 @@ function EditAssignment() {
         e.preventDefault();
         setLoading(true);
         try {
+            // Use updateAssignment for editing (PATCH)
+            // Use internal_id if available, otherwise fallback to id from params
+
             const assignmentData = {
-                offer_id: parseInt(formData.offer_id),
-                publishers: [{
-                    publisher_id: parseInt(formData.publisher_id),
-                    payout_override: formData.payout_override ? parseFloat(formData.payout_override) : null,
-                    conversion_approval_percentage: formData.conversion_approval_percentage ? parseFloat(formData.conversion_approval_percentage) : null,
+                payout_override: formData.payout_override ? parseFloat(formData.payout_override) : null,
+                conversion_approval_percentage: formData.conversion_approval_percentage ? parseFloat(formData.conversion_approval_percentage) : null,
 
-                    // Unified Capping
-                    capping_type: formData.capping_type,
-                    capping_duration: formData.capping_duration,
-                    capping_action: formData.capping_action,
-                    capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+                // Unified Capping
+                capping_type: formData.capping_type,
+                capping_duration: formData.capping_duration,
+                capping_action: formData.capping_action,
+                capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
 
-                    callback_url: formData.callback_url || null,
-                    offer_url: formData.offer_url || null,
-                    notes: formData.notes || null,
-                    status: formData.status
-                }]
+                callback_url: formData.callback_url || null,
+                offer_url: formData.offer_url || null, // Will be mapped to destination_url in backend
+                notes: formData.notes || null,
+                status: formData.status
             };
 
-            await assignmentsAPI.createOrUpdateAssignments(assignmentData);
+            // Use internal_id to ensure we are updating the correct record in DB
+            // (assignment.id might be Public ID string)
+            const targetId = assignment?.internal_id || id;
+
+            await assignmentsAPI.updateAssignment(targetId, assignmentData);
             toast.success('Assignment updated successfully!');
             navigate('/assignment/manage');
         } catch (error) {
@@ -162,6 +165,7 @@ function EditAssignment() {
                                     value={formData.offer_id}
                                     onChange={(e) => handleChange('offer_id', e.target.value)}
                                     required
+                                    disabled
                                 >
                                     <option value="">Select an offer</option>
                                     {offers.map(offer => (
@@ -178,6 +182,7 @@ function EditAssignment() {
                                     value={formData.publisher_id}
                                     onChange={(e) => handleChange('publisher_id', e.target.value)}
                                     required
+                                    disabled
                                 >
                                     <option value="">Select a publisher</option>
                                     {publishers.map(publisher => (
