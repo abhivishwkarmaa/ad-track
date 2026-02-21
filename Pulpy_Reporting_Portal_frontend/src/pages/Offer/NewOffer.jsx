@@ -264,6 +264,8 @@ function NewOffer() {
         // Targetings
         ip_action: 'ALLOW',
         ip_list: '',
+        country_action: 'ALLOW',
+        country_list: '',
         browser_action: 'ALLOW',
         browser_targeting: [],
         device_action: 'ALLOW',
@@ -510,15 +512,21 @@ function NewOffer() {
                 // IP Targeting - convert ALLOW/BLOCK to allow/block
                 ip_action: formData.ip_action.toLowerCase(),
                 ip_list: formData.ip_list || null,
+                // Country Targeting
+                country_action: formData.country_action ? formData.country_action.toLowerCase() : 'allow',
+                country_list: formData.country_list || null,
                 // Device Targeting
+                device_action: formData.device_action ? formData.device_action.toLowerCase() : 'allow',
                 device_targeting_json: formData.device_targeting && formData.device_targeting.length > 0
                     ? JSON.stringify({ device: formData.device_targeting })
                     : null,
                 // OS Targeting
+                os_action: formData.os_action ? formData.os_action.toLowerCase() : 'allow',
                 os_targeting_json: formData.os_targeting && formData.os_targeting.length > 0
                     ? JSON.stringify({ os: formData.os_targeting })
                     : null,
                 // Browser Targeting
+                browser_action: formData.browser_action ? formData.browser_action.toLowerCase() : 'allow',
                 browser_targeting_json: formData.browser_targeting && formData.browser_targeting.length > 0
                     ? JSON.stringify({ browser: formData.browser_targeting })
                     : null,
@@ -1106,6 +1114,31 @@ function NewOffer() {
                                     value={formData.ip_list}
                                     onChange={handleChange}
                                     placeholder="1.1.1.1,2.2.2.2 (comma separated)"
+                                />
+                            </div>
+                        </div>
+                        <div className="offer-form-row">
+                            <div className="form-group" style={{ flex: '0 0 150px' }}>
+                                <label className="form-label">Select Action</label>
+                                <select
+                                    className="form-control"
+                                    name="country_action"
+                                    value={formData.country_action}
+                                    onChange={handleChange}
+                                >
+                                    <option value="ALLOW">Allow</option>
+                                    <option value="BLOCK">Block</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ flex: '1' }}>
+                                <label className="form-label">Target Country Codes</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="country_list"
+                                    value={formData.country_list}
+                                    onChange={handleChange}
+                                    placeholder="US,IN,CA (comma separated)"
                                 />
                             </div>
                         </div>

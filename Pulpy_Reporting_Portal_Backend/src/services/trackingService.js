@@ -310,6 +310,87 @@ export class TrackingService {
         };
       }
 
+      // 3.1 TARGETING VALIDATION
+      const deviceInfo = parseDevice(userAgent);
+      const offerIpAction = offer.ip_action ? offer.ip_action.toLowerCase() : null;
+      if (offerIpAction && offer.ip_list) {
+        const ipList = offer.ip_list.split(',').map(i => i.trim()).filter(Boolean);
+        const isIpMatch = ipList.includes(ip);
+        if (offerIpAction === 'allow' && !isIpMatch) {
+          return { html: generateOfferErrorPage('IP not allowed', 'ip_blocked'), clickId: null };
+        } else if (offerIpAction === 'block' && isIpMatch) {
+          return { html: generateOfferErrorPage('IP blocked', 'ip_blocked'), clickId: null };
+        }
+      }
+
+      const location = getLocationFromIP(ip); // { country, region, city }
+      const country_final = location.country || getCountryFromHeaders(request) || '';
+
+      const offerCountryAction = offer.country_action ? offer.country_action.toLowerCase() : null;
+      if (offerCountryAction && offer.country_list) {
+        const countryList = offer.country_list.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
+        const isCountryMatch = countryList.includes(country_final.toLowerCase());
+        if (offerCountryAction === 'allow' && !isCountryMatch) {
+          return { html: generateOfferErrorPage('Country not allowed', 'country_blocked'), clickId: null };
+        } else if (offerCountryAction === 'block' && isCountryMatch) {
+          return { html: generateOfferErrorPage('Country blocked', 'country_blocked'), clickId: null };
+        }
+      }
+
+      const offerDeviceAction = offer.device_action ? offer.device_action.toLowerCase() : null;
+      if (offerDeviceAction && offer.device_targeting_json) {
+        try {
+          const dt = typeof offer.device_targeting_json === 'string' ? JSON.parse(offer.device_targeting_json) : offer.device_targeting_json;
+          const allowedDevices = Array.isArray(dt) ? dt : (dt?.device || dt?.devices || []);
+          if (allowedDevices.length > 0 && !allowedDevices.includes('All')) {
+            const isMatch = allowedDevices.includes(deviceInfo.deviceType) || allowedDevices.map(d => d.toLowerCase()).includes(deviceInfo.deviceType.toLowerCase());
+            if (offerDeviceAction === 'allow' && !isMatch) {
+              return { html: generateOfferErrorPage('Device not allowed', 'device_blocked'), clickId: null };
+            } else if (offerDeviceAction === 'block' && isMatch) {
+              return { html: generateOfferErrorPage('Device blocked', 'device_blocked'), clickId: null };
+            }
+          }
+        } catch (e) {
+          logger.warn('Parsing device_targeting_json failed', e);
+        }
+      }
+
+      const offerBrowserAction = offer.browser_action ? offer.browser_action.toLowerCase() : null;
+      if (offerBrowserAction && offer.browser_targeting_json) {
+        try {
+          const bt = typeof offer.browser_targeting_json === 'string' ? JSON.parse(offer.browser_targeting_json) : offer.browser_targeting_json;
+          const allowedBrowsers = Array.isArray(bt) ? bt : (bt?.browser || bt?.browsers || []);
+          if (allowedBrowsers.length > 0 && !allowedBrowsers.includes('All')) {
+            const isMatch = allowedBrowsers.includes(deviceInfo.browser) || allowedBrowsers.map(b => b.toLowerCase()).includes(deviceInfo.browser.toLowerCase());
+            if (offerBrowserAction === 'allow' && !isMatch) {
+              return { html: generateOfferErrorPage('Browser not allowed', 'browser_blocked'), clickId: null };
+            } else if (offerBrowserAction === 'block' && isMatch) {
+              return { html: generateOfferErrorPage('Browser blocked', 'browser_blocked'), clickId: null };
+            }
+          }
+        } catch (e) {
+          logger.warn('Parsing browser_targeting_json failed', e);
+        }
+      }
+
+      const offerOsAction = offer.os_action ? offer.os_action.toLowerCase() : null;
+      if (offerOsAction && offer.os_targeting_json) {
+        try {
+          const ot = typeof offer.os_targeting_json === 'string' ? JSON.parse(offer.os_targeting_json) : offer.os_targeting_json;
+          const allowedOs = Array.isArray(ot) ? ot : (ot?.os || []);
+          if (allowedOs.length > 0 && !allowedOs.includes('All')) {
+            const isMatch = allowedOs.includes(deviceInfo.os) || allowedOs.map(o => o.toLowerCase()).includes(deviceInfo.os.toLowerCase());
+            if (offerOsAction === 'allow' && !isMatch) {
+              return { html: generateOfferErrorPage('OS not allowed', 'os_blocked'), clickId: null };
+            } else if (offerOsAction === 'block' && isMatch) {
+              return { html: generateOfferErrorPage('OS blocked', 'os_blocked'), clickId: null };
+            }
+          }
+        } catch (e) {
+          logger.warn('Parsing os_targeting_json failed', e);
+        }
+      }
+
 
 
       // ✅ 4. REDIS: CHECK OFFER & PUBLISHER CAPS (Zero DB)
@@ -392,14 +473,10 @@ export class TrackingService {
       // (clickUuid generated above for cap support)
 
       // Parse params
-      const deviceInfo = parseDevice(userAgent);
       const referrer = request.headers.referer || '';
       const domain = extractDomain(referrer);
 
-      // Geo & ISP Lookup
-      const location = getLocationFromIP(ip); // { country, region, city }
-      // Fallback country from headers if GeoIP missed (e.g. Cloudflare)
-      const country_final = location.country || getCountryFromHeaders(request) || '';
+      // Geo & ISP Lookup (already performed country lookup earlier)
 
       // Async ISP lookup (with timeout protection)
       let isp = null;

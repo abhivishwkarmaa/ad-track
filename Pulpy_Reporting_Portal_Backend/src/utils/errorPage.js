@@ -105,6 +105,11 @@ function getErrorTitle(errorType) {
         'offer_time_restricted': 'Offer Temporarily Unavailable',
         'offer_cap_hit': 'Offer Cap Reached',
         'publisher_cap_hit': 'Daily Limit Reached',
+        'ip_blocked': 'IP Address Blocked',
+        'device_blocked': 'Device Not Allowed',
+        'browser_blocked': 'Browser Not Allowed',
+        'os_blocked': 'OS Not Allowed',
+        'country_blocked': 'Country Not Allowed',
     };
     return titles[errorType] || 'Offer Unavailable';
 }
@@ -118,6 +123,11 @@ function getErrorDescription(errorType, errorMessage) {
         'offer_time_restricted': 'This offer is not available at the current time. Please try again during the allowed time window.',
         'offer_cap_hit': 'This offer has reached its maximum daily budget. Traffic has been paused to ensure quality.',
         'publisher_cap_hit': 'Your daily allocation for this offer has been reached. Please check back tomorrow.',
+        'ip_blocked': 'Your IP address is not permitted to access this offer.',
+        'device_blocked': 'Your device type is not permitted to access this offer.',
+        'browser_blocked': 'Your browser is not permitted to access this offer.',
+        'os_blocked': 'Your operating system is not permitted to access this offer.',
+        'country_blocked': 'Your location is not permitted to access this offer.',
     };
     return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
 }

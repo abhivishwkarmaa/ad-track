@@ -84,6 +84,8 @@ export const createOfferSchema = {
 
     ip_action: { type: ['string', 'null'], maxLength: 20 },
     ip_list: { type: ['string', 'null'] },
+    country_action: { type: ['string', 'null'], maxLength: 20 },
+    country_list: { type: ['string', 'null'] },
     device_targeting_json: { type: ['object', 'null'] },
     device_action: { type: ['string', 'null'], maxLength: 20 },
     os_targeting_json: { type: ['object', 'null'] },
@@ -160,6 +162,8 @@ export const updateOfferSchema = {
 
     ip_action: { type: ['string', 'null'], maxLength: 20 },
     ip_list: { type: ['string', 'null'] },
+    country_action: { type: ['string', 'null'], maxLength: 20 },
+    country_list: { type: ['string', 'null'] },
     device_targeting_json: { type: ['object', 'null'] },
     device_action: { type: ['string', 'null'], maxLength: 20 },
     os_targeting_json: { type: ['object', 'null'] },
