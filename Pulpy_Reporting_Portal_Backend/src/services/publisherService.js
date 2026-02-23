@@ -142,7 +142,7 @@ export class PublisherService {
   // ✅ CRITICAL: For authentication, we may need to check across tenants or specific tenant
   async findByEmailWithPassword(email, tenantId = null) {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = 'SELECT * FROM publishers WHERE email = ?';
+    let query = 'SELECT id, public_publisher_id, email, password_hash, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE email = ?';
     const params = [email];
 
     if (tenantId) {
@@ -319,11 +319,20 @@ export class PublisherService {
       }
 
       let dateCondition = '';
-      if (filters.date_from) {
-        dateCondition += ` AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'`;
-      }
-      if (filters.date_to) {
-        dateCondition += ` AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'`;
+      const statsParams = [];
+      if (filters.date_from && filters.date_to) {
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition = ' AND conv.created_at BETWEEN ? AND ?';
+        statsParams.push(utcStart, utcEnd);
+      } else if (filters.date_from) {
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition = ' AND conv.created_at >= ?';
+        statsParams.push(utcStart);
+      } else if (filters.date_to) {
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition = ' AND conv.created_at <= ?';
+        statsParams.push(utcEnd);
       }
 
       const query = `
@@ -359,11 +368,10 @@ export class PublisherService {
             COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout
 
           FROM clicks c
-          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid ${dateCondition}
+          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid ${dateCondition.replace('conv.', '')}
           WHERE c.tenant_id = ? 
           /* Date condition for clicks also needs to be applied if we want accurate click counts in range */
-          ${filters.date_from ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'` : ''}
-          ${filters.date_to ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'` : ''}
+          ${dateCondition.replace('conv.', 'c.')}
           GROUP BY c.publisher_id
         ) stats ON stats.publisher_id = p.id
         ${whereClause}
@@ -371,8 +379,15 @@ export class PublisherService {
         LIMIT ? OFFSET ?
       `;
 
-      // Params for stats subquery + main query
-      const finalParams = [tenantId, ...params, limit, offset];
+      // Params for stats subquery (conversions) + clicks subquery + main query
+      const finalParams = [
+        ...statsParams, // for conv JOIN
+        tenantId,
+        ...statsParams, // for clicks WHERE
+        ...params,      // for main WHERE
+        limit,
+        offset
+      ];
 
       const countQuery = `SELECT COUNT(*) as total FROM publishers p ${whereClause}`;
 
@@ -394,17 +409,13 @@ export class PublisherService {
         ${dateCondition}
         ${whereClause} 
         /* Ensure we filter by date for clicks too in the summary if date range applies */
-        ${filters.date_from ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'` : ''}
-        ${filters.date_to ? ` AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'` : ''}
+        ${dateCondition.replace('conv.', 'c.')}
       `;
 
-      // Params for summary (tenantId + filter params)
-      // Note: we need to reconstruct params for the summary query because 'whereClause' uses '?' placeholders provided in 'params'
-      // But we introduced joins. 
-      // Actually, 'whereClause' is "WHERE p.tenant_id = ? AND ..."
-      // So we can reuse 'params'.
+      // Params for summary (statsParams for conv, params for where, statsParams for clicks)
+      const summaryParams = [...statsParams, ...params, ...statsParams];
 
-      const [summaryRows] = await pool.query(summaryQuery, params);
+      const [summaryRows] = await pool.query(summaryQuery, summaryParams);
       const summaryData = summaryRows[0] || {};
 
       return {

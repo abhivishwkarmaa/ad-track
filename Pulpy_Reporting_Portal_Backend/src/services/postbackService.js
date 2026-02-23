@@ -54,7 +54,7 @@ async function getAssignmentByInternalId(id, tenantId) {
     conversion_approval_percentage: row.conversion_approval_percentage,
     callback_url: row.callback_url,
     tenant_id: row.tenant_id,
-  }; 
+  };
 }
 
 /** Get publisher by internal id only. Returns row or null. */
@@ -483,7 +483,7 @@ export class PostbackService {
           // ✅ STRICT: Always filter by tenant_id (from subdomain)
           // 🔥 UPDATED: Look up by click_uuid OR tid (affiliate click ID)
           // ✅ Use ORDER BY id DESC LIMIT 1 so we get the same (latest) click as Strategy 1 and avoid wrong offer_id from duplicate rows
-          const query = 'SELECT * FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ? ORDER BY id DESC LIMIT 1';
+          const query = 'SELECT id, offer_id, publisher_id, tenant_id, publisher_offer_id, ip, user_agent, referrer, click_uuid, country, region, city, isp, location, domain, device_type, browser, os, os_version, device_brand, device_model, source_id, device_id, google_id, android_id, rcid, tid, timestamp, created_at, extra_params FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ? ORDER BY id DESC LIMIT 1';
           const params = [click_id, click_id, tenantId];
 
           try {
@@ -585,7 +585,7 @@ export class PostbackService {
       // If rcid provided, check for existing conversion (dedupe)
       if (rcid) {
         const [existingRows] = await pool.query(
-          'SELECT * FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ?',
+          'SELECT id, conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id, publisher_offer_id, rcid, status, amount, payout, ip, timestamp, postback_payload, created_at, updated_at, extra_params, is_test FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ?',
           [rcid, click ? click.offer_id : null, tenantId]
         );
 
@@ -850,7 +850,7 @@ export class PostbackService {
 
       const insertId = insertResult.insertId || insertResult[0]?.insertId;
       // ✅ CRITICAL: Fetch conversion with tenant_id filtering
-      const [convRows] = await pool.query('SELECT * FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
+      const [convRows] = await pool.query('SELECT id, conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id, publisher_offer_id, rcid, status, amount, payout, ip, timestamp, postback_payload, created_at, updated_at, extra_params, is_test FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
       const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
 
       // Update stats via Redis (consistent pipeline with conversionWorker)

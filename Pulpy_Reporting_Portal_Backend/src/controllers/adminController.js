@@ -1209,7 +1209,8 @@ export class AdminController {
       const pool = (await import('../db/connection.js')).default;
 
       let clickQuery = `
-        SELECT * FROM clicks 
+        SELECT id, offer_id, publisher_id, tenant_id, publisher_offer_id, ip, user_agent, referrer, click_uuid, country, region, city, isp, location, domain, device_type, browser, os, os_version, device_brand, device_model, source_id, device_id, google_id, android_id, rcid, tid, timestamp, created_at, extra_params
+        FROM clicks 
         WHERE offer_id = ? AND publisher_id = ? AND tenant_id = ?
       `;
       const clickParams = [offerId, pubId, tenantId];

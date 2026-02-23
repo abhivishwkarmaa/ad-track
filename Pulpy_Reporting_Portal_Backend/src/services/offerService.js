@@ -44,7 +44,7 @@ export class OfferService {
 
       const insertId = result.insertId || result[0]?.insertId;
       // ✅ CRITICAL: Fetch with tenant_id filtering
-      const [rows] = await pool.query('SELECT * FROM offers WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
+      const [rows] = await pool.query('SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
       return Array.isArray(rows) ? rows[0] : rows;
     } catch (error) {
       logger.error('OfferService.create error:', error);
@@ -61,7 +61,7 @@ export class OfferService {
 
   async findById(id, tenantId = null) {
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = 'SELECT * FROM offers WHERE id = ?';
+    let query = 'SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE id = ?';
     const params = [id];
 
     if (tenantId) {
@@ -191,7 +191,7 @@ export class OfferService {
       let advertiser = null;
       if (offer.advertiser_id) {
         const [advertiserRows] = await pool.query(
-          'SELECT * FROM advertisers WHERE id = ? AND tenant_id = ?',
+          'SELECT id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE id = ? AND tenant_id = ?',
           [offer.advertiser_id, tenantId]
         );
         advertiser = Array.isArray(advertiserRows) ? advertiserRows[0] : advertiserRows;
@@ -199,7 +199,7 @@ export class OfferService {
 
       // ✅ CRITICAL: Get assigned publishers (assignments) with tenant_id filtering
       const [assignmentsRows] = await pool.query(
-        `SELECT po.*, 
+        `SELECT po.id, po.publisher_id, po.offer_id, po.tenant_id, po.payout_override, po.cap_override, po.conversion_approval_percentage, po.capping_budget_duration, po.capping_budget_amount, po.capping_conversions_duration, po.capping_conversions_amount, po.callback_url, po.destination_url, po.status, po.assigned_at, po.updated_at, po.notes, 
                 p.id as publisher_id,
                 p.email as publisher_email,
                 p.first_name as publisher_first_name,
@@ -268,7 +268,7 @@ export class OfferService {
 
       // Get recent clicks (last 50)
       const [recentClicksRows] = await pool.query(
-        `SELECT c.*, 
+        `SELECT c.id, c.offer_id, c.publisher_id, c.tenant_id, c.publisher_offer_id, c.ip, c.user_agent, c.referrer, c.click_uuid, c.country, c.region, c.city, c.isp, c.location, c.domain, c.device_type, c.browser, c.os, c.os_version, c.device_brand, c.device_model, c.source_id, c.device_id, c.google_id, c.android_id, c.rcid, c.tid, c.timestamp, c.created_at, c.extra_params, 
                 p.email as publisher_email,
                 p.company_name as publisher_company
          FROM clicks c
@@ -282,7 +282,7 @@ export class OfferService {
 
       // Get recent conversions (last 50)
       const [recentConversionsRows] = await pool.query(
-        `SELECT conv.*,
+        `SELECT conv.id, conv.conversion_uuid, conv.click_uuid, conv.offer_id, conv.publisher_id, conv.tenant_id, conv.publisher_offer_id, conv.rcid, conv.status, conv.amount, conv.payout, conv.ip, conv.timestamp, conv.postback_payload, conv.created_at, conv.updated_at, conv.extra_params, conv.is_test,
                 p.email as publisher_email,
                 p.company_name as publisher_company,
                 c.click_uuid
@@ -348,7 +348,7 @@ export class OfferService {
     // ✅ CRITICAL: URL key lookup should also consider tenant_id if provided
     // Note: url_key uniqueness should be per-tenant, but for now we'll allow cross-tenant url_keys
     // If tenant_id is provided, filter by it
-    let query = 'SELECT * FROM offers WHERE url_key = ?';
+    let query = 'SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE url_key = ?';
     const params = [urlKey];
 
     // If tenant_id is provided, filter by it (for tenant isolation)
@@ -367,7 +367,7 @@ export class OfferService {
     }
 
     // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = 'SELECT * FROM offers WHERE tenant_id = ?';
+    let query = 'SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE tenant_id = ?';
     const params = [tenantId]; // ✅ CRITICAL: Always filter by tenant_id
 
     if (filters.status) {
@@ -490,14 +490,18 @@ export class OfferService {
       return { capped: false, count: 0, limit: 0 };
     }
 
-    // Count clicks today
+    // Count clicks today (IST)
+    const todayStr = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    const startUTC = new Date(`${todayStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+    const endUTC = new Date(`${todayStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
     const [countRows] = await pool.query(
       `SELECT COUNT(*) as count
        FROM clicks
        WHERE offer_id = ?
          AND publisher_id = ?
-         AND DATE(created_at) = ?`,
-      [offerId, publisherId, today]
+         AND created_at BETWEEN ? AND ?`,
+      [offerId, publisherId, startUTC, endUTC]
     );
 
     const count = parseInt((Array.isArray(countRows) ? countRows[0] : countRows).count || 0);

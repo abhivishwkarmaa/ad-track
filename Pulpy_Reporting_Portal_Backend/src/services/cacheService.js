@@ -67,7 +67,7 @@ export class CacheService {
         } catch (e) { }
 
         // ✅ CRITICAL: Add tenant_id filtering to query
-        let query = 'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
+        let query = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
         const params = [publisherId, offerId, 'active'];
 
         if (tenantId) {
@@ -184,20 +184,41 @@ export class CacheService {
     }
 
     async _hydrateCapFromDB(entityType, entityId, capType, duration, tenantId) {
-        const tz = '+05:30';
-        let dateCond = '';
+        const now = new Date();
+        // IST = UTC + 5:30
+        const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+        let startUTC, endUTC;
+
         if (duration === 'daily') {
-            dateCond = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+            const dateStr = istNow.toISOString().split('T')[0];
+            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            endUTC = new Date(`${dateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
         } else if (duration === 'weekly') {
-            dateCond = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+            // Get Monday of current week (IST)
+            const day = istNow.getUTCDay(); // 0-6 (Sun-Sat)
+            const diff = istNow.getUTCDate() - day + (day === 0 ? -6 : 1);
+            const monday = new Date(istNow.setDate(diff));
+            const dateStr = monday.toISOString().split('T')[0];
+            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+            const sunday = new Date(monday.setDate(monday.getDate() + 6));
+            const endDateStr = sunday.toISOString().split('T')[0];
+            endUTC = new Date(`${endDateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
         } else if (duration === 'monthly') {
-            dateCond = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+            const startOfMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1);
+            const startStr = startOfMonth.toISOString().slice(0, 10);
+            startUTC = new Date(`${startStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+            const nextMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth() + 1, 0);
+            const endStr = nextMonth.toISOString().slice(0, 10);
+            endUTC = new Date(`${endStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
         } else {
             return 0;
         }
 
+        const dateCond = 'created_at BETWEEN ? AND ?';
         let query = '';
-        let params = [];
+        let params = [startUTC, endUTC];
 
         // Count ONLY Approved + Pending. Exclude Rejected/RejectedCap.
         const statusCond = "status IN ('approved', 'pending')";
@@ -209,7 +230,7 @@ export class CacheService {
             } else {
                 query = `SELECT COUNT(*) as val FROM conversions WHERE offer_id = ? AND ${dateCond} AND ${statusCond}`;
             }
-            params.push(entityId);
+            params.unshift(entityId);
         } else {
             // Publisher Budget = Payout
             if (capType === 'budget') {
@@ -217,7 +238,7 @@ export class CacheService {
             } else {
                 query = `SELECT COUNT(*) as val FROM conversions WHERE publisher_offer_id = ? AND ${dateCond} AND ${statusCond}`;
             }
-            params.push(entityId);
+            params.unshift(entityId);
         }
 
         if (tenantId) {

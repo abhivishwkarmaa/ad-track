@@ -505,8 +505,9 @@ class OfferService {
       // Look by public_offer_id OR the sequential display_id
       const publicQuery = `
         SELECT * FROM (
-          SELECT o.*, 
-          (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+          SELECT 
+            o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
+            (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
           FROM offers o 
           WHERE o.tenant_id = ?
         ) t 
@@ -522,8 +523,9 @@ class OfferService {
     // 2. Internal ID lookup (use internalId when internalOnly to avoid type/coercion issues)
     const lookupId = internalOnly ? internalId : id;
     let query = `
-      SELECT o.*,
-      (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
+      SELECT 
+        o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
+        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
       FROM offers o WHERE o.id = ?
     `;
     const params = [lookupId];
@@ -565,7 +567,7 @@ class OfferService {
       // Get advertiser details if advertiser_id exists (with tenant isolation)
       let advertiser = null;
       if (parsedOffer.advertiser_id) {
-        let advertiserQuery = 'SELECT * FROM advertisers WHERE id = ?';
+        let advertiserQuery = 'SELECT id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE id = ?';
         const advertiserParams = [parsedOffer.advertiser_id];
 
         if (tenantId) {
@@ -602,7 +604,8 @@ class OfferService {
       if (!internalId) return [];
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-      let query = `SELECT po.*, 
+      let query = `SELECT 
+                po.id, po.publisher_id, po.offer_id, po.tenant_id, po.payout_override, po.cap_override, po.conversion_approval_percentage, po.capping_budget_duration, po.capping_budget_amount, po.capping_conversions_duration, po.capping_conversions_amount, po.callback_url, po.destination_url, po.status, po.assigned_at, po.updated_at, po.notes,
                 po.public_assignment_id,
                 p.id as publisher_id,
                 p.public_publisher_id,
@@ -747,7 +750,8 @@ class OfferService {
       const internalId = offer.id;
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-      let query = `SELECT c.*, 
+      let query = `SELECT 
+                c.id, c.offer_id, c.publisher_id, c.tenant_id, c.publisher_offer_id, c.ip, c.user_agent, c.referrer, c.click_uuid, c.country, c.region, c.city, c.isp, c.location, c.domain, c.device_type, c.browser, c.os, c.os_version, c.device_brand, c.device_model, c.source_id, c.device_id, c.google_id, c.android_id, c.rcid, c.tid, c.timestamp, c.created_at, c.extra_params,
                 p.email as publisher_email,
                 p.company_name as publisher_company
          FROM clicks c
@@ -778,7 +782,8 @@ class OfferService {
       const internalId = offer.id;
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-      let query = `SELECT conv.*,
+      let query = `SELECT 
+                conv.id, conv.conversion_uuid, conv.click_uuid, conv.offer_id, conv.publisher_id, conv.tenant_id, conv.publisher_offer_id, conv.rcid, conv.status, conv.amount, conv.payout, conv.ip, conv.timestamp, conv.postback_payload, conv.created_at, conv.updated_at, conv.extra_params, conv.is_test,
                 p.email as publisher_email,
                 p.company_name as publisher_company,
                 c.click_uuid

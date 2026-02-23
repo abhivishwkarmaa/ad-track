@@ -76,6 +76,16 @@ export class DashboardService {
       // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
       // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
       // 3. Profit = Revenue - Payout.
+      const currentRange = {
+        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
+      };
+
+      const previousRange = {
+        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
+      };
+
       const [conversionsCurrent] = await pool.query(
         `SELECT 
           COUNT(*) as total,
@@ -85,21 +95,19 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       const [conversionsPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       // Get clicks (current and previous)
@@ -108,32 +116,29 @@ export class DashboardService {
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       const [clicksPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       // Get impressions (current)
       const [impressionsCurrent] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       // Get revenue (current and previous)
@@ -142,21 +147,19 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       const [revenuePrevious] = await pool.query(
         `SELECT COALESCE(SUM(amount), 0) as revenue
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       // Calculate conversion rate
@@ -254,9 +257,10 @@ export class DashboardService {
       const params = [];
 
       if (dateFrom && dateTo) {
-        // ✅ FIX: Use DATE_ADD instead of CONVERT_TZ
-        dateCondition = 'AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ? AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?';
-        params.push(dateFrom, dateTo);
+        const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition = 'AND conv.created_at BETWEEN ? AND ?';
+        params.push(utcStart, utcEnd);
       }
 
       const [rows] = await pool.query(
@@ -320,19 +324,21 @@ export class DashboardService {
 
       logger.info(`[PerformanceChart] Fetching for Tenant: ${tenantId}, Range: ${dateFrom} to ${dateTo}, GroupBy: ${groupBy}`);
 
+      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       // Get clicks by date
       const [clicksRows] = await pool.query(
         `SELECT 
           ${dateSelect} as date_group,
           COUNT(*) as clicks
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) >= ?
-          AND DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
         `,
-        [dateFrom, dateTo, tenantId]
+        [utcStart, utcEnd, tenantId]
       );
 
       // Get conversions by date
@@ -341,13 +347,12 @@ export class DashboardService {
           ${dateSelect} as date_group,
           COUNT(*) as conversions
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) >= ?
-          AND DATE(DATE_ADD(created_at, INTERVAL ${tzOffset} MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
         `,
-        [dateFrom, dateTo, tenantId]
+        [utcStart, utcEnd, tenantId]
       );
 
       logger.info(`[PerformanceChart] Found ${clicksRows.length} click rows and ${conversionsRows.length} conversion rows.`);
@@ -378,6 +383,9 @@ export class DashboardService {
       const dateFrom = filters.date_from || this.getDateBoundaries().monthStart;
       const dateTo = filters.date_to || this.getDateBoundaries().todayStart;
 
+      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       // Get top affiliates
       const [rows] = await pool.query(
         `SELECT 
@@ -386,8 +394,7 @@ export class DashboardService {
           COUNT(DISTINCT conv.id) as conversions
         FROM publishers p
         LEFT JOIN conversions conv ON conv.publisher_id = p.id
-          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?
-          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?
+          AND conv.created_at BETWEEN ? AND ?
           AND conv.status != 'rejected' AND conv.status != 'rejected_cap'
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         GROUP BY p.id, p.company_name, p.first_name, p.email
@@ -395,18 +402,17 @@ export class DashboardService {
         ORDER BY conversions DESC
         LIMIT ?
         `,
-        [dateFrom, dateTo, tenantId, limit]
+        [utcStart, utcEnd, tenantId, limit]
       );
 
       // Get total conversions for all affiliates
       const [totalRows] = await pool.query(
         `SELECT COUNT(DISTINCT conv.id) as total_conversions
         FROM conversions conv
-        WHERE DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?
-          AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE conv.created_at BETWEEN ? AND ?
           AND conv.tenant_id = ?
         `,
-        [dateFrom, dateTo, tenantId]
+        [utcStart, utcEnd, tenantId]
       );
 
       return {
@@ -474,6 +480,9 @@ export class DashboardService {
       const dateTo = filters.date_to || dateBoundaries.todayStart;
       const metric = filters.metric || 'conversions';
 
+      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       // Get country stats from clicks and conversions
       const [rows] = await pool.query(
         `SELECT 
@@ -484,10 +493,8 @@ export class DashboardService {
           COALESCE(SUM(conv.amount), 0) as revenue
         FROM clicks c
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
-          AND DATE(conv.created_at) >= DATE(?)
-          AND DATE(conv.created_at) <= DATE(?)
-        WHERE DATE(c.created_at) >= DATE(?)
-          AND DATE(c.created_at) <= DATE(?)
+          AND conv.created_at BETWEEN ? AND ?
+        WHERE c.created_at BETWEEN ? AND ?
           AND c.country IS NOT NULL
           AND c.country != ''
           AND c.tenant_id = ?
@@ -495,7 +502,7 @@ export class DashboardService {
         ORDER BY ${metric} DESC
         LIMIT ?
         `,
-        [dateFrom, dateTo, dateFrom, dateTo, tenantId, limit]
+        [utcStart, utcEnd, utcStart, utcEnd, tenantId, limit]
       );
 
       // Map country codes to names (simplified - should use a proper country lookup)
@@ -544,6 +551,15 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
+      const currentRange = {
+        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
+      };
+
+      const previousRange = {
+        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
+      };
 
       // 1. Current Period Stats
       // Clicks
@@ -552,10 +568,9 @@ export class DashboardService {
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       // Conversions & Revenue
@@ -568,30 +583,27 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       // Impressions
       const [impressionsCurrent] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       // 2. Previous Period Stats
       const [clicksPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       const [conversionsPrevious] = await pool.query(
@@ -600,19 +612,17 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue, 
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       const [impressionsPrevious] = await pool.query(
         `SELECT COUNT(*) as total
         FROM impressions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.previousFrom, dates.previousTo, tenantId]
+        [previousRange.start, previousRange.end, tenantId]
       );
 
       // Compute Values
@@ -703,6 +713,10 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
+      const currentRange = {
+        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
+      };
 
       // Clicks
       const [clicks] = await pool.query(
@@ -710,10 +724,9 @@ export class DashboardService {
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
         FROM clicks
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       // Conversions & Revenue
@@ -725,10 +738,9 @@ export class DashboardService {
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
-        WHERE DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= ? 
-          AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= ?
+        WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?`,
-        [dates.currentFrom, dates.currentTo, tenantId]
+        [currentRange.start, currentRange.end, tenantId]
       );
 
       const uniqueClicks = clicks[0].unique_clicks || 0;
@@ -834,6 +846,9 @@ export class DashboardService {
 
       logger.info('getOfferStatistics filters:', { dateFrom, dateTo, limit, tenantId });
 
+      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       // Fixed query using subqueries to avoid Cartesian Product issue
       const [rows] = await pool.query(
         `SELECT 
@@ -855,7 +870,7 @@ export class DashboardService {
             COUNT(*) as total_clicks 
           FROM clicks 
           WHERE tenant_id = ?
-            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+            AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) c ON o.id = c.offer_id
         -- Aggregate conversions and payouts separately
@@ -871,14 +886,14 @@ export class DashboardService {
             (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
           WHERE tenant_id = ?
-            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+            AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) conv ON o.id = conv.offer_id
         WHERE o.status != 'remove' AND o.tenant_id = ?
         ORDER BY clicks DESC, conversions DESC, o.name ASC
         LIMIT ?
         `,
-        [tenantId, dateFrom, dateTo, tenantId, dateFrom, dateTo, tenantId, limit]
+        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit]
       );
 
       return rows.map(row => {
@@ -1003,6 +1018,9 @@ export class DashboardService {
 
       logger.info('getPublisherStatistics filters:', { dateFrom, dateTo, limit, tenantId });
 
+      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       const [rows] = await pool.query(
         `SELECT 
           p.id as publisher_id,p.public_publisher_id as public_id,
@@ -1021,7 +1039,7 @@ export class DashboardService {
             COUNT(*) as total_clicks 
           FROM clicks 
           WHERE tenant_id = ?
-            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+            AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id
         ) c ON p.id = c.publisher_id
         LEFT JOIN (
@@ -1036,14 +1054,14 @@ export class DashboardService {
             (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
           WHERE tenant_id = ?
-            AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) BETWEEN ? AND ?
+            AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id
         ) conv ON p.id = conv.publisher_id
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         ORDER BY conversions DESC, clicks DESC, publisher_name ASC
         LIMIT ?
         `,
-        [tenantId, dateFrom, dateTo, tenantId, dateFrom, dateTo, tenantId, limit]
+        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit]
       );
 
       return rows.map(row => ({

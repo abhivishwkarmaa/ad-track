@@ -216,7 +216,7 @@ export class TrackingService {
       let assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
       if (!assignment) {
         let [assignmentRows] = await pool.query(
-          'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+          'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
           [internalPublisherId, offer.id, tenantId]
         );
         assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
@@ -224,7 +224,7 @@ export class TrackingService {
         // Fallback: kuch purani rows me publisher_id column me public id store ho sakta hai
         if (!assignment && publicPublisherId !== internalPublisherId) {
           const [fallbackRows] = await pool.query(
-            'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+            'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
             [publicPublisherId, offer.id, tenantId]
           );
           assignment = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
@@ -1068,7 +1068,7 @@ export class TrackingService {
       }
 
       // ✅ CRITICAL: Check assignment exists (with tenant_id if available)
-      let assignmentQuery = 'SELECT * FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
+      let assignmentQuery = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
       const assignmentParams = [publisherId, offerId, 'active'];
 
       if (tenantId) {

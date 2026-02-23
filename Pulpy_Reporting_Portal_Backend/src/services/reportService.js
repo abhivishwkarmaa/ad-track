@@ -273,13 +273,15 @@ export class ReportService {
     }
 
     if (filters.date_from) {
-      clause += ' AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) >= ?';
-      params.push(filters.date_from);
+      const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      clause += ' AND c.created_at >= ?';
+      params.push(utcStart);
     }
 
     if (filters.date_to) {
-      clause += ' AND DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) <= ?';
-      params.push(filters.date_to);
+      const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      clause += ' AND c.created_at <= ?';
+      params.push(utcEnd);
     }
 
     if (filters.offer_id) {
@@ -429,10 +431,12 @@ export class ReportService {
       // 1. Build Date Condition (for Clicks/Conversions Stats)
       let dateCondition = '';
       if (filters.date_from) {
-        dateCondition += ` AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) >= '${filters.date_from}'`;
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition += ` AND created_at >= '${utcStart}'`;
       }
       if (filters.date_to) {
-        dateCondition += ` AND DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) <= '${filters.date_to}'`;
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        dateCondition += ` AND created_at <= '${utcEnd}'`;
       }
 
       // 2. Build Relevant Pairs Subquery (Active Data from Clicks + Conversions)
@@ -664,12 +668,14 @@ export class ReportService {
       }
 
       if (filters.date_from) {
-        query += ' AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) >= ?';
-        params.push(filters.date_from);
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        query += ' AND conv.created_at >= ?';
+        params.push(utcStart);
       }
       if (filters.date_to) {
-        query += ' AND DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) <= ?';
-        params.push(filters.date_to);
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        query += ' AND conv.created_at <= ?';
+        params.push(utcEnd);
       }
       if (filters.offer_id) {
         query += ' AND conv.offer_id = ?';

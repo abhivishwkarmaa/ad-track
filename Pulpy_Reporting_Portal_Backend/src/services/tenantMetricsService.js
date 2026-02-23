@@ -35,20 +35,27 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
+      // IST Day boundaries for "Today"
+      const todayStartUTC = new Date(`${dateTo}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const todayEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+      // Period boundaries
+      const periodStartUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       // Clicks metrics
       const [clicksToday] = await pool.query(
         `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
          FROM clicks
-         WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`,
-        [tenantId, dateTo]
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, todayStartUTC, todayEndUTC]
       );
 
       const [clicksPeriod] = await pool.query(
         `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
          FROM clicks
-         WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-         AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?`,
-        [tenantId, dateFrom, dateTo]
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, periodStartUTC, periodEndUTC]
       );
 
       metrics.clicks = {
@@ -72,8 +79,8 @@ export class TenantMetricsService {
            COALESCE(SUM(amount), 0) as revenue,
            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
          FROM conversions
-         WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`,
-        [tenantId, dateTo]
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, todayStartUTC, todayEndUTC]
       );
 
       const [conversionsPeriod] = await pool.query(
@@ -83,9 +90,8 @@ export class TenantMetricsService {
            COALESCE(SUM(amount), 0) as revenue,
            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
          FROM conversions
-         WHERE tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) >= ? 
-         AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) <= ?`,
-        [tenantId, dateFrom, dateTo]
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, periodStartUTC, periodEndUTC]
       );
 
       metrics.conversions = {
@@ -165,9 +171,10 @@ export class TenantMetricsService {
    */
   async getTenantDailyMetrics(tenantId, days = 30) {
     try {
+      const startUTC = new Date(new Date().getTime() - (days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
       const [rows] = await pool.query(
         `SELECT 
-           DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) as date,
+           DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) as date,
            COUNT(DISTINCT c.id) as clicks,
            COUNT(DISTINCT conv.id) as conversions,
            COALESCE(SUM(conv.amount), 0) as revenue
@@ -175,10 +182,10 @@ export class TenantMetricsService {
          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid 
            AND conv.tenant_id = c.tenant_id
          WHERE c.tenant_id = ?
-           AND DATE(CONVERT_TZ(c.created_at, '+00:00', '+05:30')) >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-         GROUP BY DATE(CONVERT_TZ(c.created_at, '+00:00', '+05:30'))
+           AND c.created_at >= ?
+         GROUP BY date
          ORDER BY date DESC`,
-        [tenantId, days]
+        [tenantId, startUTC]
       );
 
       return rows;
@@ -201,6 +208,9 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
+      const startUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const endUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
       const [rows] = await pool.query(
         `SELECT 
            o.id,
@@ -210,16 +220,14 @@ export class TenantMetricsService {
            COALESCE(SUM(conv.amount), 0) as revenue
          FROM offers o
          LEFT JOIN clicks c ON c.offer_id = o.id AND c.tenant_id = o.tenant_id
-           AND DATE(CONVERT_TZ(c.created_at, '+00:00', '+05:30')) >= ?
-           AND DATE(CONVERT_TZ(c.created_at, '+00:00', '+05:30')) <= ?
+           AND c.created_at BETWEEN ? AND ?
          LEFT JOIN conversions conv ON conv.offer_id = o.id AND conv.tenant_id = o.tenant_id
-           AND DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) >= ?
-           AND DATE(CONVERT_TZ(conv.created_at, '+00:00', '+05:30')) <= ?
+           AND conv.created_at BETWEEN ? AND ?
          WHERE o.tenant_id = ?
          GROUP BY o.id, o.name
          ORDER BY conversions DESC, revenue DESC
          LIMIT ?`,
-        [dateFrom, dateTo, dateFrom, dateTo, tenantId, limit]
+        [startUTC, endUTC, startUTC, endUTC, tenantId, limit]
       );
 
       return rows;

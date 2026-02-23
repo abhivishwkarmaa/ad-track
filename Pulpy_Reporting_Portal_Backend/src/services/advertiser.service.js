@@ -138,7 +138,7 @@ class AdvertiserService {
     // 1. Try Public ID first
     if (tenantId) {
       const [publicRows] = await pool.query(
-        'SELECT * FROM advertisers WHERE public_advertiser_id = ? AND tenant_id = ? LIMIT 1',
+        'SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE public_advertiser_id = ? AND tenant_id = ? LIMIT 1',
         [id, tenantId]
       );
       if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
@@ -147,7 +147,7 @@ class AdvertiserService {
     }
 
     // 2. Fallback to internal ID
-    let query = 'SELECT * FROM advertisers WHERE id = ?';
+    let query = 'SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE id = ?';
     const params = [id];
     if (tenantId) {
       query += ' AND tenant_id = ?';
@@ -201,7 +201,7 @@ class AdvertiserService {
       : '';
 
     const listSql = `
-      SELECT *
+      SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at
       FROM advertisers
       ${whereClause}
       ORDER BY created_at DESC

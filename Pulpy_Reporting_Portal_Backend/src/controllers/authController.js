@@ -721,7 +721,7 @@ export class AuthController {
       }
 
       const [rows] = await pool.query(
-        'SELECT * FROM password_resets WHERE email = ? AND otp = ? AND expires_at > NOW()',
+        'SELECT email, otp, status, expires_at, created_at FROM password_resets WHERE email = ? AND otp = ? AND expires_at > NOW()',
         [userEmail, otp]
       );
 
