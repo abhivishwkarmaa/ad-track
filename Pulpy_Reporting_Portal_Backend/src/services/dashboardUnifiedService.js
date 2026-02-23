@@ -2,39 +2,21 @@ import pool from '../db/connection.js';
 import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
 
+import { getUtcBoundaries, nowIST } from '../utils/dateUtils.js';
+
 const CACHE_TTL_SECONDS = 8;
 const DATE_INPUT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
-const getTenantLocalDateString = (offsetMinutes) => {
-  const now = new Date();
-  const localMillis = now.getTime() + offsetMinutes * 60 * 1000;
-  return new Date(localMillis).toISOString().slice(0, 10);
-};
-
-const toSqlDateTime = (date) => date.toISOString().slice(0, 19).replace('T', ' ');
-
-const buildUtcRange = (dateFrom, dateTo, offsetMinutes) => {
-  if (!DATE_INPUT_REGEX.test(dateFrom) || !DATE_INPUT_REGEX.test(dateTo)) {
-    throw new Error('Invalid date format. Use YYYY-MM-DD.');
-  }
-
-  const [fromYear, fromMonth, fromDay] = dateFrom.split('-').map(Number);
-  const [toYear, toMonth, toDay] = dateTo.split('-').map(Number);
-
-  const fromLocal = Date.UTC(fromYear, fromMonth - 1, fromDay, 0, 0, 0);
-  const toLocal = Date.UTC(toYear, toMonth - 1, toDay, 23, 59, 59);
-
-  const startUtc = new Date(fromLocal - offsetMinutes * 60 * 1000);
-  const endUtc = new Date(toLocal - offsetMinutes * 60 * 1000);
-
+const buildUtcRange = (dateFrom, dateTo) => {
+  const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
   return {
-    startUtc: toSqlDateTime(startUtc),
-    endUtc: toSqlDateTime(endUtc),
+    startUtc: utcStart,
+    endUtc: utcEnd,
   };
 };
 
-const normalizeDateRange = (dateFrom, dateTo, offsetMinutes) => {
-  const defaultDate = getTenantLocalDateString(offsetMinutes);
+const normalizeDateRange = (dateFrom, dateTo) => {
+  const defaultDate = nowIST('YYYY-MM-DD');
   let from = dateFrom || defaultDate;
   let to = dateTo || defaultDate;
 
@@ -60,8 +42,7 @@ const dashboardUnifiedService = {
       throw new Error('Tenant ID required');
     }
 
-    const tzOffsetMinutes = Number(process.env.DASHBOARD_TZ_OFFSET_MINUTES || 0);
-    const normalizedRange = normalizeDateRange(dateFrom, dateTo, tzOffsetMinutes);
+    const normalizedRange = normalizeDateRange(dateFrom, dateTo);
     const cacheKey = buildCacheKey(tenantId, normalizedRange.dateFrom, normalizedRange.dateTo);
 
     try {
@@ -75,8 +56,7 @@ const dashboardUnifiedService = {
 
     const { startUtc, endUtc } = buildUtcRange(
       normalizedRange.dateFrom,
-      normalizedRange.dateTo,
-      tzOffsetMinutes
+      normalizedRange.dateTo
     );
 
     const metricsSql = `

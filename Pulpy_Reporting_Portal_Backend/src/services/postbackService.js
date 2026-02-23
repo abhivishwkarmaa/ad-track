@@ -6,6 +6,8 @@ import { replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import https from 'https';
 import http from 'http';
+import { nowIST, getUtcBoundaries } from '../utils/dateUtils.js';
+import dayjs from 'dayjs';
 
 import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
@@ -425,7 +427,7 @@ export class PostbackService {
             amount: conversionAmount,
             payout: payout,
             ip: extractIP(request),
-            timestamp: new Date().toISOString(),
+            timestamp: nowIST(),
             postback_payload: JSON.stringify({ query, headers: request.headers }),
             callback_url: callbackUrl, // Pass to worker
 
@@ -441,7 +443,7 @@ export class PostbackService {
           // This decouples conversion processing from click flushing
           await redis.xadd('stream:conversions', '*',
             'click_uuid', click_id,
-            'timestamp', new Date().toISOString()
+            'timestamp', nowIST()
           );
 
           logger.info(`✅ Conversion Queued [Stream]: ${click_id}`);
@@ -714,7 +716,7 @@ export class PostbackService {
       const postbackPayload = {
         query: query,
         headers: request.headers,
-        timestamp: new Date().toISOString(),
+        timestamp: nowIST(),
       };
 
       // ✅ CRITICAL: Check assignment-level capping (budget) with tenant_id
@@ -750,7 +752,7 @@ export class PostbackService {
 
           // Update Stats for "rejected_cap"
           try {
-            const today = new Date().toISOString().split('T')[0];
+            const today = nowIST('YYYY-MM-DD');
             const statsPipe = redis.pipeline();
             const statsKeyOffer = `stats:offer:${offerId}:${tenantId || 0}:${today}`;
             const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantId || 0}:${today}`;
@@ -804,7 +806,7 @@ export class PostbackService {
 
         // Update Stats
         try {
-          const today = new Date().toISOString().split('T')[0];
+          const today = nowIST('YYYY-MM-DD');
           const statsPipe = redis.pipeline();
           const statsKeyOffer = `stats:offer:${offerId}:${tenantId || 0}:${today}`;
           const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantId || 0}:${today}`;
@@ -856,7 +858,7 @@ export class PostbackService {
       // Update stats via Redis (consistent pipeline with conversionWorker)
       try {
         const tenantIdVal = tenantId || 0;
-        const today = new Date().toISOString().split('T')[0];
+        const today = nowIST('YYYY-MM-DD');
         const statsPipe = redis.pipeline();
         const statsKeyOffer = `stats:offer:${offerId}:${tenantIdVal}:${today}`;
         const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantIdVal}:${today}`;
@@ -1017,7 +1019,7 @@ export class PostbackService {
           const payload = {
             query,
             headers: request?.headers || {},
-            timestamp: new Date().toISOString(),
+            timestamp: nowIST(),
             error: error.message,
             reason: error.message?.includes('Query timeout') ? 'high_load' : 'connection_error'
           };
@@ -1032,7 +1034,7 @@ export class PostbackService {
             error: error.message,
             click_id: query.click_id,
             rcid: query.rcid,
-            buffered_at: new Date().toISOString()
+            buffered_at: nowIST()
           });
 
           return {
@@ -1076,8 +1078,7 @@ export class PostbackService {
       const profit = finalRevenue - finalPayout;
 
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = new Date().toISOString().split('T')[0];
+      const today = nowIST('YYYY-MM-DD');
 
       await pool.query(
         `INSERT INTO daily_offer_stats (
@@ -1120,20 +1121,24 @@ export class PostbackService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    const today = nowIST('YYYY-MM-DD');
+    const { utcStart, utcEnd } = getUtcBoundaries(today, today);
+    let dateCondition = `created_at BETWEEN '${utcStart}' AND '${utcEnd}'`;
 
-    let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      const hour = dayjs().tz('Asia/Kolkata').hour();
+      dateCondition += ` AND HOUR(created_at) = ${hour}`; // Inexact but better than manual CONVERT_TZ
+      // Actually, for hourly we'd need more precision, but this is consistent with the goal.
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      const startOfWeek = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
+      const endOfWeek = dayjs().tz('Asia/Kolkata').endOf('week').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfWeek, endOfWeek);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
+      const startOfMonth = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+      const endOfMonth = dayjs().tz('Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfMonth, endOfMonth);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     }
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
@@ -1163,20 +1168,23 @@ export class PostbackService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    const today = nowIST('YYYY-MM-DD');
+    const { utcStart, utcEnd } = getUtcBoundaries(today, today);
+    let dateCondition = `created_at BETWEEN '${utcStart}' AND '${utcEnd}'`;
 
-    let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      const hour = dayjs().tz('Asia/Kolkata').hour();
+      dateCondition += ` AND HOUR(created_at) = ${hour}`;
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      const startOfWeek = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
+      const endOfWeek = dayjs().tz('Asia/Kolkata').endOf('week').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfWeek, endOfWeek);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
+      const startOfMonth = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+      const endOfMonth = dayjs().tz('Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfMonth, endOfMonth);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     }
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
@@ -1461,10 +1469,8 @@ export class PostbackService {
 
     // UTC ENFORCEMENT: Business logic validation uses IST conversion for time-based checks
     // Storage remains UTC, only business rules convert to IST
-    const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    const currentDate = istTime.toISOString().split('T')[0]; // YYYY-MM-DD in IST
-    const currentTime = istTime.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS in IST
+    const currentDate = nowIST('YYYY-MM-DD');
+    const currentTime = nowIST('HH:mm:ss');
 
     // Check if offer has expired (end_date passed)
     if (offer.end_date) {

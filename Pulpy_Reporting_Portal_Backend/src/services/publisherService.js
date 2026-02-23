@@ -2,6 +2,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import bcrypt from 'bcrypt';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { getUtcBoundaries } from '../utils/dateUtils.js';
 
 import offerPublicIdService from './offerPublicIdService.js';
 
@@ -320,19 +321,21 @@ export class PublisherService {
 
       let dateCondition = '';
       const statsParams = [];
-      if (filters.date_from && filters.date_to) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition = ' AND conv.created_at BETWEEN ? AND ?';
-        statsParams.push(utcStart, utcEnd);
-      } else if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition = ' AND conv.created_at >= ?';
-        statsParams.push(utcStart);
-      } else if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition = ' AND conv.created_at <= ?';
-        statsParams.push(utcEnd);
+      if (filters.date_from || filters.date_to) {
+        const from = filters.date_from || new Date().toISOString().split('T')[0];
+        const to = filters.date_to || from;
+        const { utcStart, utcEnd } = getUtcBoundaries(from, to);
+
+        if (filters.date_from && filters.date_to) {
+          dateCondition = ' AND conv.created_at BETWEEN ? AND ?';
+          statsParams.push(utcStart, utcEnd);
+        } else if (filters.date_from) {
+          dateCondition = ' AND conv.created_at >= ?';
+          statsParams.push(utcStart);
+        } else if (filters.date_to) {
+          dateCondition = ' AND conv.created_at <= ?';
+          statsParams.push(utcEnd);
+        }
       }
 
       const query = `

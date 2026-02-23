@@ -3,6 +3,7 @@ import dashboardUnifiedService from '../services/dashboardUnifiedService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { convertDatesToIST } from '../utils/dateUtils.js';
 
 export class DashboardController {
   async getUnifiedDashboard(request, reply) {

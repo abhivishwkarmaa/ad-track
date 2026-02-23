@@ -3,6 +3,12 @@ import logger from '../utils/logger.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
 import reportService from './reportService.js';
+import { nowIST, getUtcBoundaries } from '../utils/dateUtils.js';
+import dayjs from 'dayjs';
+import dayjsUtc from 'dayjs/plugin/utc.js';
+import dayjsTimezone from 'dayjs/plugin/timezone.js';
+dayjs.extend(dayjsUtc);
+dayjs.extend(dayjsTimezone);
 
 export class DashboardService {
   /**
@@ -11,20 +17,9 @@ export class DashboardService {
    * Database storage remains UTC, queries use CONVERT_TZ(created_at, '+00:00', '+05:30')
    */
   getDateBoundaries() {
-    const now = new Date();
-    // UTC ENFORCEMENT: IST conversion for business logic only
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-
-    // IST Day start (YYYY-MM-DD)
-    const todayStr = istTime.toISOString().split('T')[0];
-
-    // Yesterday in IST
-    const yesterdayTime = new Date(istTime);
-    yesterdayTime.setDate(yesterdayTime.getDate() - 1);
-    const yesterdayStr = yesterdayTime.toISOString().split('T')[0];
-
-    // Month start in IST
-    const monthStartStr = todayStr.substring(0, 7) + '-01';
+    const todayStr = nowIST('YYYY-MM-DD');
+    const yesterdayStr = dayjs().tz('Asia/Kolkata').subtract(1, 'day').format('YYYY-MM-DD');
+    const monthStartStr = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
 
     return {
       todayStart: todayStr,
@@ -76,15 +71,10 @@ export class DashboardService {
       // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
       // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
       // 3. Profit = Revenue - Payout.
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
-
-      const previousRange = {
-        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const { utcStart: cs, utcEnd: ce } = getUtcBoundaries(dates.currentFrom, dates.currentTo);
+      const { utcStart: ps, utcEnd: pe } = getUtcBoundaries(dates.previousFrom, dates.previousTo);
+      const currentRange = { start: cs, end: ce };
+      const previousRange = { start: ps, end: pe };
 
       const [conversionsCurrent] = await pool.query(
         `SELECT 
@@ -257,8 +247,7 @@ export class DashboardService {
       const params = [];
 
       if (dateFrom && dateTo) {
-        const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
         dateCondition = 'AND conv.created_at BETWEEN ? AND ?';
         params.push(utcStart, utcEnd);
       }
@@ -324,8 +313,7 @@ export class DashboardService {
 
       logger.info(`[PerformanceChart] Fetching for Tenant: ${tenantId}, Range: ${dateFrom} to ${dateTo}, GroupBy: ${groupBy}`);
 
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
 
       // Get clicks by date
       const [clicksRows] = await pool.query(
@@ -383,8 +371,7 @@ export class DashboardService {
       const dateFrom = filters.date_from || this.getDateBoundaries().monthStart;
       const dateTo = filters.date_to || this.getDateBoundaries().todayStart;
 
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
 
       // Get top affiliates
       const [rows] = await pool.query(
@@ -551,15 +538,10 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
-
-      const previousRange = {
-        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const { utcStart: cs, utcEnd: ce } = getUtcBoundaries(dates.currentFrom, dates.currentTo);
+      const { utcStart: ps, utcEnd: pe } = getUtcBoundaries(dates.previousFrom, dates.previousTo);
+      const currentRange = { start: cs, end: ce };
+      const previousRange = { start: ps, end: pe };
 
       // 1. Current Period Stats
       // Clicks
@@ -713,10 +695,8 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const { utcStart: cs, utcEnd: ce } = getUtcBoundaries(dates.currentFrom, dates.currentTo);
+      const currentRange = { start: cs, end: ce };
 
       // Clicks
       const [clicks] = await pool.query(
@@ -846,8 +826,7 @@ export class DashboardService {
 
       logger.info('getOfferStatistics filters:', { dateFrom, dateTo, limit, tenantId });
 
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
 
       // Fixed query using subqueries to avoid Cartesian Product issue
       const [rows] = await pool.query(
@@ -1018,8 +997,7 @@ export class DashboardService {
 
       logger.info('getPublisherStatistics filters:', { dateFrom, dateTo, limit, tenantId });
 
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart, utcEnd } = getUtcBoundaries(dateFrom, dateTo);
 
       const [rows] = await pool.query(
         `SELECT 

@@ -490,10 +490,10 @@ export class OfferService {
       return { capped: false, count: 0, limit: 0 };
     }
 
-    // Count clicks today (IST)
-    const todayStr = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
-    const startUTC = new Date(`${todayStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-    const endUTC = new Date(`${todayStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+    // Count clicks today (IST) — use centralized dateUtils
+    const { nowIST, getUtcBoundaries } = await import('../utils/dateUtils.js');
+    const todayStr = nowIST('YYYY-MM-DD');
+    const { utcStart: startUTC, utcEnd: endUTC } = getUtcBoundaries(todayStr, todayStr);
 
     const [countRows] = await pool.query(
       `SELECT COUNT(*) as count

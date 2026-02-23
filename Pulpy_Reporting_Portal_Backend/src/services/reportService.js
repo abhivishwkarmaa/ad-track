@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { getUtcBoundaries } from '../utils/dateUtils.js';
 
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
@@ -78,8 +79,8 @@ export class ReportService {
         'city': 'c.city',
         'region': 'c.region',
         'tid': 'c.tid',
-        'date': "DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))",
-        'hour': "HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))",
+        'date': "DATE(c.created_at)",
+        'hour': "HOUR(c.created_at)",
         'user_agent': 'c.user_agent',
         'device_type': 'c.device_type',
         'os': 'c.os',
@@ -272,16 +273,19 @@ export class ReportService {
       params.push(tenantId);
     }
 
-    if (filters.date_from) {
-      const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at >= ?';
-      params.push(utcStart);
-    }
+    if (filters.date_from || filters.date_to) {
+      const from = filters.date_from || new Date().toISOString().split('T')[0];
+      const to = filters.date_to || from;
+      const { utcStart, utcEnd } = getUtcBoundaries(from, to);
 
-    if (filters.date_to) {
-      const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at <= ?';
-      params.push(utcEnd);
+      if (filters.date_from) {
+        clause += ' AND c.created_at >= ?';
+        params.push(utcStart);
+      }
+      if (filters.date_to) {
+        clause += ' AND c.created_at <= ?';
+        params.push(utcEnd);
+      }
     }
 
     if (filters.offer_id) {
@@ -350,7 +354,7 @@ export class ReportService {
     }
 
     if (filters.hour !== undefined) {
-      clause += ' AND HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?';
+      clause += ' AND HOUR(c.created_at) = ?';
       params.push(filters.hour);
     }
 
@@ -430,13 +434,17 @@ export class ReportService {
 
       // 1. Build Date Condition (for Clicks/Conversions Stats)
       let dateCondition = '';
-      if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition += ` AND created_at >= '${utcStart}'`;
-      }
-      if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition += ` AND created_at <= '${utcEnd}'`;
+      if (filters.date_from || filters.date_to) {
+        const from = filters.date_from || new Date().toISOString().split('T')[0];
+        const to = filters.date_to || from;
+        const { utcStart, utcEnd } = getUtcBoundaries(from, to);
+
+        if (filters.date_from) {
+          dateCondition += ` AND created_at >= '${utcStart}'`;
+        }
+        if (filters.date_to) {
+          dateCondition += ` AND created_at <= '${utcEnd}'`;
+        }
       }
 
       // 2. Build Relevant Pairs Subquery (Active Data from Clicks + Conversions)
@@ -667,15 +675,19 @@ export class ReportService {
         params.push(tenantId);
       }
 
-      if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at >= ?';
-        params.push(utcStart);
-      }
-      if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at <= ?';
-        params.push(utcEnd);
+      if (filters.date_from || filters.date_to) {
+        const from = filters.date_from || new Date().toISOString().split('T')[0];
+        const to = filters.date_to || from;
+        const { utcStart, utcEnd } = getUtcBoundaries(from, to);
+
+        if (filters.date_from) {
+          query += ' AND conv.created_at >= ?';
+          params.push(utcStart);
+        }
+        if (filters.date_to) {
+          query += ' AND conv.created_at <= ?';
+          params.push(utcEnd);
+        }
       }
       if (filters.offer_id) {
         query += ' AND conv.offer_id = ?';

@@ -2,6 +2,7 @@ import reportService from '../services/reportService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { convertDatesToIST, nowIST } from '../utils/dateUtils.js';
 
 export class ReportController {
   async getSummary(request, reply) {
@@ -36,10 +37,11 @@ export class ReportController {
       if (request.query.search) filters.search = request.query.search;
 
       const summary = await reportService.getSummary(filters, tenantId);
+      const convertedSummary = convertDatesToIST(summary);
 
       return reply.send({
         success: true,
-        data: summary,
+        data: convertedSummary,
       });
     } catch (error) {
       logger.error('ReportController.getSummary error:', error);
@@ -100,7 +102,7 @@ export class ReportController {
         // For true styling, we'd use 'csv-stringify' or similar.
 
         reply.header('Content-Type', 'text/csv');
-        reply.header('Content-Disposition', `attachment; filename="reports-${new Date().toISOString().split('T')[0]}.csv"`);
+        reply.header('Content-Disposition', `attachment; filename="reports-${nowIST('YYYY-MM-DD')}.csv"`);
 
         // Simple CSV Builder
         const rows = result.data;
@@ -109,9 +111,10 @@ export class ReportController {
         }
 
         const headers = Object.keys(rows[0]);
+        const convertedRows = convertDatesToIST(rows);
         const csvContent = [
           headers.join(','),
-          ...rows.map(row => headers.map(header => {
+          ...convertedRows.map(row => headers.map(header => {
             const val = row[header];
             if (val === null || val === undefined) return '';
             // basic escaping
@@ -125,9 +128,11 @@ export class ReportController {
         return reply.send(csvContent);
       }
 
+      const convertedResult = convertDatesToIST(result);
+
       return reply.send({
         success: true,
-        ...result,
+        ...convertedResult,
       });
     } catch (error) {
       logger.error('ReportController.getDetailed error:', error);
@@ -154,10 +159,11 @@ export class ReportController {
       if (request.query.date_to) filters.date_to = request.query.date_to;
 
       const result = await reportService.getPublisherConversionStats(filters, tenantId);
+      const convertedResult = convertDatesToIST(result);
 
       return reply.send({
         success: true,
-        data: result,
+        data: convertedResult,
       });
     } catch (error) {
       logger.error('ReportController.getPublisherConversionStats error:', error);
@@ -188,10 +194,11 @@ export class ReportController {
       if (request.query.click_uuid) filters.click_uuid = request.query.click_uuid;
 
       const result = await reportService.getConversions(filters, tenantId);
+      const convertedResult = convertDatesToIST(result);
 
       return reply.send({
         success: true,
-        ...result,
+        ...convertedResult,
       });
     } catch (error) {
       logger.error('ReportController.getConversions error:', error);

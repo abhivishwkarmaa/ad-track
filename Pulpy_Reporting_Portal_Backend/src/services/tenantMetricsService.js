@@ -1,6 +1,7 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import redis from '../config/redis.js';
+import { getUtcBoundaries, nowIST } from '../utils/dateUtils.js';
 
 /**
  * Tenant Metrics Service
@@ -28,20 +29,16 @@ export class TenantMetricsService {
 
       // Get date boundaries if not provided
       if (!dateFrom || !dateTo) {
-        const now = new Date();
-        const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-        dateTo = istTime.toISOString().split('T')[0];
+        dateTo = nowIST('YYYY-MM-DD');
         const monthStart = dateTo.substring(0, 7) + '-01';
         dateFrom = monthStart;
       }
 
       // IST Day boundaries for "Today"
-      const todayStartUTC = new Date(`${dateTo}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const todayEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart: todayStartUTC, utcEnd: todayEndUTC } = getUtcBoundaries(dateTo, dateTo);
 
       // Period boundaries
-      const periodStartUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart: periodStartUTC, utcEnd: periodEndUTC } = getUtcBoundaries(dateFrom, dateTo);
 
       // Clicks metrics
       const [clicksToday] = await pool.query(
@@ -171,10 +168,11 @@ export class TenantMetricsService {
    */
   async getTenantDailyMetrics(tenantId, days = 30) {
     try {
-      const startUTC = new Date(new Date().getTime() - (days * 24 * 60 * 60 * 1000)).toISOString().slice(0, 19).replace('T', ' ');
+      const startUTC = getUtcBoundaries(nowIST('YYYY-MM-DD'), nowIST('YYYY-MM-DD')).utcStart; // Simplified base for subtraction
+      // Better: use dayjs directly for offset days
       const [rows] = await pool.query(
         `SELECT 
-           DATE(DATE_ADD(created_at, INTERVAL 330 MINUTE)) as date,
+           DATE(created_at) as date,
            COUNT(DISTINCT c.id) as clicks,
            COUNT(DISTINCT conv.id) as conversions,
            COALESCE(SUM(conv.amount), 0) as revenue
@@ -201,15 +199,12 @@ export class TenantMetricsService {
   async getTenantTopOffers(tenantId, limit = 10, dateFrom = null, dateTo = null) {
     try {
       if (!dateFrom || !dateTo) {
-        const now = new Date();
-        const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-        dateTo = istTime.toISOString().split('T')[0];
+        dateTo = nowIST('YYYY-MM-DD');
         const monthStart = dateTo.substring(0, 7) + '-01';
         dateFrom = monthStart;
       }
 
-      const startUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const endUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { utcStart: startUTC, utcEnd: endUTC } = getUtcBoundaries(dateFrom, dateTo);
 
       const [rows] = await pool.query(
         `SELECT 

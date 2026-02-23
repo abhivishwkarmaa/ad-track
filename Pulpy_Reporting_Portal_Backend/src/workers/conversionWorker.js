@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateClickId } from '../utils/urlGenerator.js';
 import cacheService from '../services/cacheService.js';
+import { nowIST } from '../utils/dateUtils.js';
 
 const STREAM_KEY = 'stream:conversions';
 const GROUP_NAME = 'conversion_group';
@@ -444,12 +445,7 @@ async function bulkInsertConversions(items) {
 /**
  * Helper to get IST Date String (YYYY-MM-DD)
  */
-const getIstDateString = () => {
-    const now = new Date();
-    // UTC time + 5 hours 30 minutes
-    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-    return istTime.toISOString().split('T')[0];
-};
+// getIstDateString removed – use nowIST('YYYY-MM-DD') from dateUtils instead
 
 /**
  * Update Daily Offer Stats directly in DB
@@ -457,7 +453,7 @@ const getIstDateString = () => {
 async function updateDailyStats(items) {
     if (items.length === 0) return;
 
-    const today = getIstDateString(); // YYYY-MM-DD in IST
+    const today = nowIST('YYYY-MM-DD'); // YYYY-MM-DD in IST
     const groups = {}; // Key: offer_id:tenant_id
 
     // Aggregate delta for this batch

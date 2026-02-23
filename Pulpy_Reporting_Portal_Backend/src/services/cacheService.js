@@ -1,9 +1,6 @@
-import redis from '../config/redis.js';
-import offerService from './offer.service.js';
-import publisherService from './publisherService.js';
-import assignmentService from './assignmentService.js';
-import logger from '../utils/logger.js';
 import pool from '../db/connection.js';
+import { getUtcBoundaries, nowIST } from '../utils/dateUtils.js';
+import dayjs from 'dayjs';
 
 const TTL = {
     OFFER: 300,        // 5 Minutes (Reference data doesn't change often)
@@ -162,56 +159,37 @@ export class CacheService {
     }
 
     _getCapKey(entityType, entityId, capType, duration, tenantId) {
-        const now = new Date();
-        // Use IST (UTC+05:30)
-        const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-
         let period = '';
         if (duration === 'daily') {
-            period = istTime.toISOString().split('T')[0];
+            period = nowIST('YYYY-MM-DD');
         } else if (duration === 'weekly') {
-            const d = new Date(Date.UTC(istTime.getFullYear(), istTime.getMonth(), istTime.getDate()));
-            const dayNum = d.getUTCDay() || 7;
-            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-            const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-            period = `${d.getUTCFullYear()}-W${weekNo}`;
+            period = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
         } else if (duration === 'monthly') {
-            period = istTime.toISOString().slice(0, 7); // YYYY-MM
+            period = nowIST('YYYY-MM');
         }
 
         return `cap:${tenantId}:${entityType}:${entityId}:${capType}:${duration}:${period}`;
     }
 
     async _hydrateCapFromDB(entityType, entityId, capType, duration, tenantId) {
-        const now = new Date();
-        // IST = UTC + 5:30
-        const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
         let startUTC, endUTC;
 
         if (duration === 'daily') {
-            const dateStr = istNow.toISOString().split('T')[0];
-            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-            endUTC = new Date(`${dateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            const boundaries = getUtcBoundaries(nowIST('YYYY-MM-DD'), nowIST('YYYY-MM-DD'));
+            startUTC = boundaries.utcStart;
+            endUTC = boundaries.utcEnd;
         } else if (duration === 'weekly') {
-            // Get Monday of current week (IST)
-            const day = istNow.getUTCDay(); // 0-6 (Sun-Sat)
-            const diff = istNow.getUTCDate() - day + (day === 0 ? -6 : 1);
-            const monday = new Date(istNow.setDate(diff));
-            const dateStr = monday.toISOString().split('T')[0];
-            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-
-            const sunday = new Date(monday.setDate(monday.getDate() + 6));
-            const endDateStr = sunday.toISOString().split('T')[0];
-            endUTC = new Date(`${endDateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            const startOfWeek = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
+            const endOfWeek = dayjs().tz('Asia/Kolkata').endOf('week').format('YYYY-MM-DD');
+            const boundaries = getUtcBoundaries(startOfWeek, endOfWeek);
+            startUTC = boundaries.utcStart;
+            endUTC = boundaries.utcEnd;
         } else if (duration === 'monthly') {
-            const startOfMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1);
-            const startStr = startOfMonth.toISOString().slice(0, 10);
-            startUTC = new Date(`${startStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-
-            const nextMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth() + 1, 0);
-            const endStr = nextMonth.toISOString().slice(0, 10);
-            endUTC = new Date(`${endStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            const startOfMonth = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+            const endOfMonth = dayjs().tz('Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+            const boundaries = getUtcBoundaries(startOfMonth, endOfMonth);
+            startUTC = boundaries.utcStart;
+            endUTC = boundaries.utcEnd;
         } else {
             return 0;
         }

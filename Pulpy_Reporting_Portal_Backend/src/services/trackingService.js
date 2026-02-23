@@ -11,6 +11,8 @@ import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
 import assignmentService from './assignmentService.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { nowIST, getUtcBoundaries } from '../utils/dateUtils.js';
+import dayjs from 'dayjs';
 
 import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
@@ -18,11 +20,7 @@ import redis from '../config/redis.js';
 import cacheService from './cacheService.js';
 import postbackService from './postbackService.js';
 
-const getIstDateString = () => {
-  const now = new Date();
-  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-  return istTime.toISOString().split('T')[0];
-};
+// getIstDateString removed, use nowIST('YYYY-MM-DD') instead
 
 export class TrackingService {
   async trackClick(query, request) {
@@ -540,7 +538,7 @@ export class TrackingService {
         device_model: deviceInfo.deviceModel || '',
         tid: query.tid || query.click_id || '', // Affiliate ID
         rcid: query.rcid || '',
-        timestamp: new Date().toISOString(), // UTC ENFORCEMENT: Store UTC timestamp only
+        timestamp: nowIST(), // UTC ENFORCEMENT: Store UTC timestamp only
         flushed: 'false', // ✅ CRITICAL: Track if click has been inserted into DB
         force_reject: (isCapErr === false && (
           (offerCapStatus.isHit && offer.capping_action === 'reject') ||
@@ -1148,20 +1146,23 @@ export class TrackingService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    const today = nowIST('YYYY-MM-DD');
+    const { utcStart, utcEnd } = getUtcBoundaries(today, today);
+    let dateCondition = `created_at BETWEEN '${utcStart}' AND '${utcEnd}'`;
 
-    let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      const hour = dayjs().tz('Asia/Kolkata').hour();
+      dateCondition += ` AND HOUR(created_at) = ${hour}`;
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      const startOfWeek = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
+      const endOfWeek = dayjs().tz('Asia/Kolkata').endOf('week').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfWeek, endOfWeek);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
+      const startOfMonth = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+      const endOfMonth = dayjs().tz('Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfMonth, endOfMonth);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     }
 
     const [rows] = await pool.query(
@@ -1184,20 +1185,23 @@ export class TrackingService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    const today = nowIST('YYYY-MM-DD');
+    const { utcStart, utcEnd } = getUtcBoundaries(today, today);
+    let dateCondition = `created_at BETWEEN '${utcStart}' AND '${utcEnd}'`;
 
-    let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      const hour = dayjs().tz('Asia/Kolkata').hour();
+      dateCondition += ` AND HOUR(created_at) = ${hour}`;
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      const startOfWeek = dayjs().tz('Asia/Kolkata').startOf('week').format('YYYY-MM-DD');
+      const endOfWeek = dayjs().tz('Asia/Kolkata').endOf('week').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfWeek, endOfWeek);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
+      const startOfMonth = dayjs().tz('Asia/Kolkata').startOf('month').format('YYYY-MM-DD');
+      const endOfMonth = dayjs().tz('Asia/Kolkata').endOf('month').format('YYYY-MM-DD');
+      const boundaries = getUtcBoundaries(startOfMonth, endOfMonth);
+      dateCondition = `created_at BETWEEN '${boundaries.utcStart}' AND '${boundaries.utcEnd}'`;
     }
 
     const [rows] = await pool.query(
@@ -1214,8 +1218,7 @@ export class TrackingService {
   async updateDailyStats(offerId, publisherId, type, tenantId = null) {
     try {
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = getIstDateString();
+      const today = nowIST('YYYY-MM-DD');
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {
@@ -1231,11 +1234,12 @@ export class TrackingService {
 
         let isUnique = true;
         if (clickIp) {
+          const boundaries = getUtcBoundaries(today, today);
           let countQuery = `SELECT COUNT(*) as cnt FROM clicks
                  WHERE offer_id = ?
                    AND ip = ?
-                   AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-          const countParams = [offerId, clickIp, today];
+                   AND created_at BETWEEN ? AND ?`;
+          const countParams = [offerId, clickIp, boundaries.utcStart, boundaries.utcEnd];
           if (tenantId) {
             countQuery += ' AND tenant_id = ?';
             countParams.push(tenantId);

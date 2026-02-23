@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger, responseLogger } from './middleware/requestLogger.js';
+import { nowIST } from './utils/dateUtils.js';
 
 // Load environment variables
 dotenv.config();
@@ -94,7 +95,7 @@ async function initializeServer() {
 
   // Health check
   fastify.get('/health', async (request, reply) => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    return { status: 'ok', timestamp: nowIST() };
   });
 
   // Register routes
@@ -114,7 +115,7 @@ async function initializeServer() {
   // 🔒 SECURE 404 Not Found Handler
   // Must be after routes - returns minimal response, logs full details server-side
   fastify.setNotFoundHandler(async (request, reply) => {
-    const timestamp = new Date().toISOString();
+    const timestamp = nowIST();
     const method = request.method;
     const url = request.url;
     // ✅ CRITICAL: Use X-Forwarded-Host for VPS/NGINX reverse proxy

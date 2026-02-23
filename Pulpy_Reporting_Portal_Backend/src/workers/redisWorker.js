@@ -3,6 +3,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import trackingService from '../services/trackingService.js';
 import postbackService from '../services/postbackService.js';
+import { nowIST, getUtcBoundaries } from '../utils/dateUtils.js';
 
 const BATCH_SIZE = 100; // Batch Insert Size
 const BATCH_TIMEOUT = 1000; // Wait max 1s to fill batch
@@ -16,11 +17,7 @@ const ERROR_TYPES = {
     RETRYABLE: 'retryable'
 };
 
-const getIstDateString = () => {
-    const now = new Date();
-    const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-    return istTime.toISOString().split('T')[0];
-};
+// getIstDateString removed – use nowIST('YYYY-MM-DD') from dateUtils instead
 
 function classifyError(err) {
     if (!err) return ERROR_TYPES.FATAL;
@@ -265,7 +262,8 @@ async function processBatch(buffer) {
             // Update daily_offer_stats directly in DB for clicks.
             // Aggregate by offer+tenant for a single upsert per group to avoid double-counting.
             try {
-                const today = getIstDateString();
+                const today = nowIST('YYYY-MM-DD');
+                const { utcStart, utcEnd } = getUtcBoundaries(today, today);
                 const groups = {}; // key -> { offerId, tenantId, clicks: n }
 
                 for (const c of clicks) {
@@ -284,11 +282,11 @@ async function processBatch(buffer) {
                     const tenantId = g.tenantId;
                     const deltaClicks = g.clicks;
 
-                    // Count distinct IPs for this offer+tenant for today
+                    // Count distinct IPs for this offer+tenant for IST today (using UTC boundaries)
                     const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-                    const ipParams = tenantId ? [offerId, tenantId, today] : [offerId, today];
+                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND created_at BETWEEN ? AND ?`
+                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND created_at BETWEEN ? AND ?`;
+                    const ipParams = tenantId ? [offerId, tenantId, utcStart, utcEnd] : [offerId, utcStart, utcEnd];
                     const [ipRows] = await pool.query(ipCountQuery, ipParams);
                     const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
 
@@ -640,7 +638,7 @@ async function moveToDeadLetterQueue(entries, options = {}) {
                 validationErrors: entry.errors || null,
                 context,
                 clickData: entry.clickData || {},
-                timestamp: new Date().toISOString() // UTC ENFORCEMENT: UTC timestamp for DLQ entries
+                timestamp: nowIST() // IST timestamp for DLQ entries
             };
             pipeline.xadd(dlqKey, '*', 'payload', JSON.stringify(payload));
         }
