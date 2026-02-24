@@ -29,6 +29,12 @@ export class ReportController {
       if (request.query.os) filters.os = request.query.os;
       if (request.query.browser) filters.browser = request.query.browser;
       if (request.query.referrer) filters.referrer = request.query.referrer;
+      if (request.query.noReferrer) filters.noReferrer = request.query.noReferrer;
+      if (request.query.hasReferrer) filters.hasReferrer = request.query.hasReferrer;
+      if (request.query.sourceIp) filters.sourceIp = request.query.sourceIp;
+      if (request.query.xff) filters.xff = request.query.xff;
+      if (request.query.authorizationToken) filters.authorizationToken = request.query.authorizationToken;
+      if (request.query.status) filters.status = request.query.status;
       if (request.query.source_id) filters.source_id = request.query.source_id;
       if (request.query.google_id) filters.google_id = request.query.google_id;
       if (request.query.android_id) filters.android_id = request.query.android_id;
@@ -87,6 +93,12 @@ export class ReportController {
       if (request.query.page) filters.page = parseInt(request.query.page);
       if (request.query.limit) filters.limit = parseInt(request.query.limit);
       if (request.query.search) filters.search = request.query.search;
+      if (request.query.noReferrer) filters.noReferrer = request.query.noReferrer;
+      if (request.query.hasReferrer) filters.hasReferrer = request.query.hasReferrer;
+      if (request.query.sourceIp) filters.sourceIp = request.query.sourceIp;
+      if (request.query.xff) filters.xff = request.query.xff;
+      if (request.query.authorizationToken) filters.authorizationToken = request.query.authorizationToken;
+      if (request.query.status) filters.status = request.query.status;
       if (request.query.export) filters.export = request.query.export;
       if (request.query.groupBy) filters.groupBy = request.query.groupBy;
       if (request.query.columns) filters.columns = request.query.columns;

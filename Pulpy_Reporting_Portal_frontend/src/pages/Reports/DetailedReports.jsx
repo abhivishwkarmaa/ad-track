@@ -64,7 +64,9 @@ const AVAILABLE_DIMENSIONS = [
     { id: 'browser', label: 'Browser' },
     { id: 'click_uuid', label: 'Click UUID' },
     { id: 'rcid', label: 'RCID' },
-    { id: 'referer', label: 'Referer' }
+    { id: 'referer', label: 'Referer' },
+    { id: 'x_forwarded_for', label: 'X-Forwarded-For' },
+    { id: 'authorization_token', label: 'Auth Token' }
 ];
 
 const AVAILABLE_METRICS = [
@@ -107,6 +109,14 @@ function DetailedReports() {
     const [publisherFilter, setPublisherFilter] = useState(searchParams.get('publisher_id') || 'all');
     const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all');
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
+    const [sourceIpFilter, setSourceIpFilter] = useState(searchParams.get('sourceIp') || '');
+    const [xffFilter, setXffFilter] = useState(searchParams.get('xff') || '');
+    const [referrerFilter, setReferrerFilter] = useState(searchParams.get('referrer') || '');
+    const [authTokenFilter, setAuthTokenFilter] = useState(searchParams.get('authorizationToken') || '');
+    // Traffic type: 'all' | 'direct' | 'referred'
+    const initTraffic = searchParams.get('noReferrer') === 'true' ? 'direct'
+        : searchParams.get('hasReferrer') === 'true' ? 'referred' : 'all';
+    const [trafficType, setTrafficType] = useState(initTraffic);
 
     // Checkbox selections
     // Checkbox selections
@@ -156,6 +166,15 @@ function DetailedReports() {
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
             if (statusFilter !== 'all') params.status = statusFilter;
             if (searchTerm) params.search = searchTerm;
+            if (sourceIpFilter) params.sourceIp = sourceIpFilter;
+            if (xffFilter) params.xff = xffFilter;
+            if (referrerFilter) params.referrer = referrerFilter;
+            if (authTokenFilter) params.authorizationToken = authTokenFilter;
+            if (trafficType === 'direct') params.noReferrer = 'true';
+            if (trafficType === 'referred') params.hasReferrer = 'true';
+            // Text referrer filter only makes sense for referred traffic
+            if (trafficType === 'referred' && referrerFilter) params.referrer = referrerFilter;
+            else if (trafficType === 'all' && referrerFilter) params.referrer = referrerFilter;
 
             // Grouping Logic
             if (activeDims.length > 0) {
@@ -175,6 +194,13 @@ function DetailedReports() {
             if (publisherFilter !== 'all') urlParams.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') urlParams.set('status', statusFilter);
             if (searchTerm) urlParams.set('search', searchTerm);
+            if (sourceIpFilter) urlParams.set('sourceIp', sourceIpFilter);
+            if (xffFilter) urlParams.set('xff', xffFilter);
+            if (referrerFilter) urlParams.set('referrer', referrerFilter);
+            if (authTokenFilter) urlParams.set('authorizationToken', authTokenFilter);
+            if (trafficType === 'direct') { urlParams.set('noReferrer', 'true'); urlParams.delete('hasReferrer'); }
+            if (trafficType === 'referred') { urlParams.set('hasReferrer', 'true'); urlParams.delete('noReferrer'); }
+            if (trafficType === 'all') { urlParams.delete('noReferrer'); urlParams.delete('hasReferrer'); }
             if (activeDims.length > 0) urlParams.set('groupBy', activeDims.join(','));
             if (activeMetrics.length > 0) urlParams.set('metrics', activeMetrics.join(','));
             setSearchParams(urlParams);
@@ -259,6 +285,12 @@ function DetailedReports() {
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') params.set('status', statusFilter);
             if (searchTerm) params.set('search', searchTerm);
+            if (sourceIpFilter) params.set('sourceIp', sourceIpFilter);
+            if (xffFilter) params.set('xff', xffFilter);
+            if (referrerFilter) params.set('referrer', referrerFilter);
+            if (authTokenFilter) params.set('authorizationToken', authTokenFilter);
+            if (trafficType === 'direct') params.set('noReferrer', 'true');
+            if (trafficType === 'referred') params.set('hasReferrer', 'true');
             if (selectedDims.length > 0) params.set('groupBy', selectedDims.join(','));
             if (selectedMetrics.length > 0) params.set('columns', selectedMetrics.join(','));
 
@@ -324,6 +356,8 @@ function DetailedReports() {
                 { id: 'offer_id', label: 'Offer' },
                 { id: 'publisher_company', label: 'Publisher' },
                 { id: 'ip', label: 'IP' },
+                { id: 'referer', label: 'Referer' },
+                { id: 'x_forwarded_for', label: 'X-Forwarded-For' },
                 { id: 'country', label: 'Country' },
                 { id: 'device_type', label: 'Device' },
                 { id: 'click_created_at', label: 'Time' },
@@ -413,6 +447,41 @@ function DetailedReports() {
                             <label>Search</label>
                             <input type="text" className="form-control" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
                         </div>
+                        <div className="filter-group">
+                            <label>Source IP</label>
+                            <input type="text" className="form-control" placeholder="e.g. 103.45.67.89" value={sourceIpFilter} onChange={e => setSourceIpFilter(e.target.value)} />
+                        </div>
+                        <div className="filter-group">
+                            <label>X-Forwarded-For</label>
+                            <input type="text" className="form-control" placeholder="Partial match..." value={xffFilter} onChange={e => setXffFilter(e.target.value)} />
+                        </div>
+                        <div className="filter-group">
+                            <label>Referrer</label>
+                            <select
+                                className="form-control"
+                                value={trafficType}
+                                onChange={e => { setTrafficType(e.target.value); if (e.target.value === 'direct') setReferrerFilter(''); }}
+                            >
+                                <option value="all">All</option>
+                                <option value="direct">Empty Referral</option>
+                                <option value="referred">Non-Empty Referral</option>
+                            </select>
+                            {/* Text search only available when showing referred traffic */}
+                            {trafficType !== 'direct' && (
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    placeholder="Search referrer URL..."
+                                    value={referrerFilter}
+                                    onChange={e => setReferrerFilter(e.target.value)}
+                                    style={{ marginTop: '6px' }}
+                                />
+                            )}
+                        </div>
+                        <div className="filter-group">
+                            <label>Auth Token</label>
+                            <input type="text" className="form-control" placeholder="Exact match..." value={authTokenFilter} onChange={e => setAuthTokenFilter(e.target.value)} />
+                        </div>
                     </div>
 
                     <div className="columns-grid-container">
@@ -482,6 +551,12 @@ function DetailedReports() {
                                     <tr key={idx}>
                                         {tableColumns.map(col => {
                                             const val = row[col.id];
+                                            // Referrer: show 'Direct' badge when null/empty/whitespace
+                                            if (col.id === 'referrer' || col.id === 'referer') {
+                                                const rawVal = val ? String(val).trim() : '';
+                                                if (!rawVal) return <td key={col.id}><span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: 'var(--bg-secondary, #f0f0f0)', color: 'var(--text-secondary, #888)', fontStyle: 'italic' }}>Direct</span></td>;
+                                                return <td key={col.id} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={val}>{val}</td>;
+                                            }
                                             if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
                                             if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
                                             if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;

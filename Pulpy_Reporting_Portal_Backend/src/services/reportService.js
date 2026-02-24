@@ -4,48 +4,80 @@ import logger from '../utils/logger.js';
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
     // FINANCIAL SEPARATION RULES:
-    // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
-    // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
-    // 3. Profit = Revenue - Payout.
+    // 1. Revenue = SUM(amount)  — ALL conversions regardless of status
+    // 2. Payout  = SUM(payout)  — ONLY approved conversions
+    // 3. Profit  = Revenue - Payout
+    //
+    // ✅ PERFORMANCE: Independent scalar subqueries — no JOIN fanout, no temp tables.
+    // Each subquery hits (tenant_id, created_at) composite index directly.
     try {
-      let query = `
-        SELECT 
-          COUNT(DISTINCT c.publisher_id) as affiliates,
-          COUNT(DISTINCT c.id) as unique_clicks,
-          COUNT(DISTINCT i.id) as impressions,
-          COUNT(DISTINCT conv.id) as conversions,
-          COALESCE(SUM(conv.amount), 0) as revenue,
-          COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
-          COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit
-        FROM clicks c
-        LEFT JOIN impressions i ON i.offer_id = c.offer_id AND i.publisher_id = c.publisher_id
-        LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
-        WHERE 1=1
+      // ── Build WHERE fragments (no table alias — scalar subqueries use bare column names) ──
+      const clickParams = [];
+      const convParams = [];
+      let clickWhere = '1=1';
+      let convWhere = '1=1';
+
+      if (tenantId) {
+        clickWhere += ' AND tenant_id = ?'; clickParams.push(tenantId);
+        convWhere += ' AND tenant_id = ?'; convParams.push(tenantId);
+      }
+
+      // Default: today only (IST) — prevents open-ended scan
+      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+      const fromDate = filters.date_from || todayIST;
+      const toDate = filters.date_to || todayIST;
+      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+      clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(utcStart, utcEnd);
+      convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(utcStart, utcEnd);
+
+      // NOTE: No referrer guard — getSummary counts ALL clicks
+
+      // Optional dimension filters
+      if (filters.offer_id) { clickWhere += ' AND offer_id = ?'; clickParams.push(filters.offer_id); convWhere += ' AND offer_id = ?'; convParams.push(filters.offer_id); }
+      if (filters.publisher_id) { clickWhere += ' AND publisher_id = ?'; clickParams.push(filters.publisher_id); convWhere += ' AND publisher_id = ?'; convParams.push(filters.publisher_id); }
+      if (filters.ip) { clickWhere += ' AND ip = ?'; clickParams.push(filters.ip); }
+      if (filters.sourceIp) { clickWhere += ' AND ip = ?'; clickParams.push(filters.sourceIp); }
+      if (filters.country) { clickWhere += ' AND country = ?'; clickParams.push(filters.country); }
+      if (filters.xff) { clickWhere += ' AND x_forwarded_for LIKE ?'; clickParams.push(`%${filters.xff}%`); }
+      if (filters.authorizationToken) { clickWhere += ' AND authorization_token = ?'; clickParams.push(filters.authorizationToken); }
+      if (filters.noReferrer === 'true' || filters.noReferrer === true) {
+        clickWhere += " AND (referrer IS NULL OR referrer = '')";
+        convWhere += " AND (referrer IS NULL OR referrer = '')";
+      } else {
+        if (filters.hasReferrer === 'true' || filters.hasReferrer === true) {
+          clickWhere += " AND referrer IS NOT NULL AND LENGTH(TRIM(referrer)) > 0";
+          convWhere += " AND referrer IS NOT NULL AND LENGTH(TRIM(referrer)) > 0";
+        }
+        if (filters.referrer) {
+          clickWhere += " AND referrer LIKE ?";
+          clickParams.push(`%${filters.referrer}%`);
+          convWhere += " AND referrer LIKE ?";
+          convParams.push(`%${filters.referrer}%`);
+        }
+      }
+      const sql = `
+        SELECT
+          (SELECT COUNT(DISTINCT publisher_id) FROM clicks      WHERE ${clickWhere}) AS affiliates,
+          (SELECT COUNT(*)                     FROM clicks      WHERE ${clickWhere}) AS unique_clicks,
+          (SELECT COUNT(*)                     FROM conversions WHERE ${convWhere})  AS conversions,
+          (SELECT COALESCE(SUM(amount), 0)     FROM conversions WHERE ${convWhere})  AS revenue,
+          (SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS payout,
+          (SELECT COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS profit,
+          0 AS impressions
       `;
 
-      const filtersBuild = this.buildWhereClause(filters, tenantId);
-      query += filtersBuild.clause;
+      // Params: affiliates(c), unique_clicks(c), conversions(cv), revenue(cv), payout(cv), profit(cv)
+      const allParams = [...clickParams, ...clickParams, ...convParams, ...convParams, ...convParams, ...convParams];
+      const [rows] = await pool.query(sql, allParams);
 
-      const [rows] = await pool.query(query, filtersBuild.params);
-      const summary = rows[0] || {
-        affiliates: 0,
-        unique_clicks: 0,
-        impressions: 0,
-        conversions: 0,
-        revenue: 0,
-        payout: 0,
-        profit: 0,
-      };
-
-      // Calculate conversion rate
+      const summary = rows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
       const conversionRate = summary.unique_clicks > 0
         ? (summary.conversions / summary.unique_clicks) * 100
         : 0;
 
-      return {
-        ...summary,
-        conversion_rate: parseFloat(conversionRate.toFixed(2)),
-      };
+      return { ...summary, conversion_rate: parseFloat(conversionRate.toFixed(2)) };
     } catch (error) {
       logger.error('ReportService.getSummary error:', error);
       throw error;
@@ -87,7 +119,9 @@ export class ReportService {
         'domain': 'c.domain',
         'click_uuid': 'c.click_uuid',
         'rcid': 'c.rcid',
-        'referer': 'c.referrer'
+        'referer': 'c.referrer as referer',
+        'x_forwarded_for': 'c.x_forwarded_for as x_forwarded_for',
+        'authorization_token': 'c.authorization_token as authorization_token'
       };
 
       // Safe column selector
@@ -182,8 +216,10 @@ export class ReportService {
           p.email as publisher_email,
           p.company_name as publisher_company,
           c.ip,
+          c.x_forwarded_for,
           c.user_agent,
-          c.referrer,
+          c.referrer as referer,
+          c.authorization_token as authorization_token,
           c.country,
           c.region,
           c.city,
@@ -266,132 +302,96 @@ export class ReportService {
     let clause = '';
     const params = [];
 
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
+    // ✅ CRITICAL: Tenant isolation — always first
     if (tenantId) {
       clause += ' AND c.tenant_id = ?';
       params.push(tenantId);
     }
 
-    if (filters.date_from) {
-      const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at >= ?';
-      params.push(utcStart);
+    // ✅ Date range — index-safe BETWEEN on raw UTC created_at (no DATE() wrapping)
+    // Default: today only (IST) — prevents open-ended full table scan
+    const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+    const fromDate = filters.date_from || todayIST;
+    const toDate = filters.date_to || todayIST;
+    const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+    const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+    clause += ' AND c.created_at BETWEEN ? AND ?';
+    params.push(utcStart, utcEnd);
+
+    // ✅ HOUR filter — index-safe: compute UTC boundaries in JS, use BETWEEN on raw column
+    // Old: HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?  ← breaks index
+    // New: c.created_at BETWEEN <utc_hour_start> AND <utc_hour_end>  ← index-safe
+    if (filters.hour !== undefined && filters.date_from) {
+      const h = parseInt(filters.hour, 10);
+      const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      clause += ' AND c.created_at BETWEEN ? AND ?';
+      params.push(utcHourStart, utcHourEnd);
     }
 
-    if (filters.date_to) {
-      const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at <= ?';
-      params.push(utcEnd);
-    }
+    // NOTE: No referrer guard here — reports show ALL clicks, including direct traffic.
 
-    if (filters.offer_id) {
-      clause += ' AND c.offer_id = ?';
-      params.push(filters.offer_id);
-    }
-
-    if (filters.publisher_id) {
-      clause += ' AND c.publisher_id = ?';
-      params.push(filters.publisher_id);
-    }
-
-    if (filters.country) {
-      clause += ' AND c.country = ?';
-      params.push(filters.country);
-    }
-
-    if (filters.ip) {
-      clause += ' AND c.ip = ?';
-      params.push(filters.ip);
-    }
-
-    if (filters.tid) {
-      clause += ' AND c.tid = ?';
-      params.push(filters.tid);
-    }
+    if (filters.offer_id) { clause += ' AND c.offer_id = ?'; params.push(filters.offer_id); }
+    if (filters.publisher_id) { clause += ' AND c.publisher_id = ?'; params.push(filters.publisher_id); }
+    if (filters.country) { clause += ' AND c.country = ?'; params.push(filters.country); }
+    if (filters.ip) { clause += ' AND c.ip = ?'; params.push(filters.ip); }
+    if (filters.tid) { clause += ' AND c.tid = ?'; params.push(filters.tid); }
 
     if (filters.rcid) {
       clause += ' AND (c.rcid = ? OR conv.rcid = ?)';
       params.push(filters.rcid, filters.rcid);
     }
 
-    if (filters.device_brand) {
-      clause += ' AND c.device_brand = ?';
-      params.push(filters.device_brand);
+    if (filters.device_brand) { clause += ' AND c.device_brand = ?'; params.push(filters.device_brand); }
+    if (filters.os) { clause += ' AND c.os = ?'; params.push(filters.os); }
+    if (filters.browser) { clause += ' AND c.browser = ?'; params.push(filters.browser); }
+
+    // Referrer traffic mode filter
+    if (filters.noReferrer === 'true' || filters.noReferrer === true) {
+      clause += " AND (c.referrer IS NULL OR c.referrer = '')";
+    } else {
+      if (filters.hasReferrer === 'true' || filters.hasReferrer === true) {
+        clause += " AND c.referrer IS NOT NULL AND LENGTH(TRIM(c.referrer)) > 0";
+      }
+      if (filters.referrer) {
+        clause += ' AND c.referrer LIKE ?';
+        params.push(`%${filters.referrer}%`);
+      }
     }
 
-    if (filters.os) {
-      clause += ' AND c.os = ?';
-      params.push(filters.os);
-    }
-
-    if (filters.browser) {
-      clause += ' AND c.browser = ?';
-      params.push(filters.browser);
-    }
-
-    if (filters.referrer) {
-      clause += ' AND c.referrer LIKE ?';
-      params.push(`%${filters.referrer}%`);
-    }
-
-    if (filters.source_id) {
-      clause += ' AND c.source_id = ?';
-      params.push(filters.source_id);
-    }
-
-    if (filters.google_id) {
-      clause += ' AND c.google_id = ?';
-      params.push(filters.google_id);
-    }
-
-    if (filters.android_id) {
-      clause += ' AND c.android_id = ?';
-      params.push(filters.android_id);
-    }
-
-    if (filters.hour !== undefined) {
-      clause += ' AND HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?';
-      params.push(filters.hour);
-    }
-
-    if (filters.os_version) {
-      clause += ' AND c.os_version = ?';
-      params.push(filters.os_version);
-    }
-
-    if (filters.device_model) {
-      clause += ' AND c.device_model = ?';
-      params.push(filters.device_model);
-    }
+    if (filters.source_id) { clause += ' AND c.source_id = ?'; params.push(filters.source_id); }
+    if (filters.google_id) { clause += ' AND c.google_id = ?'; params.push(filters.google_id); }
+    if (filters.android_id) { clause += ' AND c.android_id = ?'; params.push(filters.android_id); }
+    if (filters.os_version) { clause += ' AND c.os_version = ?'; params.push(filters.os_version); }
+    if (filters.device_model) { clause += ' AND c.device_model = ?'; params.push(filters.device_model); }
 
     if (filters.user_agent) {
       clause += ' AND c.user_agent LIKE ?';
       params.push(`%${filters.user_agent}%`);
     }
 
-    if (filters.advertiser_id) {
-      clause += ' AND o.advertiser_id = ?';
-      params.push(filters.advertiser_id);
+    if (filters.advertiser_id) { clause += ' AND o.advertiser_id = ?'; params.push(filters.advertiser_id); }
+    if (filters.isp) { clause += ' AND c.isp = ?'; params.push(filters.isp); }
+    if (filters.city) { clause += ' AND c.city = ?'; params.push(filters.city); }
+    if (filters.region) { clause += ' AND c.region = ?'; params.push(filters.region); }
+    if (filters.domain) { clause += ' AND c.domain = ?'; params.push(filters.domain); }
+
+    // ✅ NEW: Source IP exact match (uses idx_clicks_tenant_created_ip)
+    if (filters.sourceIp) {
+      clause += ' AND c.ip = ?';
+      params.push(filters.sourceIp);
     }
 
-    if (filters.isp) {
-      clause += ' AND c.isp = ?';
-      params.push(filters.isp);
+    // ✅ NEW: X-Forwarded-For LIKE (uses idx_clicks_tenant_created_xff prefix)
+    if (filters.xff) {
+      clause += ' AND c.x_forwarded_for LIKE ?';
+      params.push(`%${filters.xff}%`);
     }
 
-    if (filters.city) {
-      clause += ' AND c.city = ?';
-      params.push(filters.city);
-    }
-
-    if (filters.region) {
-      clause += ' AND c.region = ?';
-      params.push(filters.region);
-    }
-
-    if (filters.domain) {
-      clause += ' AND c.domain = ?';
-      params.push(filters.domain);
+    // ✅ NEW: Authorization token exact match (uses idx_clicks_tenant_created_auth_token)
+    if (filters.authorizationToken) {
+      clause += ' AND c.authorization_token = ?';
+      params.push(filters.authorizationToken);
     }
 
     if (filters.status) {
@@ -402,11 +402,11 @@ export class ReportService {
     if (filters.search) {
       const term = `%${filters.search}%`;
       clause += ` AND (
-        c.click_uuid LIKE ? OR 
-        conv.conversion_uuid LIKE ? OR 
-        o.name LIKE ? OR 
-        p.email LIKE ? OR 
-        p.company_name LIKE ? OR 
+        c.click_uuid LIKE ? OR
+        conv.conversion_uuid LIKE ? OR
+        o.name LIKE ? OR
+        p.email LIKE ? OR
+        p.company_name LIKE ? OR
         c.ip LIKE ? OR
         c.user_agent LIKE ?
       )`;
@@ -425,41 +425,29 @@ export class ReportService {
   async getPublisherConversionStats(filters = {}, tenantId = null) {
     try {
       const { publisher_id, offer_id } = filters;
-      const params = [];
-      const statsParams = []; // Params for the Stats Subqueries
 
-      // 1. Build Date Condition (for Clicks/Conversions Stats)
-      let dateCondition = '';
-      if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition += ` AND created_at >= '${utcStart}'`;
-      }
-      if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        dateCondition += ` AND created_at <= '${utcEnd}'`;
-      }
+      // ✅ Date range — parameterized BETWEEN on raw UTC created_at (index-safe, no string injection)
+      // Default: today only (IST) — prevents open-ended full table scan
+      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+      const fromDate = filters.date_from || todayIST;
+      const toDate = filters.date_to || todayIST;
+      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
-      // 2. Build Relevant Pairs Subquery (Active Data from Clicks + Conversions)
-      // This ensures we see stats even for unassigned/historical offers
+      // ── 1. Pairs subquery — distinct (publisher, offer) combinations seen in date range ──
+      // params: tenantId, utcStart, utcEnd  (×2 for UNION)
       const pairsQuery = `
-        SELECT DISTINCT publisher_id, offer_id FROM clicks WHERE tenant_id = ? ${dateCondition}
+        SELECT DISTINCT publisher_id, offer_id FROM clicks
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
         UNION
-        SELECT DISTINCT publisher_id, offer_id FROM conversions WHERE tenant_id = ? ${dateCondition}
+        SELECT DISTINCT publisher_id, offer_id FROM conversions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
       `;
-      // params for pairsQuery: tenantId (x2)
-      // Note: date_from/to are injected directly above as strings, so we don't need params for them in the array if safe (they are usually sanitized dates).
-      // But above code pushed them to statsParams.
-      // Let's rely on string injection or params.
-      // The previous code injected ? and pushed to statsParams.
-      // To be safe and cleaner, let's keep using ? in dateCondition variables if possible, but here we construct the string.
-      // The original code used params for date_from/date_to.
-      // Let's stick to the pattern:
+      const pairsParams = [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd];
 
-      params.push(tenantId, tenantId); // For the 2 UNION selects
-
-      // 3. Main Query
+      // ── 2. Main query — subqueries use the same parameterized window ──
       const query = `
-        SELECT 
+        SELECT
           p.id as publisher_id,
           p.email as publisher_email,
           p.company_name as publisher_company,
@@ -474,8 +462,6 @@ export class ReportService {
           COALESCE(conv_stats.pending_conversions, 0) as pending_conversions,
           COALESCE(conv_stats.rejected_conversions, 0) as rejected_conversions,
           COALESCE(conv_stats.rejected_cap_conversions, 0) as rejected_cap_conversions,
-          -- FINANCIAL SEPARATION: Revenue (ALL), Payout (Approved Only)
-          -- Total (Approved + Pending)
           COALESCE(conv_stats.total_revenue, 0) as total_revenue,
           COALESCE(conv_stats.approved_revenue, 0) as approved_revenue,
           COALESCE(conv_stats.total_payout, 0) as total_payout,
@@ -483,58 +469,43 @@ export class ReportService {
           COALESCE(conv_stats.total_profit, 0) as total_profit,
           COALESCE(conv_stats.approved_profit, 0) as approved_profit
         FROM (${pairsQuery}) as pairs
-        JOIN publishers p ON pairs.publisher_id = p.id
-        JOIN offers o ON pairs.offer_id = o.id
+        JOIN publishers  p ON pairs.publisher_id = p.id
+        JOIN offers      o ON pairs.offer_id     = o.id
         LEFT JOIN (
-          SELECT 
-            publisher_id,
-            offer_id,
-            COUNT(DISTINCT id) as total_clicks
+          SELECT publisher_id, offer_id, COUNT(DISTINCT id) as total_clicks
           FROM clicks
-          WHERE tenant_id = ? ${dateCondition}
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id, offer_id
         ) click_stats ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
         LEFT JOIN (
-          SELECT 
-            publisher_id,
-            offer_id,
-            COUNT(DISTINCT id) as total_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'approved' THEN id END) as approved_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'pending' THEN id END) as pending_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected' THEN id END) as rejected_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END) as rejected_cap_conversions,
-            
-            -- Total (Approved + Pending)
-            COALESCE(SUM(amount), 0) as total_revenue,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout,
-            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_profit,
-
-            -- Approved
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as approved_revenue,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0) as approved_profit,
-
-            -- Pending
-            COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_revenue,
-            COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) as pending_payout,
-            COALESCE(SUM(CASE WHEN status = 'pending' THEN amount - payout ELSE 0 END), 0) as pending_profit
-
+          SELECT
+            publisher_id, offer_id,
+            COUNT(DISTINCT id)                                                                AS total_conversions,
+            COUNT(DISTINCT CASE WHEN status = 'approved'     THEN id END)                    AS approved_conversions,
+            COUNT(DISTINCT CASE WHEN status = 'pending'      THEN id END)                    AS pending_conversions,
+            COUNT(DISTINCT CASE WHEN status = 'rejected'     THEN id END)                    AS rejected_conversions,
+            COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END)                    AS rejected_cap_conversions,
+            COALESCE(SUM(amount), 0)                                                         AS total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout  ELSE 0 END), 0)          AS total_payout,
+            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount   ELSE 0 END), 0)         AS approved_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout   ELSE 0 END), 0)         AS approved_payout,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0)  AS approved_profit,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount   ELSE 0 END), 0)         AS pending_revenue,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN payout   ELSE 0 END), 0)         AS pending_payout,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount - payout ELSE 0 END), 0)  AS pending_profit
           FROM conversions
-          WHERE tenant_id = ? ${dateCondition}
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id, offer_id
         ) conv_stats ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
         ORDER BY conv_stats.total_conversions DESC, conv_stats.approved_conversions DESC
       `;
 
-      // Params for main query:
-      // 1. pairs params (already accumulated)
-      // 2. click_stats params: tenantId, ...statsParams
-      // 3. conv_stats params: tenantId, ...statsParams
-
+      // Params order: pairs(×6) + click_stats(tenantId, utcStart, utcEnd) + conv_stats(tenantId, utcStart, utcEnd)
       const finalParams = [
-        ...params,
-        tenantId, ...statsParams,
-        tenantId, ...statsParams
+        ...pairsParams,
+        tenantId, utcStart, utcEnd,  // click_stats subquery
+        tenantId, utcStart, utcEnd,  // conv_stats subquery
       ];
 
       const [rows] = await pool.query(query, finalParams);
