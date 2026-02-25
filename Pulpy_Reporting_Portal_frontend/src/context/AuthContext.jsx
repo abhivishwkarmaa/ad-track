@@ -111,7 +111,9 @@ export function AuthProvider({ children }) {
                     fullName: response.data.name,
                     role: response.data.role,
                     tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
-                    mustChangePassword: Boolean(response.data.must_change_password)
+                    mustChangePassword: Boolean(response.data.must_change_password),
+                    companyName: response.data.company_name || null,
+                    phone: response.data.phone || null
                 };
 
                 setUser(userData);
@@ -132,10 +134,39 @@ export function AuthProvider({ children }) {
 
     const logout = () => handleLogout({ redirect: true, broadcast: true });
 
-    const updateProfile = (updates) => {
-        const updatedUser = { ...user, ...updates };
-        setUser(updatedUser);
-        localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
+    const updateProfile = async (updates) => {
+        try {
+            // If it's just a local state update (e.g. password change complete flag)
+            // with no actual profile fields, we can skip the API call if desired.
+            // But here we check if any main profile fields are being updated.
+            const profileFields = ['fullName', 'name', 'companyName', 'phone'];
+            const hasProfileFields = Object.keys(updates).some(key => profileFields.includes(key));
+
+            if (hasProfileFields) {
+                const response = await authAPI.updateProfile(updates);
+                if (response.success && response.data) {
+                    const updatedUser = {
+                        ...user,
+                        ...updates,
+                        fullName: response.data.name || updates.fullName || user.fullName,
+                        companyName: response.data.company_name || updates.companyName || user.companyName,
+                        phone: response.data.phone || updates.phone || user.phone
+                    };
+                    setUser(updatedUser);
+                    localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
+                    return { success: true };
+                }
+            } else {
+                // Local only update (e.g. for mustChangePassword flag)
+                const updatedUser = { ...user, ...updates };
+                setUser(updatedUser);
+                localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
+                return { success: true };
+            }
+        } catch (error) {
+            console.error('Update profile error:', error);
+            throw error;
+        }
     };
 
     if (loading) {

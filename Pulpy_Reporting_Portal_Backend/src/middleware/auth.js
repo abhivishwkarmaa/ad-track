@@ -137,7 +137,7 @@ export async function authenticateAdmin(request, reply) {
     try {
       // Try query with tenant_id first
       [rows] = await pool.query(
-        'SELECT id, email, name, role, tenant_id, must_change_password FROM admin_users WHERE id = ? AND email = ?',
+        'SELECT id, email, name, role, tenant_id, must_change_password, company_name, phone FROM admin_users WHERE id = ? AND email = ?',
         [decoded.id, decoded.email]
       );
     } catch (error) {
@@ -276,6 +276,8 @@ export async function authenticateAdmin(request, reply) {
       role: admin.role,
       tenantId: tenantId,
       isSuperAdmin: isSuperAdmin,
+      companyName: admin.company_name || null,
+      phone: admin.phone || null,
     };
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

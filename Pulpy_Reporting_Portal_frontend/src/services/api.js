@@ -261,6 +261,12 @@ export const authAPI = {
             body: JSON.stringify({ resetToken, newPassword }),
         });
     },
+    updateProfile: async (data) => {
+        return apiRequest('/api/auth/profile', {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+    },
 };
 
 // Dashboard API

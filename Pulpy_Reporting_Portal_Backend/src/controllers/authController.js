@@ -214,7 +214,7 @@ export class AuthController {
       try {
         // Try query with tenant_id first
         [rows] = await pool.query(
-          'SELECT id, email, name, password_hash, role, tenant_id, must_change_password FROM admin_users WHERE email = ?',
+          'SELECT id, email, name, password_hash, role, tenant_id, must_change_password, company_name, phone FROM admin_users WHERE email = ?',
           [email]
         );
       } catch (error) {
@@ -440,6 +440,8 @@ export class AuthController {
           role: admin.role,
           tenant_id: tenantId, // Include tenant_id in response
           must_change_password: mustChangePassword,
+          company_name: admin.company_name,
+          phone: admin.phone,
           token,
         },
       });
@@ -460,6 +462,62 @@ export class AuthController {
       });
     } catch (error) {
       logger.error('AuthController.getProfile error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async updateProfile(request, reply) {
+    try {
+      const { id } = request.admin;
+      const { fullName, name, companyName, phone } = request.body;
+
+      const finalName = fullName || name;
+
+      const updates = [];
+      const params = [];
+
+      if (finalName) {
+        updates.push('name = ?');
+        params.push(finalName);
+      }
+      if (companyName !== undefined) {
+        updates.push('company_name = ?');
+        params.push(companyName);
+      }
+      if (phone !== undefined) {
+        updates.push('phone = ?');
+        params.push(phone);
+      }
+
+      if (updates.length === 0) {
+        return reply.code(400).send({
+          success: false,
+          message: 'No fields to update'
+        });
+      }
+
+      params.push(id);
+      await pool.query(
+        `UPDATE admin_users SET ${updates.join(', ')} WHERE id = ?`,
+        params
+      );
+
+      // Fetch updated user
+      const [rows] = await pool.query(
+        'SELECT id, email, name, role, tenant_id, company_name, phone FROM admin_users WHERE id = ?',
+        [id]
+      );
+
+      return reply.send({
+        success: true,
+        message: 'Profile updated successfully',
+        data: {
+          ...rows[0],
+          fullName: rows[0].name // Support both frontend naming conventions
+        }
+      });
+    } catch (error) {
+      logger.error('AuthController.updateProfile error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
@@ -513,7 +571,7 @@ export class AuthController {
       let [rows] = [];
       try {
         [rows] = await pool.query(
-          'SELECT id, email, name, role, tenant_id FROM admin_users WHERE id = ?',
+          'SELECT id, email, name, role, tenant_id, company_name, phone FROM admin_users WHERE id = ?',
           [session.user_id]
         );
       } catch (error) {

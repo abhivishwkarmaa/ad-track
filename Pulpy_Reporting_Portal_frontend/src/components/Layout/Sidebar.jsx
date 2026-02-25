@@ -236,12 +236,12 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                 <div className="sidebar-header">
                     <div className="sidebar-logo">
                         {logoImage ? (
-                            <img src={logoImage} alt="Track MyAds Logo" />
+                            <img src={logoImage} alt={`${user?.companyName || 'Track MyAds'} Logo`} />
                         ) : (
                             <span className="sidebar-logo-text">TM</span>
                         )}
                     </div>
-                    <span className="sidebar-brand">Track MyAds</span>
+                    <span className="sidebar-brand">{user?.companyName || 'Track MyAds'}</span>
                 </div>
 
                 <nav className="sidebar-nav">

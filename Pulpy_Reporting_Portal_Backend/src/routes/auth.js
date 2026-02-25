@@ -12,6 +12,9 @@ async function authRoutes(fastify, options) {
   fastify.get('/profile', {
     preHandler: authenticateAdmin,
   }, authController.getProfile);
+  fastify.patch('/profile', {
+    preHandler: authenticateAdmin,
+  }, authController.updateProfile.bind(authController));
 
   // Password Reset (Public)
   fastify.post('/forgot-password/request-otp', authController.requestOtp.bind(authController));

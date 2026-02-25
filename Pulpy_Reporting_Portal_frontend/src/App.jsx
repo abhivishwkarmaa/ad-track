@@ -88,81 +88,87 @@ function AppRoutes() {
   // Check domain context
   const hostname = window.location.hostname;
   const isAdminDomain = hostname.startsWith('admin');
+  const { user } = useAuth();
+
+  useEffect(() => {
+    const brandName = user?.companyName || 'Track MyAds';
+    document.title = `${brandName} | Performance Marketing Platform`;
+  }, [user?.companyName]);
 
   return (
     <>
       {isAuthenticated && <ChangePasswordPrompt />}
       <Routes>
-      <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
-      <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
-      <Route
-        path="/"
-        element={
-          <PrivateRoute>
-            <Layout />
-          </PrivateRoute>
-        }
-      >
-        {/* Helper to redirect based on domain if accessing root */}
-        <Route index element={!isAdminDomain ? <Dashboard /> : <Navigate to="/tenant/manage" replace />} />
+        <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
+        <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <Layout />
+            </PrivateRoute>
+          }
+        >
+          {/* Helper to redirect based on domain if accessing root */}
+          <Route index element={!isAdminDomain ? <Dashboard /> : <Navigate to="/tenant/manage" replace />} />
 
-        {/* Tenant Only Routes - Redirect to Tenant Manage if accessed by Admin */}
-        <Route element={!isAdminDomain ? <Outlet /> : <Navigate to="/tenant/manage" replace />}>
-          <Route path="offer">
-            <Route index element={<OfferList />} />
-            <Route path="list" element={<OfferList />} />
-            <Route path="new" element={<NewOffer />} />
-            <Route path="edit/:id" element={<EditOffer />} />
-            <Route path="detail/:id" element={<OfferDetail />} />
+          {/* Tenant Only Routes - Redirect to Tenant Manage if accessed by Admin */}
+          <Route element={!isAdminDomain ? <Outlet /> : <Navigate to="/tenant/manage" replace />}>
+            <Route path="offer">
+              <Route index element={<OfferList />} />
+              <Route path="list" element={<OfferList />} />
+              <Route path="new" element={<NewOffer />} />
+              <Route path="edit/:id" element={<EditOffer />} />
+              <Route path="detail/:id" element={<OfferDetail />} />
+            </Route>
+            <Route path="affiliate">
+              <Route index element={<ManageAffiliate />} />
+              <Route path="manage" element={<ManageAffiliate />} />
+              <Route path="new" element={<NewAffiliate />} />
+              <Route path="edit/:id" element={<EditAffiliate />} />
+              <Route path="detail/:id" element={<AffiliateDetail />} />
+              <Route path="postback-test" element={<PostbackTest />} />
+            </Route>
+            <Route path="advertiser">
+              <Route index element={<ManageAdvertiser />} />
+              <Route path="manage" element={<ManageAdvertiser />} />
+              <Route path="new" element={<NewAdvertiser />} />
+              <Route path="edit/:id" element={<EditAdvertiser />} />
+              <Route path="detail/:id" element={<AdvertiserDetail />} />
+            </Route>
+            <Route path="assignment">
+              <Route index element={<ManageAssignment />} />
+              <Route path="manage" element={<ManageAssignment />} />
+              <Route path="new" element={<NewAssignment />} />
+              <Route path="edit/:id" element={<EditAssignment />} />
+            </Route>
+            <Route path="reports">
+              <Route index element={<DetailedReports />} />
+              <Route path="detailed" element={<DetailedReports />} />
+            </Route>
+            <Route path="live-logs" element={<LiveLogs />} />
+            {/* <Route path="import" element={<ImportData />} /> */}
           </Route>
-          <Route path="affiliate">
-            <Route index element={<ManageAffiliate />} />
-            <Route path="manage" element={<ManageAffiliate />} />
-            <Route path="new" element={<NewAffiliate />} />
-            <Route path="edit/:id" element={<EditAffiliate />} />
-            <Route path="detail/:id" element={<AffiliateDetail />} />
-            <Route path="postback-test" element={<PostbackTest />} />
-          </Route>
-          <Route path="advertiser">
-            <Route index element={<ManageAdvertiser />} />
-            <Route path="manage" element={<ManageAdvertiser />} />
-            <Route path="new" element={<NewAdvertiser />} />
-            <Route path="edit/:id" element={<EditAdvertiser />} />
-            <Route path="detail/:id" element={<AdvertiserDetail />} />
-          </Route>
-          <Route path="assignment">
-            <Route index element={<ManageAssignment />} />
-            <Route path="manage" element={<ManageAssignment />} />
-            <Route path="new" element={<NewAssignment />} />
-            <Route path="edit/:id" element={<EditAssignment />} />
-          </Route>
-          <Route path="reports">
-            <Route index element={<DetailedReports />} />
-            <Route path="detailed" element={<DetailedReports />} />
-          </Route>
-          <Route path="live-logs" element={<LiveLogs />} />
-          {/* <Route path="import" element={<ImportData />} /> */}
-        </Route>
 
-        {/* Admin Only Routes - Redirect to Dashboard (which redirects to login or 404?) if accessed by Tenant */}
-        {/* If Tenant access /tenant, fallback to / (Dashboard) */}
-        <Route element={isAdminDomain ? <Outlet /> : <Navigate to="/" replace />}>
-          <Route path="tenant">
-            <Route index element={<ManageTenant />} />
-            <Route path="manage" element={<ManageTenant />} />
-            <Route path="new" element={<NewTenant />} />
-            <Route path="edit/:id" element={<EditTenant />} />
-            <Route path="detail/:id" element={<TenantDetail />} />
+          {/* Admin Only Routes - Redirect to Dashboard (which redirects to login or 404?) if accessed by Tenant */}
+          {/* If Tenant access /tenant, fallback to / (Dashboard) */}
+          <Route element={isAdminDomain ? <Outlet /> : <Navigate to="/" replace />}>
+            <Route path="tenant">
+              <Route index element={<ManageTenant />} />
+              <Route path="manage" element={<ManageTenant />} />
+              <Route path="new" element={<NewTenant />} />
+              <Route path="edit/:id" element={<EditTenant />} />
+              <Route path="detail/:id" element={<TenantDetail />} />
+            </Route>
+            <Route path="contact-submissions" element={<ManageContactSubmissions />} />
           </Route>
-          <Route path="contact-submissions" element={<ManageContactSubmissions />} />
-        </Route>
 
-        {/* Shared Routes */}
-        <Route path="settings">
-          <Route index element={<UpdateProfile />} />
-          <Route path="profile" element={<UpdateProfile />} />
+          {/* Shared Routes */}
+          <Route path="settings">
+            <Route index element={<UpdateProfile />} />
+            <Route path="profile" element={<UpdateProfile />} />
+          </Route>
         </Route>
-      </Route>
       </Routes>
     </>
   );
