@@ -43,20 +43,67 @@ export class TenantMetricsService {
       const periodStartUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
-      // Clicks metrics
-      const [clicksToday] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, todayStartUTC, todayEndUTC]
-      );
+      // Execute all 5 summary queries in parallel to significantly reduce latency
+      const [
+        [clicksToday],
+        [clicksPeriod],
+        [conversionsToday],
+        [conversionsPeriod],
+        [publishersCount],
+        [offersCount]
+      ] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
+           FROM clicks
+           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+          [tenantId, todayStartUTC, todayEndUTC]
+        ),
+        pool.query(
+          `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
+           FROM clicks
+           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+          [tenantId, periodStartUTC, periodEndUTC]
+        ),
+        pool.query(
+          `SELECT 
+             COUNT(*) as total,
+             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+             SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+             COALESCE(SUM(amount), 0) as revenue,
+             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
+           FROM conversions
+           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+          [tenantId, todayStartUTC, todayEndUTC]
+        ),
+        pool.query(
+          `SELECT 
+             COUNT(*) as total,
+             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+             COALESCE(SUM(amount), 0) as revenue,
+             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
+           FROM conversions
+           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+          [tenantId, periodStartUTC, periodEndUTC]
+        ),
+        pool.query(
+          `SELECT 
+             COUNT(*) as total,
+             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
+           FROM publishers
+           WHERE tenant_id = ?`,
+          [tenantId]
+        ),
+        pool.query(
+          `SELECT 
+             COUNT(*) as total,
+             SUM(CASE WHEN status = 'live' THEN 1 ELSE 0 END) as live
+           FROM offers
+           WHERE tenant_id = ?`,
+          [tenantId]
+        )
+      ]);
 
-      const [clicksPeriod] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, periodStartUTC, periodEndUTC]
-      );
 
       metrics.clicks = {
         today: {
@@ -68,31 +115,6 @@ export class TenantMetricsService {
           unique: parseInt(clicksPeriod[0]?.unique_clicks || 0),
         },
       };
-
-      // Conversions metrics
-      const [conversionsToday] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-           SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-           COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-         FROM conversions
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, todayStartUTC, todayEndUTC]
-      );
-
-      const [conversionsPeriod] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-           COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-         FROM conversions
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, periodStartUTC, periodEndUTC]
-      );
 
       metrics.conversions = {
         today: {
@@ -115,35 +137,17 @@ export class TenantMetricsService {
         profit_period: parseFloat(conversionsPeriod[0]?.revenue || 0) - parseFloat(conversionsPeriod[0]?.payout || 0),
       };
 
-      // Publishers count
-      const [publishersCount] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active
-         FROM publishers
-         WHERE tenant_id = ?`,
-        [tenantId]
-      );
-
       metrics.publishers = {
         total: parseInt(publishersCount[0]?.total || 0),
         active: parseInt(publishersCount[0]?.active || 0),
       };
 
-      // Offers count
-      const [offersCount] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'live' THEN 1 ELSE 0 END) as live
-         FROM offers
-         WHERE tenant_id = ?`,
-        [tenantId]
-      );
-
       metrics.offers = {
         total: parseInt(offersCount[0]?.total || 0),
         live: parseInt(offersCount[0]?.live || 0),
       };
+
+
 
       // Redis queue depth (approximate)
       try {
