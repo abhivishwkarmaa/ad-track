@@ -9,6 +9,7 @@ import http from 'http';
 
 import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
+import cacheService from './cacheService.js';
 
 // ---------- In-file lookups (no external findById/getOfferById) ----------
 /** Get offer by internal id only. Returns row or null. */
@@ -356,13 +357,12 @@ export class PostbackService {
             rcid: rcid
           });
 
-          // 2. Validate Offer / Fetch Payout (in-file lookup by internal id)
-          const offer = await getOfferByInternalId(clickData.offer_id, tenantId);
-          console.log('offer', offer);
+          // 2. Validate Offer / Fetch Payout (CACHED)
+          const offer = await cacheService.getOffer(clickData.offer_id, tenantId);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
-          if (offer.tenant_id !== tenantId) {
+          if (parseInt(offer.tenant_id) !== parseInt(tenantId)) {
             throw new Error('Offer does not belong to this tenant');
           }
 
@@ -1535,34 +1535,15 @@ export class PostbackService {
     };
   }
 
-  async isCapExceeded(offer, tenantId = null) {
+  async isCapExceeded(offer, tenantId) {
     if (!offer) return false;
 
-    const cacheService = (await import('./cacheService.js')).default;
-
-    // ✅ 1. Legacy Total Cap Check
-    if (offer.total_cap && offer.total_cap > 0) {
-      let query = 'SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ?';
-      const params = [offer.id];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
-
-      const [rows] = await pool.query(query, params);
-      const totalCount = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
-      if (totalCount >= offer.total_cap) return true;
-    }
-
-    // ✅ 2. New Unified Cap Check (Budget/Conversion + Daily/Weekly/Monthly)
+    // ✅ PRODUCTION GRADE: Single Redis hit for all cap types (Daily/Monthly/Total/Legacy)
     const capStatus = await cacheService.getCapStatus('offer', offer.id, offer, tenantId);
 
     if (capStatus.isHit) {
       logger.info(`[POSTBACK] Offer Capping Exceeded`, {
         offer_id: offer.id,
-        type: offer.capping_type,
-        duration: offer.capping_duration,
         limit: capStatus.limit,
         current: capStatus.current
       });

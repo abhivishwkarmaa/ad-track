@@ -198,50 +198,28 @@ async function processConversionBatch(entries) {
                     c.status = 'rejected_cap';
                     c.payout = 0;
                     rejected = true;
-                    logger.info(`[WORKER] Conversion rejected (Force Reject from Click)`, {
-                        click_uuid: c.click_uuid,
-                        offer_id: c.offer_id
-                    });
-                } else if (offer) {
-                    const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, c.tenant_id);
-                    if (offerCapStatus.isHit) {
+                    logger.info(`[WORKER] Conversion rejected (Force Reject from Click)`, { click_uuid: c.click_uuid });
+                } else if (offer && ['approved', 'pending'].includes(c.status)) {
+                    // ✅ PRODUCTION GRADE: Atomic Check-and-Increment with Idempotency
+                    const offerResult = await cacheService.checkAndIncrCap('offer', offer.id, offer, c.amount, c.tenant_id, c.click_uuid);
+                    if (!offerResult.success) {
                         c.status = 'rejected_cap';
                         c.payout = 0;
                         rejected = true;
-                        logger.info(`[WORKER] Conversion rejected (Offer Cap Hit)`, {
-                            click_uuid: c.click_uuid,
-                            offer_id: offer.id
-                        });
+                        logger.info(`[WORKER] Conversion rejected (Offer Cap Hit - Atomic)`, { click_uuid: c.click_uuid, offer_id: offer.id });
                     }
                 }
 
                 // 2. Check Publisher Cap (if not already rejected)
-                if (!rejected && assignment) {
-                    const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, c.tenant_id);
-                    if (pubCapStatus.isHit) {
+                if (!rejected && assignment && ['approved', 'pending'].includes(c.status)) {
+                    // ✅ PRODUCTION GRADE: Atomic Check-and-Increment with Idempotency
+                    const pubResult = await cacheService.checkAndIncrCap('publisher', assignment.id, assignment, c.payout, c.tenant_id, c.click_uuid);
+                    if (!pubResult.success) {
                         c.status = 'rejected_cap';
                         c.payout = 0;
                         rejected = true;
-                        logger.info(`[WORKER] Conversion rejected (Publisher Cap Hit)`, {
-                            click_uuid: c.click_uuid,
-                            assignment_id: assignment.id,
-                            cap_type: assignment.capping_type
-                        });
+                        logger.info(`[WORKER] Conversion rejected (Publisher Cap Hit - Atomic)`, { click_uuid: c.click_uuid, assignment_id: assignment.id });
                     }
-                }
-
-                // 3. Increment Counters (if not rejected & valid status & assignment/offer exists)
-                if (!rejected && ['approved', 'pending'].includes(c.status)) {
-                    const incPromises = [];
-                    if (assignment) {
-                        // Publisher budget uses payout
-                        incPromises.push(cacheService.incrementCap('publisher', assignment.id, assignment, c.payout, c.tenant_id));
-                    }
-                    if (offer) {
-                        // Offer budget uses amount (revenue)
-                        incPromises.push(cacheService.incrementCap('offer', offer.id, offer, c.amount, c.tenant_id));
-                    }
-                    await Promise.all(incPromises);
                 }
 
             } catch (capErr) {

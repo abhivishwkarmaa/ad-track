@@ -100,15 +100,14 @@ export class TrackingService {
       });
 
       // ============================================
-      // STEP 2: RESOLVE — Public ID → Internal ID (sirf iske baad DB me internal id use karo)
+      // STEP 2: RESOLVE — Public ID → Internal ID
       // ============================================
-      const internalOfferId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
-      const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
-      const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+      const internalOfferId = await cacheService.getInternalOfferId(publicOfferId, tenantId);
+      const publisher = await cacheService.getPublisher(publicPublisherId, tenantId);
       const internalPublisherId = publisher ? publisher.id : null;
 
       const offer = internalOfferId
-        ? await offerService.getOfferById(internalOfferId, tenantId, true)
+        ? await cacheService.getOffer(internalOfferId, tenantId)
         : null;
 
       // ============================================
@@ -195,85 +194,35 @@ export class TrackingService {
         throw new Error(`Security violation: Publisher ${publisher.id} belongs to tenant ${publisher.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
 
-      // ✅ STEP 5: Verify tenant exists in database (for foreign key integrity)
+      // ✅ STEP 5: Verify tenant exists in database (CACHED)
       try {
-        const [tenantRows] = await pool.query('SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
-        if (tenantRows.length === 0) {
-          logger.error(`❌ CRITICAL: Tenant ID ${tenantId} does not exist in tenants table!`);
-          throw new Error(`Tenant ${tenantId} does not exist in database`);
+        const tenant = await cacheService.getTenant(tenantId);
+        if (!tenant) {
+          logger.error(`❌ CRITICAL: Tenant ID ${tenantId} does not exist!`);
+          throw new Error(`Tenant ${tenantId} does not exist`);
         }
-        logger.debug(`✅ Tenant ${tenantId} verified: ${tenantRows[0].name}`);
+        logger.debug(`✅ Tenant ${tenantId} verified: ${tenant.name}`);
       } catch (err) {
         if (err.message.includes('does not exist')) {
-          throw err; // Re-throw tenant not found error
+          throw err;
         }
         logger.warn(`⚠️ Could not verify tenant existence: ${err.message}`);
       }
 
       // ============================================
-      // STEP 4: Assignment nikalna — pehle internal ids, na mile to public publisher_id (legacy fallback)
+      // STEP 4: Assignment Resolution (CACHED)
       // ============================================
-      let assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
-      if (!assignment) {
-        let [assignmentRows] = await pool.query(
-          'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
-          [internalPublisherId, offer.id, tenantId]
-        );
-        assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
-
-        // Fallback: kuch purani rows me publisher_id column me public id store ho sakta hai
-        if (!assignment && publicPublisherId !== internalPublisherId) {
-          const [fallbackRows] = await pool.query(
-            'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
-            [publicPublisherId, offer.id, tenantId]
-          );
-          assignment = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
-          if (assignment) {
-            logger.warn('⚠️ Assignment found by public publisher_id (legacy row). Prefer storing internal publisher_id in publisher_offers.', {
-              public_publisher_id: publicPublisherId,
-              internal_offer_id: offer.id,
-              tenant_id: tenantId
-            });
-          }
-        }
-
-        logger.info('[CLICK] Assignment resolved', {
-          assignment_id: assignment?.id,
-          status: assignment?.status
-        });
-
-        if (assignment && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
-          logger.error('❌ HARD FAILURE: Assignment tenant mismatch', {
-            assignment_id: assignment.id,
-            assignment_tenant_id: assignment.tenant_id,
-            resolved_tenant_id: tenantId
-          });
-          throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
-        }
-
-        if (assignment && assignment.status !== 'active') {
-          logger.error('❌ Assignment exists but is not active', {
-            assignment_id: assignment.id,
-            status: assignment.status,
-            internal_publisher_id: internalPublisherId,
-            internal_offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            public_publisher_id: publicPublisherId,
-            tenant_id: tenantId
-          });
-          throw new Error(`Assignment exists but status is '${assignment.status}'. Set it to 'active' to accept clicks.`);
-        }
-      }
+      const assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
 
       if (!assignment) {
-        logger.error('❌ Assignment not found (no row in publisher_offers)', {
+        logger.error('❌ Assignment not found or inactive', {
           public_offer_id: publicOfferId,
           public_publisher_id: publicPublisherId,
-          internal_offer_id: offer.id,
-          internal_publisher_id: internalPublisherId,
+          offer_id: offer.id,
+          publisher_id: internalPublisherId,
           tenant_id: tenantId
         });
-        throw new Error(`Assignment not found for publisher ${publicPublisherId} (internal ${internalPublisherId}) and offer ${publicOfferId} (internal ${offer.id}) in tenant ${tenantId}. Create the assignment on the offer detail page.`);
+        throw new Error(`Technical Error: No active assignment for publisher ${publicPublisherId} and offer ${publicOfferId}.`);
       }
 
       // ✅ CRITICAL: HARD VALIDATION - Assignment must belong to resolved tenant
@@ -283,7 +232,7 @@ export class TrackingService {
           assignment_tenant_id: assignment.tenant_id,
           resolved_tenant_id: tenantId
         });
-        throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+        throw new Error(`Security violation: Assignment does not belong to tenant ${tenantId}.`);
       }
 
       // ============================================
@@ -918,15 +867,15 @@ export class TrackingService {
 
       // Offer Fallback
       if (offer.fallback_type === 'offer' && offer.fallback_offer_id) {
-        // Validate fallback offer belongs to tenant
-        const fallbackOffer = await offerService.getOfferById(offer.fallback_offer_id, tenantId, true);
+        // Validate fallback offer belongs to tenant (CACHED)
+        const fallbackOffer = await cacheService.getOffer(offer.fallback_offer_id, tenantId);
         if (!fallbackOffer) {
           logger.warn('[CAP] Fallback offer not found or invalid', { fallback_offer_id: offer.fallback_offer_id, tenant_id: tenantId });
           return { stop: true };
         }
 
-        // Check if SAME publisher is assigned to fallback offer
-        const fallbackAssignment = await assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
+        // Check if SAME publisher is assigned to fallback offer (CACHED)
+        const fallbackAssignment = await cacheService.getAssignment(assignment.publisher_id, fallbackOffer.id, tenantId);
         if (!fallbackAssignment || fallbackAssignment.status !== 'active') {
           logger.warn('[CAP] Fallback offer not assigned to publisher or inactive', {
             pub_id: assignment.publisher_id,

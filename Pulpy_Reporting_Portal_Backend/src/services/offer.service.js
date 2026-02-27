@@ -474,24 +474,24 @@ class OfferService {
   async getInternalOfferIdByPublicId(publicOfferId, tenantId) {
     if (publicOfferId == null || !tenantId) return null;
 
-    // 1. Try Public ID or Display ID
+    // 1. Direct Public ID Lookup (Optimized & Safe)
     const [publicRows] = await pool.query(
-      `SELECT id FROM (
-        SELECT id, public_offer_id, 
-        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
-        FROM offers o WHERE tenant_id = ?
-      ) t WHERE t.public_offer_id = ? OR t.display_id = ? LIMIT 1`,
-      [tenantId, publicOfferId, publicOfferId]
+      'SELECT id FROM offers WHERE tenant_id = ? AND public_offer_id = ? LIMIT 1',
+      [tenantId, publicOfferId]
     );
 
     if (publicRows?.[0]?.id) return publicRows[0].id;
 
-    // 2. Fallback to Internal ID
-    const [internalRows] = await pool.query(
-      'SELECT id FROM offers WHERE tenant_id = ? AND id = ? LIMIT 1',
-      [tenantId, publicOfferId]
-    );
-    return internalRows?.[0]?.id ?? null;
+    // 2. Fallback to Internal ID (only if numeric and clearly an ID)
+    if (!isNaN(publicOfferId)) {
+      const [internalRows] = await pool.query(
+        'SELECT id FROM offers WHERE tenant_id = ? AND id = ? LIMIT 1',
+        [tenantId, publicOfferId]
+      );
+      return internalRows?.[0]?.id ?? null;
+    }
+
+    return null;
   }
 
   async getOfferById(id, tenantId = null, internalOnly = false) {

@@ -12,32 +12,123 @@ const TTL = {
     CAP_COUNTERS: 14400, // 4 Hours
 };
 
+// --- LUA SCRIPTS ---
+/**
+ * Return codes:
+ *  1: Success (Allowed & Incremented)
+ *  0: Limit Reached (Blocked)
+ * -1: Key Missing (Trigger Hydration)
+ *  2: Already Processed (Idempotent success)
+ */
+const CAP_CHECK_SCRIPT = `
+local key = KEYS[1]
+local processedKey = KEYS[2]
+local limit = tonumber(ARGV[1])
+local amount = tonumber(ARGV[2])
+local idempotencyTTL = tonumber(ARGV[3])
+
+-- 1. Atomic Idempotency Guard
+-- Try to set processedKey only if it doesn't exist
+local isNew = redis.call('SET', processedKey, '1', 'NX', 'EX', idempotencyTTL)
+if not isNew then
+    return {2, redis.call('GET', key) or "0"}
+end
+
+-- 2. Existence Check (Fails-Safe/Closed)
+if redis.call('EXISTS', key) == 0 then
+    -- If key is missing, we must NOT increment. 
+    -- Return -1 so caller can trigger hydration.
+    return {-1, "0"}
+end
+
+-- 3. Safety Check
+local current = tonumber(redis.call('GET', key) or "0")
+if current >= limit then
+    return {0, tostring(current)}
+end
+
+-- 4. Atomic Increment
+local new_val = redis.call('INCRBYFLOAT', key, amount)
+return {1, tostring(new_val)}
+`;
+
+if (typeof redis.atomicCapCheck !== 'function') {
+    redis.defineCommand('atomicCapCheck', {
+        numberOfKeys: 2,
+        lua: CAP_CHECK_SCRIPT,
+    });
+}
+
 export class CacheService {
 
     // --- Reference Data Lookups (Read-Through) ---
 
     async getOffer(offerId, tenantId = null) {
-        // ✅ CRITICAL: Include tenant_id in cache key for tenant isolation
-        const key = tenantId
-            ? `ref:offer:${tenantId}:${offerId}`
-            : `ref:offer:${offerId}`;
+        // ✅ PRODUCTION GRADE: Split Static (Meta) vs Dynamic (Status)
+        const metaKey = tenantId ? `ref:offer:meta:${tenantId}:${offerId}` : `ref:offer:meta:${offerId}`;
+        const statusKey = tenantId ? `ref:offer:status:${tenantId}:${offerId}` : `ref:offer:status:${offerId}`;
+
         try {
-            const cached = await redis.hgetall(key);
-            if (cached && cached.id) {
-                // Redis returns strings; strictly typed fields might need conversion
-                return this._deserialize(cached);
+            // MGET for performance
+            const [cachedMeta, cachedStatus] = await Promise.all([
+                redis.hgetall(metaKey),
+                redis.get(statusKey)
+            ]);
+
+            if (cachedMeta && cachedMeta.id && cachedStatus) {
+                const offer = this._deserialize(cachedMeta);
+                offer.status = cachedStatus;
+                return offer;
             }
         } catch (e) {
             logger.warn(`Redis getOffer error: ${e.message}`);
         }
 
-        // ✅ CRITICAL: DB Fallback with tenant_id filtering
-        const offer = await offerService.getOfferById(offerId, tenantId);
+        // ✅ DB Fallback
+        const offer = await offerService.getOfferById(offerId, tenantId, true);
         if (offer) {
-            // Async Cache Population (don't block response)
-            this._cacheObject(key, offer, TTL.OFFER);
+            const { status, ...meta } = offer;
+            this._cacheObject(metaKey, meta, TTL.OFFER);
+            redis.setex(statusKey, TTL.OFFER, status);
         }
         return offer;
+    }
+
+    async getTenant(tenantId) {
+        const key = `ref:tenant:${tenantId}`;
+        try {
+            const cached = await redis.hgetall(key);
+            if (cached && cached.id) return cached;
+        } catch (e) { }
+
+        const [rows] = await pool.query('SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
+        const tenant = rows[0];
+        if (tenant) this._cacheObject(key, tenant, 3600); // 1 hour
+        return tenant;
+    }
+
+    async getInternalOfferId(publicId, tenantId) {
+        const key = `ref:offer_id_map:${tenantId}:${publicId}`;
+        try {
+            const cached = await redis.get(key);
+            if (cached) return parseInt(cached);
+        } catch (e) { }
+
+        const internalId = await offerService.getInternalOfferIdByPublicId(publicId, tenantId);
+        if (internalId) await redis.setex(key, 3600, internalId);
+        return internalId;
+    }
+
+    async getInternalPublisherId(publicId, tenantId) {
+        const key = `ref:pub_id_map:${tenantId}:${publicId}`;
+        try {
+            const cached = await redis.get(key);
+            if (cached) return parseInt(cached);
+        } catch (e) { }
+
+        const internalId = await publisherService.getInternalIdByPublicId(publicId, tenantId);
+        if (internalId) await redis.setex(key, 3600, internalId);
+        return internalId;
     }
 
     async getPublisher(publisherId, tenantId = null) {
@@ -84,20 +175,148 @@ export class CacheService {
 
     // --- Capping Logic (Redis Counters) ---
 
-    async getCapStatus(entityType, entityId, obj, tenantId) {
-        // entityType: 'offer' or 'publisher'
-        // capType: 'budget' or 'conversion'
-        // duration: 'daily', 'weekly', 'monthly'
+    /**
+     * PRODUCTION GRADE: Atomic Check-and-Increment with Idempotency & Hydration
+     */
+    async checkAndIncrCap(entityType, entityId, obj, amount, tenantId, uuid = null) {
+        const { key, limit, duration } = this._getCapConfig(entityType, entityId, obj, tenantId);
+        if (!key || !limit || limit <= 0) return { success: true, current: 0 };
 
+        const processedKey = uuid ? `cap:processed:${uuid}` : `cap:temp:${Math.random()}`;
+        const idempotencyTTL = 86400; // 24 hours
+
+        try {
+            // ARGV: [Limit, Amount, IdempotencyTTL]
+            let [code, current] = await redis.atomicCapCheck(key, processedKey, limit, amount, idempotencyTTL);
+
+            // Handle Missing Key (Trigger Hydration)
+            if (code === -1) {
+                logger.info(`[CAP] Cache miss or Flush detected for ${key}. Safeguarding via hydration...`);
+                await this._safeHydrate(key, entityType, entityId, obj, duration, tenantId);
+                // Retry once after hydration
+                [code, current] = await redis.atomicCapCheck(key, processedKey, limit, amount, idempotencyTTL);
+            }
+
+            return {
+                success: code === 1 || code === 2,
+                current: parseFloat(current),
+                idempotent: code === 2
+            };
+        } catch (e) {
+            logger.error(`[CAP] Critical Atomic error: ${e.message}`);
+            // FAIL-CLOSED: Block conversion if system is unreliable
+            return { success: false, current: 0, error: 'Redis System Failure' };
+        }
+    }
+
+    async getCapStatus(entityType, entityId, obj, tenantId) {
+        const { key, limit, duration } = this._getCapConfig(entityType, entityId, obj, tenantId);
+        if (!key || !limit) return { isHit: false, current: 0, limit: 0 };
+
+        try {
+            let current = await redis.get(key);
+            if (current === null) {
+                current = await this._safeHydrate(key, entityType, entityId, obj, duration, tenantId);
+            }
+            return {
+                isHit: parseFloat(current || 0) >= limit,
+                current: parseFloat(current || 0),
+                limit: limit
+            };
+        } catch (e) {
+            return { isHit: false, current: 0, limit: 0 };
+        }
+    }
+
+    /**
+     * SINGLE-FLIGHT HYDRATION with Redis Lock
+     */
+    async _safeHydrate(key, entityType, entityId, obj, duration, tenantId) {
+        const lockKey = `lock:hydrate:${key}`;
+
+        // 1. Acquire distributed lock (NX, EX 10s)
+        const lock = await redis.set(lockKey, '1', 'NX', 'EX', 10);
+
+        if (!lock) {
+            // Someone else is hydrating. Wait and check Redis.
+            for (let i = 0; i < 5; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                const current = await redis.get(key);
+                if (current !== null) return parseFloat(current);
+            }
+            throw new Error(`Hydration lock timeout for ${key}`);
+        }
+
+        try {
+            // Double check existence after lock acquired
+            const existing = await redis.get(key);
+            if (existing !== null) return parseFloat(existing);
+
+            // 2. Fetch from Aggregated Stats (Faster & Reliable)
+            const truth = await this._hydrateFromStats(entityType, entityId, obj, duration, tenantId);
+
+            // 3. Set with Long TTL (Deterministic Period)
+            let ttl = 172800; // 2 days for daily
+            if (duration === 'monthly') ttl = 3024000; // 35 days
+
+            if (duration === 'total') {
+                await redis.set(key, truth);
+                await redis.persist(key);
+            } else {
+                await redis.setex(key, ttl, truth);
+            }
+
+            return truth;
+        } finally {
+            await redis.del(lockKey);
+        }
+    }
+
+    async _hydrateFromStats(entityType, entityId, obj, duration, tenantId) {
+        const capType = obj.capping_type || (obj.total_cap > 0 ? 'conversion' : 'none');
+        const col = capType === 'budget' ? 'revenue' : 'approved_conversions';
+
+        // Base Query
+        let query = '';
+        let params = [entityId];
+
+        if (duration === 'daily') {
+            const today = new Date().toISOString().split('T')[0];
+            query = `SELECT COALESCE(SUM(${col}), 0) as val FROM daily_offer_stats WHERE offer_id = ? AND day = ?`;
+            params.push(today);
+        } else if (duration === 'monthly') {
+            const month = new Date().toISOString().slice(0, 7) + '%';
+            query = `SELECT COALESCE(SUM(${col}), 0) as val FROM daily_offer_stats WHERE offer_id = ? AND day LIKE ?`;
+            params.push(month);
+        } else {
+            // Total Cap: Sum all daily stats
+            query = `SELECT COALESCE(SUM(${col}), 0) as val FROM daily_offer_stats WHERE offer_id = ?`;
+        }
+
+        if (tenantId) {
+            query += ' AND tenant_id = ?';
+            params.push(tenantId);
+        }
+
+        try {
+            const [rows] = await pool.query(query, params);
+            return parseFloat((Array.isArray(rows) ? rows[0] : rows).val || 0);
+        } catch (e) {
+            logger.error(`Stats Hydration Error: ${e.message}`);
+            // Fallback to slow sum of conversions if stats table fails
+            return this._hydrateCapFromDB(entityType, entityId, capType, duration, tenantId);
+        }
+    }
+
+    _getCapConfig(entityType, entityId, obj, tenantId) {
         const capType = obj.capping_type;
-        const duration = obj.capping_duration;
+        const duration = obj.capping_duration || 'total';
 
         let limit = 0;
         if (entityType === 'offer') {
             if (capType === 'budget') limit = parseFloat(obj.budget_cap || 0);
             else if (capType === 'conversion') limit = parseInt(obj.conversion_cap || 0);
         } else {
-            // Publisher Assignment (Support both raw DB rows and formatted objects)
             if (capType === 'budget') {
                 limit = parseFloat(obj.capping_amount ?? obj.capping_budget_amount ?? 0);
             } else if (capType === 'conversion') {
@@ -105,68 +324,21 @@ export class CacheService {
             }
         }
 
-        if (!capType || capType === 'none' || !duration || limit <= 0) {
-            return { isHit: false, current: 0, limit: 0 };
+        if (!capType || capType === 'none' || limit <= 0) {
+            if (obj.total_cap > 0) {
+                return {
+                    key: `cap:${tenantId || 0}:offer:${entityId}:total:count`,
+                    limit: parseFloat(obj.total_cap),
+                    duration: 'total'
+                };
+            }
+            return { key: null, limit: null, duration: null };
         }
 
-        const key = this._getCapKey(entityType, entityId, capType, duration, tenantId);
-        let current = await redis.get(key);
-
-        if (current === null) {
-            current = await this._hydrateCapFromDB(entityType, entityId, capType, duration, tenantId);
-            // Set TTL based on duration
-            let ttl = 86400; // default 1 day
-            if (duration === 'weekly') ttl = 604800;
-            if (duration === 'monthly') ttl = 2678400;
-            await redis.setex(key, ttl, current);
-        }
-
-        return {
-            isHit: parseFloat(current) >= limit,
-            current: parseFloat(current),
-            limit: limit
-        };
-    }
-
-    async incrementCap(entityType, entityId, obj, amount, tenantId) {
-        const capType = obj.capping_type;
-        const duration = obj.capping_duration;
-
-        if (!capType || capType === 'none' || !duration) return;
-
-        let incrementValue = 0;
-        // Rules:
-        // Offer Budget = Revenue (amount)
-        // Offer Conversion = 1
-        // Publisher Budget = Payout (amount check logic should pass payout here)
-        // Publisher Conversion = 1
-
-        if (entityType === 'offer' && capType === 'budget') incrementValue = amount; // Revenue
-        else if (entityType === 'offer' && capType === 'conversion') incrementValue = 1;
-        else if (entityType === 'publisher' && capType === 'budget') incrementValue = amount; // Payout
-        else if (entityType === 'publisher' && capType === 'conversion') incrementValue = 1;
-
-        if (incrementValue <= 0) return;
-
-        const key = this._getCapKey(entityType, entityId, capType, duration, tenantId);
-
-        // Update Redis
-        try {
-            await redis.incrbyfloat(key, incrementValue);
-            // Ensure TTL is refreshed or set if key was missing (concurrently created?)
-            // Usually we rely on init. If we incr a non-existent key, it starts at 0+inc.
-            // We should ensure extensive TTL if new. Not critical if short overlap.
-        } catch (e) {
-            logger.warn(`Redis incr cap error: ${e.message}`);
-        }
-    }
-
-    _getCapKey(entityType, entityId, capType, duration, tenantId) {
         const now = new Date();
-        // Use IST (UTC+05:30)
         const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-
         let period = '';
+
         if (duration === 'daily') {
             period = istTime.toISOString().split('T')[0];
         } else if (duration === 'weekly') {
@@ -177,10 +349,16 @@ export class CacheService {
             const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
             period = `${d.getUTCFullYear()}-W${weekNo}`;
         } else if (duration === 'monthly') {
-            period = istTime.toISOString().slice(0, 7); // YYYY-MM
+            period = istTime.toISOString().slice(0, 7);
+        } else {
+            period = 'total';
         }
 
-        return `cap:${tenantId}:${entityType}:${entityId}:${capType}:${duration}:${period}`;
+        return {
+            key: `cap:${tenantId || 0}:${entityType}:${entityId}:${capType}:${duration}:${period}`,
+            limit,
+            duration
+        };
     }
 
     async _hydrateCapFromDB(entityType, entityId, capType, duration, tenantId) {
@@ -301,10 +479,9 @@ export class CacheService {
     // --- Invalidation ---
 
     async invalidateOffer(offerId, tenantId) {
-        const key = tenantId
-            ? `ref:offer:${tenantId}:${offerId}`
-            : `ref:offer:${offerId}`;
-        await redis.del(key);
+        const metaKey = tenantId ? `ref:offer:meta:${tenantId}:${offerId}` : `ref:offer:meta:${offerId}`;
+        const statusKey = tenantId ? `ref:offer:status:${tenantId}:${offerId}` : `ref:offer:status:${offerId}`;
+        await redis.del(metaKey, statusKey);
     }
 
     async invalidatePublisher(publisherId, tenantId) {
