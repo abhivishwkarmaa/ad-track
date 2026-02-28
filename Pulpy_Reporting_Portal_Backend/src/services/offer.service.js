@@ -492,6 +492,7 @@ class OfferService {
       [tenantId, publicOfferId]
     );
     return internalRows?.[0]?.id ?? null;
+    
   }
 
   async getOfferById(id, tenantId = null, internalOnly = false) {
