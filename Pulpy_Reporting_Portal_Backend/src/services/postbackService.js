@@ -97,6 +97,8 @@ function checkOfferValidity(offer) {
 
 const APPROVAL_KEY_PREFIX = 'approval';
 const APPROVAL_SCRIPT_KEY_COUNT = 3;
+const CLICK_EXPIRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CLICK_EXPIRED_STATUS = 'click_expired';
 
 const DETERMINISTIC_APPROVAL_LUA = `
 local totalKey = KEYS[1]
@@ -182,6 +184,13 @@ const buildApprovalKeys = ({ tenantId, offerId, publisherId, assignmentId }) => 
 
 const generateConversionUuid = (tenantId, offerId, publisherId) => {
   return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
+};
+
+const isClickOlderThan24Hours = (clickTimeValue) => {
+  if (!clickTimeValue) return false;
+  const clickTime = new Date(clickTimeValue).getTime();
+  if (!Number.isFinite(clickTime)) return false;
+  return (Date.now() - clickTime) >= CLICK_EXPIRY_WINDOW_MS;
 };
 
 export class PostbackService {
@@ -355,6 +364,46 @@ export class PostbackService {
             click_id: click_id,
             rcid: rcid
           });
+
+          const redisClickTimestamp = redisClick.created_at || redisClick.timestamp;
+          if (isClickOlderThan24Hours(redisClickTimestamp)) {
+            const expiredConversionData = {
+              click_uuid: click_id,
+              offer_id: clickData.offer_id,
+              publisher_id: clickData.publisher_id,
+              publisher_offer_id: clickData.publisher_offer_id,
+              tenant_id: tenantId,
+              rcid: rcid || redisClick.rcid || uuidv4(),
+              status: CLICK_EXPIRED_STATUS,
+              amount: 0,
+              payout: 0,
+              ip: extractIP(request),
+              timestamp: new Date().toISOString(),
+              postback_payload: JSON.stringify({ query, headers: request.headers }),
+              callback_url: '',
+              tid: redisClick.tid || '',
+              force_reject: redisClick.force_reject
+            };
+
+            await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(expiredConversionData));
+            await redis.xadd('stream:conversions', '*',
+              'click_uuid', click_id,
+              'timestamp', new Date().toISOString()
+            );
+
+            logger.info('⏰ Conversion rejected: click expired (Redis path)', {
+              click_id,
+              tenantId,
+              click_timestamp: redisClickTimestamp
+            });
+
+            return {
+              success: false,
+              message: 'Click expired (older than 24 hours)',
+              error_type: 'click_expired',
+              duplicate: false
+            };
+          }
 
           // 2. Validate Offer / Fetch Payout (in-file lookup by internal id)
           const offer = await getOfferByInternalId(clickData.offer_id, tenantId);
@@ -601,6 +650,75 @@ export class PostbackService {
 
       if (!click && !rcid) {
         throw new Error('Cannot process postback without click_id or rcid');
+      }
+
+      if (click && isClickOlderThan24Hours(click.created_at || click.timestamp)) {
+        const expiredOfferId = click.offer_id;
+        const expiredPublisherId = click.publisher_id;
+        const expiredPublisherOfferId = click.publisher_offer_id;
+        const expiredConversionUuid = generateConversionUuid(tenantId, expiredOfferId, expiredPublisherId);
+        const expiredConversionAmount = 0;
+        const expiredConversionPayout = 0;
+        const expiredConversionRcid = rcid || click?.rcid || uuidv4();
+
+        await pool.query(
+          `INSERT INTO conversions (
+            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+          [
+            expiredConversionUuid,
+            click.click_uuid,
+            expiredOfferId,
+            expiredPublisherId,
+            expiredPublisherOfferId,
+            tenantId,
+            expiredConversionRcid,
+            CLICK_EXPIRED_STATUS,
+            expiredConversionAmount,
+            expiredConversionPayout,
+            extractIP(request),
+            JSON.stringify({
+              query,
+              headers: request.headers,
+              timestamp: new Date().toISOString(),
+              rejection_reason: 'click_expired',
+            }),
+          ]
+        );
+
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const statsPipe = redis.pipeline();
+          const statsKeyOffer = `stats:offer:${expiredOfferId}:${tenantId || 0}:${today}`;
+          const statsKeyPub = `stats:pub:${expiredPublisherId || 0}:${tenantId || 0}:${today}`;
+
+          statsPipe.incr(`${statsKeyOffer}:conversions`);
+          statsPipe.incr(`${statsKeyPub}:conversions`);
+          statsPipe.incr(`${statsKeyOffer}:rejected_conversions`);
+          statsPipe.incr(`${statsKeyPub}:rejected_conversions`);
+
+          await statsPipe.exec();
+        } catch (statsErr) {
+          logger.error('Failed to update stats for click_expired conversion:', statsErr);
+        }
+
+        await this.updateDailyStats(expiredOfferId, expiredConversionAmount, expiredConversionPayout, CLICK_EXPIRED_STATUS);
+
+        logger.info('⏰ Conversion rejected: click expired (DB path)', {
+          click_id,
+          click_uuid: click.click_uuid,
+          tenantId,
+          click_created_at: click.created_at || click.timestamp
+        });
+
+        return {
+          success: false,
+          message: 'Conversion rejected(click_expired)',
+          error_type: 'click_expired',
+          conversion: null,
+          duplicate: false,
+        };
       }
 
       // Get offer and assignment
@@ -879,7 +997,7 @@ export class PostbackService {
         } else if (normalizedStatus === 'pending') {
           statsPipe.incr(`${statsKeyOffer}:pending_conversions`);
           statsPipe.incr(`${statsKeyPub}:pending_conversions`);
-        } else if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_cap') {
+        } else if (normalizedStatus === 'rejected' || normalizedStatus === 'rejected_cap' || normalizedStatus === CLICK_EXPIRED_STATUS) {
           statsPipe.incr(`${statsKeyOffer}:rejected_conversions`);
           statsPipe.incr(`${statsKeyPub}:rejected_conversions`);
         }
@@ -1070,7 +1188,7 @@ export class PostbackService {
       const conversionInc = 1;
       const approvedConversionInc = status === 'approved' ? 1 : 0;
       const pendingConversionInc = status === 'pending' ? 1 : 0;
-      const rejectedConversionInc = (status === 'rejected' || status === 'rejected_cap') ? 1 : 0;
+      const rejectedConversionInc = (status === 'rejected' || status === 'rejected_cap' || status === CLICK_EXPIRED_STATUS) ? 1 : 0;
 
       // Profit
       const profit = finalRevenue - finalPayout;
@@ -1140,7 +1258,7 @@ export class PostbackService {
     // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COALESCE(SUM(amount), 0) as total_revenue
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {
@@ -1183,7 +1301,7 @@ export class PostbackService {
     // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COUNT(*) as conversion_count
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND ${dateCondition}`;
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
     const params = [offerId, publisherId];
 
     if (tenantId) {

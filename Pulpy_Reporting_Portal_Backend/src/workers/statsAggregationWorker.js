@@ -99,7 +99,7 @@ async function aggregateDay(istDate) {
         COUNT(*)                                                                AS total_conversions,
         COUNT(CASE WHEN status = 'approved'                    THEN 1 END)     AS approved_conversions,
         COUNT(CASE WHEN status = 'pending'                     THEN 1 END)     AS pending_conversions,
-        COUNT(CASE WHEN status IN ('rejected','rejected_cap')  THEN 1 END)     AS rejected_conversions,
+        COUNT(CASE WHEN status IN ('rejected','rejected_cap','click_expired')  THEN 1 END)     AS rejected_conversions,
         COALESCE(SUM(amount), 0)                                               AS revenue,
         COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout,
         COALESCE(SUM(CASE WHEN status = 'pending'  THEN payout ELSE 0 END), 0) AS pending_payout

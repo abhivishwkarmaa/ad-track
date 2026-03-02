@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { dashboardAPI, offersAPI, publishersAPI, assignmentsAPI, authAPI, getAccessToken } from '../../services/api';
+import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './Reports.css';
@@ -83,6 +83,52 @@ const AVAILABLE_METRICS = [
     { id: 'profit', label: 'Profit' }
 ];
 
+const DATE_PRESET_OPTIONS = [
+    { id: 'today', label: 'Today' },
+    { id: 'yesterday', label: 'Yesterday' },
+    { id: 'this_week', label: 'This Week' },
+    { id: 'this_month', label: 'This Month' },
+    { id: 'last_month', label: 'Last Month' },
+    { id: 'all', label: 'All Time' },
+    { id: 'custom', label: 'Custom Range' },
+];
+
+const toYmd = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const getPresetDateRange = (preset) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (preset === 'today') return { from: toYmd(today), to: toYmd(today), allDates: false };
+    if (preset === 'yesterday') {
+        const y = new Date(today);
+        y.setDate(y.getDate() - 1);
+        return { from: toYmd(y), to: toYmd(y), allDates: false };
+    }
+    if (preset === 'this_week') {
+        const start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        return { from: toYmd(start), to: toYmd(today), allDates: false };
+    }
+    if (preset === 'this_month') {
+        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        return { from: toYmd(start), to: toYmd(today), allDates: false };
+    }
+    if (preset === 'last_month') {
+        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const end = new Date(today.getFullYear(), today.getMonth(), 0);
+        return { from: toYmd(start), to: toYmd(end), allDates: false };
+    }
+    if (preset === 'all') return { from: '', to: '', allDates: true };
+
+    return { from: '', to: '', allDates: false };
+};
+
 function DetailedReports() {
     const toast = useToast();
     const navigate = useNavigate();
@@ -103,6 +149,10 @@ function DetailedReports() {
         totalPages: 1
     });
 
+    const [datePreset, setDatePreset] = useState(
+        searchParams.get('date_preset') ||
+        (searchParams.get('all_dates') === 'true' ? 'all' : (searchParams.get('date_from') || searchParams.get('date_to') ? 'custom' : 'today'))
+    );
     const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '');
     const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '');
     const [offerFilter, setOfferFilter] = useState(searchParams.get('offer_id') || 'all');
@@ -150,6 +200,13 @@ function DetailedReports() {
         fetchData();
     }, []);
 
+    useEffect(() => {
+        if (datePreset === 'custom') return;
+        const range = getPresetDateRange(datePreset);
+        setDateFrom(range.from);
+        setDateTo(range.to);
+    }, [datePreset]);
+
     const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics) => {
         try {
             setLoading(true);
@@ -160,8 +217,16 @@ function DetailedReports() {
                 limit: pagination.limit
             };
 
-            if (dateFrom) params.date_from = dateFrom;
-            if (dateTo) params.date_to = dateTo;
+            const resolvedRange = datePreset === 'custom'
+                ? { from: dateFrom, to: dateTo, allDates: false }
+                : getPresetDateRange(datePreset);
+
+            if (resolvedRange.allDates) {
+                params.all_dates = 'true';
+            } else {
+                if (resolvedRange.from) params.date_from = resolvedRange.from;
+                if (resolvedRange.to) params.date_to = resolvedRange.to;
+            }
             if (offerFilter !== 'all') params.offer_id = offerFilter;
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
             if (statusFilter !== 'all') params.status = statusFilter;
@@ -188,8 +253,10 @@ function DetailedReports() {
             const urlParams = new URLSearchParams();
             urlParams.set('page', params.page);
             urlParams.set('limit', params.limit);
-            if (dateFrom) urlParams.set('date_from', dateFrom);
-            if (dateTo) urlParams.set('date_to', dateTo);
+            urlParams.set('date_preset', datePreset);
+            if (params.all_dates === 'true') urlParams.set('all_dates', 'true');
+            if (params.date_from) urlParams.set('date_from', params.date_from);
+            if (params.date_to) urlParams.set('date_to', params.date_to);
             if (offerFilter !== 'all') urlParams.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') urlParams.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') urlParams.set('status', statusFilter);
@@ -266,8 +333,14 @@ function DetailedReports() {
 
     const getStatusBadge = (status) => {
         if (!status) return null;
-        const statusClass = status.toLowerCase();
-        return <span className={`report-status ${statusClass}`}>{status}</span>;
+        const normalizedStatus = String(status).toLowerCase();
+        const statusClass = normalizedStatus.replace(/\s+/g, '_');
+        let statusLabel = String(status).replace(/_/g, ' ');
+
+        if (normalizedStatus === 'click_expired') statusLabel = 'Rejected (Click Expired)';
+        if (normalizedStatus === 'rejected_cap') statusLabel = 'Rejected (Cap Hit)';
+
+        return <span className={`report-status ${statusClass}`}>{statusLabel}</span>;
     };
 
     const handlePageChange = (newPage) => {
@@ -279,8 +352,16 @@ function DetailedReports() {
             toast.info('Preparing export...');
 
             const params = new URLSearchParams();
-            if (dateFrom) params.set('date_from', dateFrom);
-            if (dateTo) params.set('date_to', dateTo);
+            const resolvedRange = datePreset === 'custom'
+                ? { from: dateFrom, to: dateTo, allDates: false }
+                : getPresetDateRange(datePreset);
+
+            if (resolvedRange.allDates) {
+                params.set('all_dates', 'true');
+            } else {
+                if (resolvedRange.from) params.set('date_from', resolvedRange.from);
+                if (resolvedRange.to) params.set('date_to', resolvedRange.to);
+            }
             if (offerFilter !== 'all') params.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') params.set('status', statusFilter);
@@ -293,28 +374,7 @@ function DetailedReports() {
             if (trafficType === 'referred') params.set('hasReferrer', 'true');
             if (selectedDims.length > 0) params.set('groupBy', selectedDims.join(','));
             if (selectedMetrics.length > 0) params.set('columns', selectedMetrics.join(','));
-
-            params.set('export', 'csv');
-
-            // Direct download link logic
-            // We use fetch with blob to handle auth headers if needed, or just window.open if cookies usage
-            // Since we use Bearer token, we must use fetch
-
-            if (!getAccessToken()) {
-                await authAPI.refresh();
-            }
-            const token = getAccessToken();
-
-            const response = await fetch(`/api/admin/reports/detailed?${params.toString()}`, {
-                headers: {
-                    ...(token && { 'Authorization': `Bearer ${token}` })
-                },
-                credentials: 'include'
-            });
-
-            if (!response.ok) throw new Error('Export failed');
-
-            const blob = await response.blob();
+            const blob = await dashboardAPI.exportDetailedCSV(Object.fromEntries(params.entries()));
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -326,7 +386,7 @@ function DetailedReports() {
             toast.success('Export downloaded!');
         } catch (error) {
             console.error('Export error:', error);
-            toast.error('Failed to export data');
+            toast.error(error.message || 'Failed to export data');
         }
     };
 
@@ -413,11 +473,31 @@ function DetailedReports() {
                     </div>
                     <div className="filters-row">
                         <div className="filter-group">
+                            <label>Date Preset</label>
+                            <select className="form-control" value={datePreset} onChange={e => setDatePreset(e.target.value)}>
+                                {DATE_PRESET_OPTIONS.map(option => (
+                                    <option key={option.id} value={option.id}>{option.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="filter-group">
                             <label>Date Range</label>
                             <div className="date-inputs">
-                                <input type="date" className="form-control" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+                                <input
+                                    type="date"
+                                    className="form-control"
+                                    value={dateFrom}
+                                    onChange={e => setDateFrom(e.target.value)}
+                                    disabled={datePreset !== 'custom'}
+                                />
                                 <span className="separator">to</span>
-                                <input type="date" className="form-control" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                                <input
+                                    type="date"
+                                    className="form-control"
+                                    value={dateTo}
+                                    onChange={e => setDateTo(e.target.value)}
+                                    disabled={datePreset !== 'custom'}
+                                />
                             </div>
                         </div>
                         <div className="filter-group">
@@ -441,6 +521,8 @@ function DetailedReports() {
                                 <option value="approved">Approved</option>
                                 <option value="pending">Pending</option>
                                 <option value="rejected">Rejected</option>
+                                <option value="rejected_cap">Rejected (Cap Hit)</option>
+                                <option value="click_expired">Rejected (Click Expired)</option>
                             </select>
                         </div>
                         <div className="filter-group">

@@ -102,7 +102,9 @@ export class ReportService {
       // Dimension Mapping
       const dimMap = {
         'offer_id': 'o.public_offer_id as offer_id, o.name as offer_name',
-        'publisher_id': 'p.id as publisher_id, p.company_name as publisher_name, p.email as publisher_email',
+        'publisher_id': `c.publisher_id as publisher_id,
+          COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_name,
+          COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', c.publisher_id, '@unknown')) as publisher_email`,
         'advertiser_id': 'o.advertiser_id',
         'ip': 'c.ip',
         'country': 'c.country',
@@ -143,7 +145,7 @@ export class ReportService {
             if (dim === 'date') groups.push(dimMap['date']);
             else if (dim === 'hour') groups.push(dimMap['hour']);
             else if (dim === 'offer_id') { groups.push('o.public_offer_id'); groups.push('o.name'); }
-            else if (dim === 'publisher_id') { groups.push('p.id'); groups.push('p.company_name'); groups.push('p.email'); }
+            else if (dim === 'publisher_id') { groups.push('c.publisher_id'); groups.push('p.company_name'); groups.push('p.email'); }
             else if (dim === 'advertiser_id') groups.push('o.advertiser_id');
             else if (dim === 'isp' || dim === 'city' || dim === 'region') { } // Cannot group by NULL literals easily or pointless
             else groups.push(dimMap[dim].split(' as ')[0]);
@@ -168,7 +170,7 @@ export class ReportService {
                      FROM clicks c
                      LEFT JOIN offers o ON c.offer_id = o.id
                      LEFT JOIN publishers p ON c.publisher_id = p.id
-                     LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
+                     LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id
                      WHERE 1=1 `;
 
         const filtersBuild = this.buildWhereClause(filters, tenantId);
@@ -178,17 +180,33 @@ export class ReportService {
           query += ` GROUP BY ${groups.join(', ')}`;
         }
 
-        const countQuery = `SELECT COUNT(*) as total FROM (${query}) as agg`; // Inefficient but works for dynamic grouping
-
-        const [countRows] = await pool.query(countQuery, filtersBuild.params);
-        const total = countRows[0]?.total || 0;
-
         // --- EXPORT LOGIC ---
         if (filters.export === 'csv' || filters.export === 'true') {
           const exportQuery = query + ` LIMIT ? OFFSET ?`;
           const [exportRows] = await pool.query(exportQuery, [...filtersBuild.params, 100000, 0]); // Limit large export
           return { data: exportRows, isExport: true, sql: exportQuery, params: [...filtersBuild.params, 100000, 0] };
         }
+
+        // Faster count query: only count grouped keys, avoid metric SELECT and avoid conversions join unless required.
+        const needsConvJoinForCount =
+          Boolean(filters.status) ||
+          Boolean(filters.rcid) ||
+          Boolean(filters.search);
+
+        let countBaseQuery = `
+          SELECT 1
+          FROM clicks c
+          LEFT JOIN offers o ON c.offer_id = o.id
+          LEFT JOIN publishers p ON c.publisher_id = p.id
+          ${needsConvJoinForCount ? 'LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id' : ''}
+          WHERE 1=1
+          ${filtersBuild.clause}
+        `;
+        if (groups.length > 0) countBaseQuery += ` GROUP BY ${groups.join(', ')}`;
+
+        const countQuery = `SELECT COUNT(*) as total FROM (${countBaseQuery}) as agg`;
+        const [countRows] = await pool.query(countQuery, filtersBuild.params);
+        const total = countRows[0]?.total || 0;
 
         query += ` LIMIT ? OFFSET ?`;
         const [rows] = await pool.query(query, [...filtersBuild.params, limit, offset]);
@@ -214,7 +232,7 @@ export class ReportService {
           c.publisher_id,
           p.public_publisher_id,
           p.email as publisher_email,
-          p.company_name as publisher_company,
+          COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_company,
           c.ip,
           c.x_forwarded_for,
           c.user_agent,
@@ -309,19 +327,23 @@ export class ReportService {
     }
 
     // ✅ Date range — index-safe BETWEEN on raw UTC created_at (no DATE() wrapping)
-    // Default: today only (IST) — prevents open-ended full table scan
+    // Default is today unless all_dates=true (then no date restriction)
+    const allDates = filters.all_dates === true || filters.all_dates === 'true';
     const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
     const fromDate = filters.date_from || todayIST;
     const toDate = filters.date_to || todayIST;
-    const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-    const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-    clause += ' AND c.created_at BETWEEN ? AND ?';
-    params.push(utcStart, utcEnd);
+
+    if (!allDates) {
+      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      clause += ' AND c.created_at BETWEEN ? AND ?';
+      params.push(utcStart, utcEnd);
+    }
 
     // ✅ HOUR filter — index-safe: compute UTC boundaries in JS, use BETWEEN on raw column
     // Old: HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?  ← breaks index
     // New: c.created_at BETWEEN <utc_hour_start> AND <utc_hour_end>  ← index-safe
-    if (filters.hour !== undefined && filters.date_from) {
+    if (!allDates && filters.hour !== undefined && filters.date_from) {
       const h = parseInt(filters.hour, 10);
       const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
@@ -483,7 +505,7 @@ export class ReportService {
             COUNT(DISTINCT id)                                                                AS total_conversions,
             COUNT(DISTINCT CASE WHEN status = 'approved'     THEN id END)                    AS approved_conversions,
             COUNT(DISTINCT CASE WHEN status = 'pending'      THEN id END)                    AS pending_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected'     THEN id END)                    AS rejected_conversions,
+            COUNT(DISTINCT CASE WHEN status IN ('rejected','click_expired') THEN id END)     AS rejected_conversions,
             COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END)                    AS rejected_cap_conversions,
             COALESCE(SUM(amount), 0)                                                         AS total_revenue,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout  ELSE 0 END), 0)          AS total_payout,

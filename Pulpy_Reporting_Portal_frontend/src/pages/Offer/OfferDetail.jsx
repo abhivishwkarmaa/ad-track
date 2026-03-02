@@ -348,6 +348,19 @@ function OfferDetail() {
         }, 'en-US');
     };
 
+    const formatConversionStatus = (status) => {
+        if (!status) return '-';
+        const normalized = String(status).toLowerCase();
+        if (normalized === 'click_expired') return 'Rejected (Click Expired)';
+        if (normalized === 'rejected_cap') return 'Rejected (Cap Hit)';
+        return String(status).replace(/_/g, ' ');
+    };
+
+    const getStatusClass = (status) => {
+        if (!status) return '';
+        return String(status).toLowerCase().replace(/\s+/g, '_');
+    };
+
     return (
         <div className="offer-page">
             <div className="offer-header">
@@ -449,6 +462,10 @@ function OfferDetail() {
                     <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
                         <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Pending Conversions</div>
                         <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffb800' }}>{stats.pending_conversions || 0}</div>
+                    </div>
+                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Rejected Conversions</div>
+                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#F44336' }}>{stats.rejected_conversions || 0}</div>
                     </div>
                     <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Conversion Rate</div>
@@ -1147,8 +1164,8 @@ function OfferDetail() {
                                         <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{conversion.conversion_uuid}</td>
                                         <td>{conversion.publisher_email}</td>
                                         <td>
-                                            <span className={`offer-status ${conversion.status?.toLowerCase()}`}>
-                                                {conversion.status}
+                                            <span className={`offer-status ${getStatusClass(conversion.status)}`}>
+                                                {formatConversionStatus(conversion.status)}
                                             </span>
                                         </td>
                                         <td>{offer.offer_currency} {conversion.amount}</td>

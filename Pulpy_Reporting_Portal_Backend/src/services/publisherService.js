@@ -353,7 +353,7 @@ export class PublisherService {
           SELECT 
             c.publisher_id,
             COUNT(DISTINCT c.id) as clicks,
-            COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' THEN conv.id END) as conversions,
+            COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired' THEN conv.id END) as conversions,
             
             -- Revenue: ALL (Advertiser Revenue - inc. Rejected)
             COALESCE(SUM(conv.amount), 0) as radius_revenue,
@@ -399,7 +399,7 @@ export class PublisherService {
       const summaryQuery = `
         SELECT 
           COUNT(DISTINCT c.id) as total_clicks,
-          COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' THEN conv.id END) as total_conversions,
+          COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired' THEN conv.id END) as total_conversions,
           COALESCE(SUM(conv.amount), 0) as total_revenue,
           COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_payout,
           COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_profit

@@ -491,7 +491,7 @@ async function updateDailyStats(items) {
             g.payout += parseFloat(c.payout || 0); // Payout only if approved
         } else if (status === 'pending') {
             g.pending += 1;
-        } else if (status === 'rejected' || status === 'rejected_cap') {
+        } else if (status === 'rejected' || status === 'rejected_cap' || status === 'click_expired') {
             g.rejected += 1;
         }
     }
@@ -540,7 +540,7 @@ async function fireAffiliatePostbacks(items) {
     const promises = items.map(async (item) => {
         const c = item.data;
         const normalizedStatus = (c.status || '').toString().toLowerCase();
-        // STRICT: Affiliate postback ONLY for approved conversions. Never for pending/rejected/rejected_cap.
+        // STRICT: Affiliate postback ONLY for approved conversions. Never for pending/rejected/rejected_cap/click_expired.
         if (normalizedStatus !== 'approved' || !c.callback_url) return;
 
         try {

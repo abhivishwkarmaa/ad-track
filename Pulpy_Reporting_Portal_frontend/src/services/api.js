@@ -315,6 +315,34 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/detailed?${queryString}`, {}, meta);
     },
+    exportDetailedCSV: async (params = {}) => {
+        const queryString = new URLSearchParams({ ...params, export: 'csv' }).toString();
+        const endpoint = `/api/admin/reports/detailed?${queryString}`;
+
+        const requestCsv = async (token) => {
+            return fetch(`${BASE_URL}${endpoint}`, {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                    ...(token && { Authorization: `Bearer ${token}` }),
+                },
+            });
+        };
+
+        let response = await requestCsv(accessToken);
+        if (response.status === 401) {
+            const refreshed = await refreshAccessToken();
+            if (!refreshed) throw new Error('Session expired. Please login again.');
+            response = await requestCsv(accessToken);
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || `CSV export failed (${response.status})`);
+        }
+
+        return response.blob();
+    },
     getPublisherConversions: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`);

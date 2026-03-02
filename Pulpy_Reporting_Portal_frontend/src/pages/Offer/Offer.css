@@ -258,6 +258,17 @@
     color: #4CAF50;
 }
 
+.offer-status.rejected,
+.offer-status.rejected_cap {
+    background: rgba(244, 67, 54, 0.15);
+    color: #F44336;
+}
+
+.offer-status.click_expired {
+    background: rgba(121, 85, 72, 0.15);
+    color: #795548;
+}
+
 .offer-status-select {
     display: inline-block;
     padding: 6px 12px;

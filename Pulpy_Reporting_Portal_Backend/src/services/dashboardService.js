@@ -395,7 +395,7 @@ export class DashboardService {
         FROM publishers p
         LEFT JOIN conversions conv ON conv.publisher_id = p.id
           AND conv.created_at BETWEEN ? AND ?
-          AND conv.status != 'rejected' AND conv.status != 'rejected_cap'
+          AND conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired'
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         GROUP BY p.id, p.company_name, p.first_name, p.email
         HAVING conversions > 0
