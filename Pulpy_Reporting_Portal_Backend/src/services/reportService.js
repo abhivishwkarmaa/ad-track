@@ -193,8 +193,6 @@ export class ReportService {
           if (selectParts.length === 3) selectParts.push('COALESCE(ca.clicks, 0) as clicks');
 
           const countQuery = `SELECT COUNT(DISTINCT c.publisher_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
-          const [countRows] = await pool.query(countQuery, clickParams);
-          const total = countRows[0]?.total || 0;
 
           // Export keeps full dataset behavior, but query is still pre-aggregated and avoids click_uuid joins.
           if (filters.export === 'csv' || filters.export === 'true') {
@@ -251,7 +249,13 @@ export class ReportService {
             ORDER BY clicks DESC, c.publisher_id ASC
             LIMIT ? OFFSET ?
           `;
-          const [publisherRows] = await pool.query(topPublishersQuery, [...clickParams, limit, offset]);
+          const [countResult, publisherResult] = await Promise.all([
+            pool.query(countQuery, clickParams),
+            pool.query(topPublishersQuery, [...clickParams, limit, offset])
+          ]);
+          const countRows = countResult[0];
+          const publisherRows = publisherResult[0];
+          const total = countRows[0]?.total || 0;
           const publisherIds = publisherRows.map(r => r.publisher_id).filter(Boolean);
 
           if (publisherIds.length === 0) {
@@ -262,7 +266,7 @@ export class ReportService {
             };
           }
 
-          const [publisherMetaRows] = await pool.query(
+          const publisherMetaPromise = pool.query(
             `SELECT p.id as publisher_id,
                     COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
                     COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
@@ -270,11 +274,10 @@ export class ReportService {
              WHERE p.id IN (?)`,
             [publisherIds]
           );
-          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
 
-          let conversionMap = new Map();
-          if (needsConversionMetrics) {
-            const conversionsForPageQuery = `
+          const conversionPromise = needsConversionMetrics
+            ? pool.query(
+              `
               SELECT
                 conv.publisher_id,
                 COUNT(*) as conversions,
@@ -288,8 +291,18 @@ export class ReportService {
               FROM conversions conv
               WHERE ${convWhere.join(' AND ')} AND conv.publisher_id IN (?)
               GROUP BY conv.publisher_id
-            `;
-            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, publisherIds]);
+            `,
+              [...convParams, publisherIds]
+            )
+            : Promise.resolve([[]]);
+
+          const [publisherMetaResult, conversionResult] = await Promise.all([publisherMetaPromise, conversionPromise]);
+          const publisherMetaRows = publisherMetaResult[0];
+          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const conversionRows = conversionResult[0];
             conversionMap = new Map(conversionRows.map(r => [r.publisher_id, r]));
           }
 
@@ -366,8 +379,6 @@ export class ReportService {
             wantsMetric('approved_payout');
 
           const countQuery = `SELECT COUNT(DISTINCT c.offer_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
-          const [countRows] = await pool.query(countQuery, clickParams);
-          const total = countRows[0]?.total || 0;
 
           if (filters.export === 'csv' || filters.export === 'true') {
             let exportQuery = `
@@ -421,7 +432,13 @@ export class ReportService {
             ORDER BY clicks DESC, c.offer_id ASC
             LIMIT ? OFFSET ?
           `;
-          const [offerRows] = await pool.query(topOffersQuery, [...clickParams, limit, offset]);
+          const [countResult, offerResult] = await Promise.all([
+            pool.query(countQuery, clickParams),
+            pool.query(topOffersQuery, [...clickParams, limit, offset])
+          ]);
+          const countRows = countResult[0];
+          const offerRows = offerResult[0];
+          const total = countRows[0]?.total || 0;
           const offerIds = offerRows.map(r => r.offer_id).filter(Boolean);
 
           if (offerIds.length === 0) {
@@ -432,7 +449,7 @@ export class ReportService {
             };
           }
 
-          const [offerMetaRows] = await pool.query(
+          const offerMetaPromise = pool.query(
             `SELECT o.id as offer_internal_id,
                     COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
                     COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
@@ -440,11 +457,9 @@ export class ReportService {
              WHERE o.id IN (?)`,
             [offerIds]
           );
-          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
-
-          let conversionMap = new Map();
-          if (needsConversionMetrics) {
-            const conversionsForPageQuery = `
+          const conversionPromise = needsConversionMetrics
+            ? pool.query(
+              `
               SELECT
                 conv.offer_id,
                 COUNT(*) as conversions,
@@ -458,8 +473,18 @@ export class ReportService {
               FROM conversions conv
               WHERE ${convWhere.join(' AND ')} AND conv.offer_id IN (?)
               GROUP BY conv.offer_id
-            `;
-            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, offerIds]);
+            `,
+              [...convParams, offerIds]
+            )
+            : Promise.resolve([[]]);
+
+          const [offerMetaResult, conversionResult] = await Promise.all([offerMetaPromise, conversionPromise]);
+          const offerMetaRows = offerMetaResult[0];
+          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const conversionRows = conversionResult[0];
             conversionMap = new Map(conversionRows.map(r => [r.offer_id, r]));
           }
 
@@ -548,9 +573,6 @@ export class ReportService {
               GROUP BY c.publisher_id, c.offer_id
             ) grouped_pairs
           `;
-          const [countRows] = await pool.query(countQuery, clickParams);
-          const total = countRows[0]?.total || 0;
-
           if (filters.export === 'csv' || filters.export === 'true') {
             let exportQuery = `
               SELECT
@@ -608,7 +630,13 @@ export class ReportService {
             ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
             LIMIT ? OFFSET ?
           `;
-          const [pairRows] = await pool.query(topPairsQuery, [...clickParams, limit, offset]);
+          const [countResult, pairResult] = await Promise.all([
+            pool.query(countQuery, clickParams),
+            pool.query(topPairsQuery, [...clickParams, limit, offset])
+          ]);
+          const countRows = countResult[0];
+          const pairRows = pairResult[0];
+          const total = countRows[0]?.total || 0;
           if (pairRows.length === 0) {
             return {
               data: [],
@@ -620,7 +648,7 @@ export class ReportService {
           const publisherIds = [...new Set(pairRows.map(r => r.publisher_id).filter(Boolean))];
           const offerIds = [...new Set(pairRows.map(r => r.offer_id).filter(Boolean))];
 
-          const [publisherMetaRows] = await pool.query(
+          const publisherMetaPromise = pool.query(
             `SELECT p.id as publisher_id,
                     COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
                     COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
@@ -628,9 +656,7 @@ export class ReportService {
              WHERE p.id IN (?)`,
             [publisherIds]
           );
-          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
-
-          const [offerMetaRows] = await pool.query(
+          const offerMetaPromise = pool.query(
             `SELECT o.id as offer_internal_id,
                     COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
                     COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
@@ -638,16 +664,14 @@ export class ReportService {
              WHERE o.id IN (?)`,
             [offerIds]
           );
-          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
 
-          let conversionMap = new Map();
+          let conversionPromise = Promise.resolve([[]]);
           if (needsConversionMetrics) {
             const tuplePlaceholders = pairRows.map(() => '(?, ?)').join(', ');
             const tupleParams = [];
             pairRows.forEach((r) => {
               tupleParams.push(r.publisher_id, r.offer_id);
             });
-
             const conversionsForPageQuery = `
               SELECT
                 conv.publisher_id,
@@ -665,7 +689,23 @@ export class ReportService {
                 AND (conv.publisher_id, conv.offer_id) IN (${tuplePlaceholders})
               GROUP BY conv.publisher_id, conv.offer_id
             `;
-            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, ...tupleParams]);
+            conversionPromise = pool.query(conversionsForPageQuery, [...convParams, ...tupleParams]);
+          }
+
+          const [publisherMetaResult, offerMetaResult, conversionResult] = await Promise.all([
+            publisherMetaPromise,
+            offerMetaPromise,
+            conversionPromise
+          ]);
+          const publisherMetaRows = publisherMetaResult[0];
+          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
+
+          const offerMetaRows = offerMetaResult[0];
+          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const conversionRows = conversionResult[0];
             conversionMap = new Map(conversionRows.map(r => [`${r.publisher_id}:${r.offer_id}`, r]));
           }
 
