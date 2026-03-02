@@ -98,6 +98,7 @@ export class ReportService {
       // Check if this is an aggregated report request
       const groupBy = filters.groupBy ? (Array.isArray(filters.groupBy) ? filters.groupBy : filters.groupBy.split(',')) : [];
       const columns = filters.columns ? (Array.isArray(filters.columns) ? filters.columns : filters.columns.split(',')) : [];
+      const metricColumns = filters.metrics ? (Array.isArray(filters.metrics) ? filters.metrics : filters.metrics.split(',')) : [];
 
       // Dimension Mapping
       const dimMap = {
@@ -132,6 +133,587 @@ export class ReportService {
       };
 
       if (groupBy.length > 0) {
+        const selectedMetrics = new Set((metricColumns.length > 0 ? metricColumns : columns).map(m => String(m).trim()).filter(Boolean));
+        const includeAllMetrics = selectedMetrics.size === 0;
+        const wantsMetric = (name) => includeAllMetrics || selectedMetrics.has(name);
+
+        // Fast path: publisher-only aggregation (most common slow case: month + groupBy=publisher_id)
+        // Uses pre-aggregated subqueries and avoids click_uuid joins across large ranges.
+        const simpleKeys = new Set(['page', 'limit', 'date_from', 'date_to', 'groupBy', 'metrics', 'columns', 'export', 'all_dates']);
+        const hasComplexFilters = Object.keys(filters).some((k) => !simpleKeys.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
+        if (groupBy.length === 1 && groupBy[0] === 'publisher_id' && !hasComplexFilters) {
+          const allDates = filters.all_dates === true || filters.all_dates === 'true';
+          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+          const fromDate = filters.date_from || todayIST;
+          const toDate = filters.date_to || todayIST;
+          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+          const clickWhere = [`c.tenant_id = ?`];
+          const clickParams = [tenantId];
+          if (!allDates) {
+            clickWhere.push('c.created_at BETWEEN ? AND ?');
+            clickParams.push(utcStart, utcEnd);
+          }
+
+          const convWhere = [`conv.tenant_id = ?`];
+          const convParams = [tenantId];
+          if (!allDates) {
+            convWhere.push('conv.created_at BETWEEN ? AND ?');
+            convParams.push(utcStart, utcEnd);
+          }
+
+          const needsConversionMetrics =
+            wantsMetric('conversions') ||
+            wantsMetric('approved_conversions') ||
+            wantsMetric('pending_conversions') ||
+            wantsMetric('revenue') ||
+            wantsMetric('payout') ||
+            wantsMetric('profit') ||
+            wantsMetric('pending_payout') ||
+            wantsMetric('approved_payout');
+
+          const selectParts = [
+            'base.publisher_id as publisher_id',
+            `COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', base.publisher_id)) as publisher_name`,
+            `COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', base.publisher_id, '@unknown')) as publisher_email`
+          ];
+
+          if (wantsMetric('clicks')) selectParts.push('COALESCE(ca.clicks, 0) as clicks');
+          if (wantsMetric('unique_clicks')) selectParts.push('COALESCE(ca.unique_clicks, 0) as unique_clicks');
+          if (wantsMetric('impressions')) selectParts.push('0 as impressions');
+          if (wantsMetric('conversions')) selectParts.push('COALESCE(va.conversions, 0) as conversions');
+          if (wantsMetric('approved_conversions')) selectParts.push('COALESCE(va.approved_conversions, 0) as approved_conversions');
+          if (wantsMetric('pending_conversions')) selectParts.push('COALESCE(va.pending_conversions, 0) as pending_conversions');
+          if (wantsMetric('revenue')) selectParts.push('COALESCE(va.revenue, 0) as revenue');
+          if (wantsMetric('payout')) selectParts.push('COALESCE(va.payout, 0) as payout');
+          if (wantsMetric('profit')) selectParts.push('COALESCE(va.profit, 0) as profit');
+          if (wantsMetric('pending_payout')) selectParts.push('COALESCE(va.pending_payout, 0) as pending_payout');
+          if (wantsMetric('approved_payout')) selectParts.push('COALESCE(va.approved_payout, 0) as approved_payout');
+          if (selectParts.length === 3) selectParts.push('COALESCE(ca.clicks, 0) as clicks');
+
+          const countQuery = `SELECT COUNT(DISTINCT c.publisher_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
+          const [countRows] = await pool.query(countQuery, clickParams);
+          const total = countRows[0]?.total || 0;
+
+          // Export keeps full dataset behavior, but query is still pre-aggregated and avoids click_uuid joins.
+          if (filters.export === 'csv' || filters.export === 'true') {
+            let exportQuery = `
+              SELECT
+                c.publisher_id as publisher_id,
+                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_name,
+                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', c.publisher_id, '@unknown')) as publisher_email,
+                COUNT(*) as clicks,
+                COUNT(DISTINCT c.ip) as unique_clicks
+                ${needsConversionMetrics ? `,
+                COALESCE(va.conversions, 0) as conversions,
+                COALESCE(va.approved_conversions, 0) as approved_conversions,
+                COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.revenue, 0) as revenue,
+                COALESCE(va.payout, 0) as payout,
+                COALESCE(va.profit, 0) as profit,
+                COALESCE(va.pending_payout, 0) as pending_payout,
+                COALESCE(va.approved_payout, 0) as approved_payout` : ''}
+              FROM clicks c
+              LEFT JOIN publishers p ON p.id = c.publisher_id
+              ${needsConversionMetrics ? `
+                LEFT JOIN (
+                  SELECT
+                    conv.publisher_id,
+                    COUNT(*) as conversions,
+                    SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                    SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    COALESCE(SUM(conv.amount), 0) as revenue,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                    COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                    COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+                  FROM conversions conv
+                  WHERE ${convWhere.join(' AND ')}
+                  GROUP BY conv.publisher_id
+                ) va ON va.publisher_id = c.publisher_id` : ''}
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.publisher_id, p.company_name, p.email
+              ORDER BY clicks DESC, c.publisher_id ASC
+              LIMIT 100000
+            `;
+            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const [exportRows] = await pool.query(exportQuery, exportParams);
+            return { data: exportRows, isExport: true };
+          }
+
+          // Paged strategy: get top publishers first, then fetch conversion aggregates only for those publishers.
+          const topPublishersQuery = `
+            SELECT c.publisher_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
+            FROM clicks c
+            WHERE ${clickWhere.join(' AND ')}
+            GROUP BY c.publisher_id
+            ORDER BY clicks DESC, c.publisher_id ASC
+            LIMIT ? OFFSET ?
+          `;
+          const [publisherRows] = await pool.query(topPublishersQuery, [...clickParams, limit, offset]);
+          const publisherIds = publisherRows.map(r => r.publisher_id).filter(Boolean);
+
+          if (publisherIds.length === 0) {
+            return {
+              data: [],
+              pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+              isAggregated: true
+            };
+          }
+
+          const [publisherMetaRows] = await pool.query(
+            `SELECT p.id as publisher_id,
+                    COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
+                    COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
+             FROM publishers p
+             WHERE p.id IN (?)`,
+            [publisherIds]
+          );
+          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const conversionsForPageQuery = `
+              SELECT
+                conv.publisher_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+              FROM conversions conv
+              WHERE ${convWhere.join(' AND ')} AND conv.publisher_id IN (?)
+              GROUP BY conv.publisher_id
+            `;
+            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, publisherIds]);
+            conversionMap = new Map(conversionRows.map(r => [r.publisher_id, r]));
+          }
+
+          const rows = publisherRows.map((row) => {
+            const pubMeta = publisherMetaMap.get(row.publisher_id) || {
+              publisher_id: row.publisher_id,
+              publisher_name: `Publisher #${row.publisher_id}`,
+              publisher_email: `publisher-${row.publisher_id}@unknown`
+            };
+            const conv = conversionMap.get(row.publisher_id) || {};
+
+            const resultRow = {
+              publisher_id: row.publisher_id,
+              publisher_name: pubMeta.publisher_name,
+              publisher_email: pubMeta.publisher_email
+            };
+
+            if (wantsMetric('clicks') || includeAllMetrics) resultRow.clicks = Number(row.clicks || 0);
+            if (wantsMetric('unique_clicks') || includeAllMetrics) resultRow.unique_clicks = Number(row.unique_clicks || 0);
+            if (wantsMetric('impressions')) resultRow.impressions = 0;
+            if (needsConversionMetrics) {
+              if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
+              if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
+              if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
+              if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
+              if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
+              if (wantsMetric('pending_payout') || includeAllMetrics) resultRow.pending_payout = Number(conv.pending_payout || 0);
+              if (wantsMetric('approved_payout') || includeAllMetrics) resultRow.approved_payout = Number(conv.approved_payout || 0);
+            }
+
+            return resultRow;
+          });
+
+          return {
+            data: rows,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+            isAggregated: true
+          };
+        }
+
+        // Fast path: offer-only aggregation (month + groupBy=offer_id can also be heavy).
+        // Uses paged click aggregation + conversion aggregation for page offer IDs only.
+        if (groupBy.length === 1 && groupBy[0] === 'offer_id' && !hasComplexFilters) {
+          const allDates = filters.all_dates === true || filters.all_dates === 'true';
+          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+          const fromDate = filters.date_from || todayIST;
+          const toDate = filters.date_to || todayIST;
+          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+          const clickWhere = [`c.tenant_id = ?`];
+          const clickParams = [tenantId];
+          if (!allDates) {
+            clickWhere.push('c.created_at BETWEEN ? AND ?');
+            clickParams.push(utcStart, utcEnd);
+          }
+
+          const convWhere = [`conv.tenant_id = ?`];
+          const convParams = [tenantId];
+          if (!allDates) {
+            convWhere.push('conv.created_at BETWEEN ? AND ?');
+            convParams.push(utcStart, utcEnd);
+          }
+
+          const needsConversionMetrics =
+            wantsMetric('conversions') ||
+            wantsMetric('approved_conversions') ||
+            wantsMetric('pending_conversions') ||
+            wantsMetric('revenue') ||
+            wantsMetric('payout') ||
+            wantsMetric('profit') ||
+            wantsMetric('pending_payout') ||
+            wantsMetric('approved_payout');
+
+          const countQuery = `SELECT COUNT(DISTINCT c.offer_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
+          const [countRows] = await pool.query(countQuery, clickParams);
+          const total = countRows[0]?.total || 0;
+
+          if (filters.export === 'csv' || filters.export === 'true') {
+            let exportQuery = `
+              SELECT
+                COALESCE(o.public_offer_id, CAST(c.offer_id AS CHAR)) as offer_id,
+                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', c.offer_id)) as offer_name,
+                COUNT(*) as clicks,
+                COUNT(DISTINCT c.ip) as unique_clicks
+                ${needsConversionMetrics ? `,
+                COALESCE(va.conversions, 0) as conversions,
+                COALESCE(va.approved_conversions, 0) as approved_conversions,
+                COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.revenue, 0) as revenue,
+                COALESCE(va.payout, 0) as payout,
+                COALESCE(va.profit, 0) as profit,
+                COALESCE(va.pending_payout, 0) as pending_payout,
+                COALESCE(va.approved_payout, 0) as approved_payout` : ''}
+              FROM clicks c
+              LEFT JOIN offers o ON o.id = c.offer_id
+              ${needsConversionMetrics ? `
+                LEFT JOIN (
+                  SELECT
+                    conv.offer_id,
+                    COUNT(*) as conversions,
+                    SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                    SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    COALESCE(SUM(conv.amount), 0) as revenue,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                    COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                    COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+                  FROM conversions conv
+                  WHERE ${convWhere.join(' AND ')}
+                  GROUP BY conv.offer_id
+                ) va ON va.offer_id = c.offer_id` : ''}
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.offer_id, o.public_offer_id, o.name
+              ORDER BY clicks DESC, c.offer_id ASC
+              LIMIT 100000
+            `;
+            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const [exportRows] = await pool.query(exportQuery, exportParams);
+            return { data: exportRows, isExport: true };
+          }
+
+          const topOffersQuery = `
+            SELECT c.offer_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
+            FROM clicks c
+            WHERE ${clickWhere.join(' AND ')}
+            GROUP BY c.offer_id
+            ORDER BY clicks DESC, c.offer_id ASC
+            LIMIT ? OFFSET ?
+          `;
+          const [offerRows] = await pool.query(topOffersQuery, [...clickParams, limit, offset]);
+          const offerIds = offerRows.map(r => r.offer_id).filter(Boolean);
+
+          if (offerIds.length === 0) {
+            return {
+              data: [],
+              pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+              isAggregated: true
+            };
+          }
+
+          const [offerMetaRows] = await pool.query(
+            `SELECT o.id as offer_internal_id,
+                    COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
+                    COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
+             FROM offers o
+             WHERE o.id IN (?)`,
+            [offerIds]
+          );
+          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const conversionsForPageQuery = `
+              SELECT
+                conv.offer_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+              FROM conversions conv
+              WHERE ${convWhere.join(' AND ')} AND conv.offer_id IN (?)
+              GROUP BY conv.offer_id
+            `;
+            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, offerIds]);
+            conversionMap = new Map(conversionRows.map(r => [r.offer_id, r]));
+          }
+
+          const rows = offerRows.map((row) => {
+            const offerMeta = offerMetaMap.get(row.offer_id) || {
+              offer_internal_id: row.offer_id,
+              offer_id: String(row.offer_id),
+              offer_name: `Offer #${row.offer_id}`
+            };
+            const conv = conversionMap.get(row.offer_id) || {};
+
+            const resultRow = {
+              offer_id: offerMeta.offer_id,
+              offer_name: offerMeta.offer_name
+            };
+
+            if (wantsMetric('clicks') || includeAllMetrics) resultRow.clicks = Number(row.clicks || 0);
+            if (wantsMetric('unique_clicks') || includeAllMetrics) resultRow.unique_clicks = Number(row.unique_clicks || 0);
+            if (wantsMetric('impressions')) resultRow.impressions = 0;
+            if (needsConversionMetrics) {
+              if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
+              if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
+              if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
+              if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
+              if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
+              if (wantsMetric('pending_payout') || includeAllMetrics) resultRow.pending_payout = Number(conv.pending_payout || 0);
+              if (wantsMetric('approved_payout') || includeAllMetrics) resultRow.approved_payout = Number(conv.approved_payout || 0);
+            }
+
+            return resultRow;
+          });
+
+          return {
+            data: rows,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+            isAggregated: true
+          };
+        }
+
+        // Fast path: publisher+offer aggregation (common heavy case with month range).
+        // Strategy: page top click groups first, then aggregate conversions only for those page pairs.
+        if (
+          groupBy.length === 2 &&
+          groupBy.includes('publisher_id') &&
+          groupBy.includes('offer_id') &&
+          !hasComplexFilters
+        ) {
+          const allDates = filters.all_dates === true || filters.all_dates === 'true';
+          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+          const fromDate = filters.date_from || todayIST;
+          const toDate = filters.date_to || todayIST;
+          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+          const clickWhere = [`c.tenant_id = ?`];
+          const clickParams = [tenantId];
+          if (!allDates) {
+            clickWhere.push('c.created_at BETWEEN ? AND ?');
+            clickParams.push(utcStart, utcEnd);
+          }
+
+          const convWhere = [`conv.tenant_id = ?`];
+          const convParams = [tenantId];
+          if (!allDates) {
+            convWhere.push('conv.created_at BETWEEN ? AND ?');
+            convParams.push(utcStart, utcEnd);
+          }
+
+          const needsConversionMetrics =
+            wantsMetric('conversions') ||
+            wantsMetric('approved_conversions') ||
+            wantsMetric('pending_conversions') ||
+            wantsMetric('revenue') ||
+            wantsMetric('payout') ||
+            wantsMetric('profit') ||
+            wantsMetric('pending_payout') ||
+            wantsMetric('approved_payout');
+
+          const countQuery = `
+            SELECT COUNT(*) as total
+            FROM (
+              SELECT 1
+              FROM clicks c
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.publisher_id, c.offer_id
+            ) grouped_pairs
+          `;
+          const [countRows] = await pool.query(countQuery, clickParams);
+          const total = countRows[0]?.total || 0;
+
+          if (filters.export === 'csv' || filters.export === 'true') {
+            let exportQuery = `
+              SELECT
+                c.publisher_id as publisher_id,
+                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_name,
+                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', c.publisher_id, '@unknown')) as publisher_email,
+                COALESCE(o.public_offer_id, CAST(c.offer_id AS CHAR)) as offer_id,
+                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', c.offer_id)) as offer_name,
+                COUNT(*) as clicks,
+                COUNT(DISTINCT c.ip) as unique_clicks
+                ${needsConversionMetrics ? `,
+                COALESCE(va.conversions, 0) as conversions,
+                COALESCE(va.approved_conversions, 0) as approved_conversions,
+                COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.revenue, 0) as revenue,
+                COALESCE(va.payout, 0) as payout,
+                COALESCE(va.profit, 0) as profit,
+                COALESCE(va.pending_payout, 0) as pending_payout,
+                COALESCE(va.approved_payout, 0) as approved_payout` : ''}
+              FROM clicks c
+              LEFT JOIN publishers p ON p.id = c.publisher_id
+              LEFT JOIN offers o ON o.id = c.offer_id
+              ${needsConversionMetrics ? `
+                LEFT JOIN (
+                  SELECT
+                    conv.publisher_id,
+                    conv.offer_id,
+                    COUNT(*) as conversions,
+                    SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                    SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    COALESCE(SUM(conv.amount), 0) as revenue,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                    COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                    COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                    COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+                  FROM conversions conv
+                  WHERE ${convWhere.join(' AND ')}
+                  GROUP BY conv.publisher_id, conv.offer_id
+                ) va ON va.publisher_id = c.publisher_id AND va.offer_id = c.offer_id` : ''}
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.publisher_id, c.offer_id, p.company_name, p.email, o.public_offer_id, o.name
+              ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
+              LIMIT 100000
+            `;
+            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const [exportRows] = await pool.query(exportQuery, exportParams);
+            return { data: exportRows, isExport: true };
+          }
+
+          const topPairsQuery = `
+            SELECT c.publisher_id, c.offer_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
+            FROM clicks c
+            WHERE ${clickWhere.join(' AND ')}
+            GROUP BY c.publisher_id, c.offer_id
+            ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
+            LIMIT ? OFFSET ?
+          `;
+          const [pairRows] = await pool.query(topPairsQuery, [...clickParams, limit, offset]);
+          if (pairRows.length === 0) {
+            return {
+              data: [],
+              pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+              isAggregated: true
+            };
+          }
+
+          const publisherIds = [...new Set(pairRows.map(r => r.publisher_id).filter(Boolean))];
+          const offerIds = [...new Set(pairRows.map(r => r.offer_id).filter(Boolean))];
+
+          const [publisherMetaRows] = await pool.query(
+            `SELECT p.id as publisher_id,
+                    COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
+                    COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
+             FROM publishers p
+             WHERE p.id IN (?)`,
+            [publisherIds]
+          );
+          const publisherMetaMap = new Map(publisherMetaRows.map(r => [r.publisher_id, r]));
+
+          const [offerMetaRows] = await pool.query(
+            `SELECT o.id as offer_internal_id,
+                    COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
+                    COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
+             FROM offers o
+             WHERE o.id IN (?)`,
+            [offerIds]
+          );
+          const offerMetaMap = new Map(offerMetaRows.map(r => [r.offer_internal_id, r]));
+
+          let conversionMap = new Map();
+          if (needsConversionMetrics) {
+            const tuplePlaceholders = pairRows.map(() => '(?, ?)').join(', ');
+            const tupleParams = [];
+            pairRows.forEach((r) => {
+              tupleParams.push(r.publisher_id, r.offer_id);
+            });
+
+            const conversionsForPageQuery = `
+              SELECT
+                conv.publisher_id,
+                conv.offer_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+              FROM conversions conv
+              WHERE ${convWhere.join(' AND ')}
+                AND (conv.publisher_id, conv.offer_id) IN (${tuplePlaceholders})
+              GROUP BY conv.publisher_id, conv.offer_id
+            `;
+            const [conversionRows] = await pool.query(conversionsForPageQuery, [...convParams, ...tupleParams]);
+            conversionMap = new Map(conversionRows.map(r => [`${r.publisher_id}:${r.offer_id}`, r]));
+          }
+
+          const rows = pairRows.map((row) => {
+            const pubMeta = publisherMetaMap.get(row.publisher_id) || {
+              publisher_id: row.publisher_id,
+              publisher_name: `Publisher #${row.publisher_id}`,
+              publisher_email: `publisher-${row.publisher_id}@unknown`
+            };
+            const offerMeta = offerMetaMap.get(row.offer_id) || {
+              offer_internal_id: row.offer_id,
+              offer_id: String(row.offer_id),
+              offer_name: `Offer #${row.offer_id}`
+            };
+            const conv = conversionMap.get(`${row.publisher_id}:${row.offer_id}`) || {};
+
+            const resultRow = {
+              publisher_id: row.publisher_id,
+              publisher_name: pubMeta.publisher_name,
+              publisher_email: pubMeta.publisher_email,
+              offer_id: offerMeta.offer_id,
+              offer_name: offerMeta.offer_name
+            };
+
+            if (wantsMetric('clicks') || includeAllMetrics) resultRow.clicks = Number(row.clicks || 0);
+            if (wantsMetric('unique_clicks') || includeAllMetrics) resultRow.unique_clicks = Number(row.unique_clicks || 0);
+            if (wantsMetric('impressions')) resultRow.impressions = 0;
+            if (needsConversionMetrics) {
+              if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
+              if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
+              if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
+              if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
+              if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
+              if (wantsMetric('pending_payout') || includeAllMetrics) resultRow.pending_payout = Number(conv.pending_payout || 0);
+              if (wantsMetric('approved_payout') || includeAllMetrics) resultRow.approved_payout = Number(conv.approved_payout || 0);
+            }
+
+            return resultRow;
+          });
+
+          return {
+            data: rows,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+            isAggregated: true
+          };
+        }
+
         // --- AGGREGATED REPORT MODE ---
         let selects = [];
         let groups = [];
@@ -152,25 +734,38 @@ export class ReportService {
           }
         });
 
-        // Metrics
-        selects.push('COUNT(DISTINCT c.id) as clicks'); // Total clicks
-        selects.push('COUNT(DISTINCT c.ip) as unique_clicks'); // Unique IP
-        // Impressions not linked to clicks 1:1, so generally 0 in this join unless we switch to UNION.
-        selects.push('0 as impressions');
-        selects.push('COUNT(DISTINCT conv.id) as conversions');
-        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'approved\' THEN conv.id END) as approved_conversions');
-        selects.push('COUNT(DISTINCT CASE WHEN conv.status = \'pending\' THEN conv.id END) as pending_conversions');
-        selects.push('COALESCE(SUM(conv.amount), 0) as revenue');
-        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as payout');
-        selects.push('COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as profit');
-        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
-        selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
+        // Metrics (compute only requested ones; avoid expensive DISTINCT unless required)
+        const needsConversionJoinForMetrics =
+          wantsMetric('conversions') ||
+          wantsMetric('approved_conversions') ||
+          wantsMetric('pending_conversions') ||
+          wantsMetric('revenue') ||
+          wantsMetric('payout') ||
+          wantsMetric('profit') ||
+          wantsMetric('pending_payout') ||
+          wantsMetric('approved_payout');
+
+        if (wantsMetric('clicks')) selects.push('COUNT(*) as clicks');
+        if (wantsMetric('unique_clicks')) selects.push('COUNT(DISTINCT c.ip) as unique_clicks');
+        if (wantsMetric('impressions')) selects.push('0 as impressions');
+        if (wantsMetric('conversions')) selects.push('SUM(CASE WHEN conv.id IS NOT NULL THEN 1 ELSE 0 END) as conversions');
+        if (wantsMetric('approved_conversions')) selects.push('SUM(CASE WHEN conv.status = \'approved\' THEN 1 ELSE 0 END) as approved_conversions');
+        if (wantsMetric('pending_conversions')) selects.push('SUM(CASE WHEN conv.status = \'pending\' THEN 1 ELSE 0 END) as pending_conversions');
+        if (wantsMetric('revenue')) selects.push('COALESCE(SUM(conv.amount), 0) as revenue');
+        if (wantsMetric('payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as payout');
+        if (wantsMetric('profit')) selects.push('COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as profit');
+        if (wantsMetric('pending_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
+        if (wantsMetric('approved_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
+
+        if (selects.length === 0) {
+          selects.push('COUNT(*) as clicks');
+        }
 
         let query = `SELECT ${selects.join(', ')} 
                      FROM clicks c
                      LEFT JOIN offers o ON c.offer_id = o.id
                      LEFT JOIN publishers p ON c.publisher_id = p.id
-                     LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id
+                     ${needsConversionJoinForMetrics || filters.status || filters.rcid || filters.search ? 'LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id' : ''}
                      WHERE 1=1 `;
 
         const filtersBuild = this.buildWhereClause(filters, tenantId);

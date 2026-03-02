@@ -102,6 +102,7 @@ export class ReportController {
       if (request.query.export) filters.export = request.query.export;
       if (request.query.groupBy) filters.groupBy = request.query.groupBy;
       if (request.query.columns) filters.columns = request.query.columns;
+      if (request.query.metrics) filters.metrics = request.query.metrics;
       if (request.query.all_dates !== undefined) {
         const val = String(request.query.all_dates).toLowerCase();
         filters.all_dates = val === 'true' || val === '1' || val === 'yes';
