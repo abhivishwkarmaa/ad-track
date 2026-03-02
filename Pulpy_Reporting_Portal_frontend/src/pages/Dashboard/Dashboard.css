@@ -462,6 +462,11 @@
     min-height: 0;
 }
 
+.chart-card,
+.recent-offers-card {
+    min-height: 420px;
+}
+
 .card-header {
     display: flex;
     align-items: center;
@@ -492,10 +497,11 @@
 /* Recent Offers */
 .offers-list {
     padding: 8px 0;
-    max-height: 320px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .offer-row {
@@ -505,12 +511,8 @@
     padding: 10px 16px;
     transition: var(--transition-fast);
     cursor: pointer;
-    flex: 1;
-    /* Grow to fill space */
-    min-height: 60px;
-    /* Minimum substantial height */
-    max-height: 90px;
-    /* Prevent being too huge */
+    min-height: 56px;
+    flex: 0 0 auto;
 }
 
 .offer-row:hover {
@@ -876,8 +878,10 @@
 
 .chart-wrapper {
     width: 100%;
-    min-height: 260px;
-    aspect-ratio: 16 / 7;
+    height: 320px;
+    min-height: 320px;
+    padding: 8px 16px 16px;
+    box-sizing: border-box;
 }
 
 .summary-grid {
@@ -1401,6 +1405,8 @@
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         min-width: 320px;
+        height: 260px;
+        min-height: 260px;
     }
 
     .card-header {
@@ -1451,5 +1457,7 @@
 
     .chart-wrapper {
         min-width: 280px;
+        height: 240px;
+        min-height: 240px;
     }
 }

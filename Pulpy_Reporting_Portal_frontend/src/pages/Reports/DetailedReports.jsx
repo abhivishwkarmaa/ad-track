@@ -22,6 +22,12 @@ const DownloadIcon = () => (
     </svg>
 );
 
+const ChevronDownIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="6 9 12 15 18 9" />
+    </svg>
+);
+
 const FilterIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -184,6 +190,8 @@ function DetailedReports() {
     const [pendingMetrics, setPendingMetrics] = useState(initialMetrics);
 
     const [showFilters, setShowFilters] = useState(true);
+    const [exportMode, setExportMode] = useState('frontend'); // frontend | backend
+    const [showExportMenu, setShowExportMenu] = useState(false);
 
     // Fetch filter options
     useEffect(() => {
@@ -349,10 +357,75 @@ function DetailedReports() {
         setPagination(prev => ({ ...prev, page: newPage }));
     };
 
-    const handleExport = async () => {
+    const handleExport = async (modeOverride = null) => {
+        const mode = modeOverride || exportMode;
         try {
-            toast.info('Preparing export...');
+            if (mode === 'frontend') {
+                if (!reports || reports.length === 0) {
+                    toast.error('No loaded data to export');
+                    return;
+                }
 
+                toast.info('Preparing CSV from loaded data...');
+
+                const csvEscape = (value) => {
+                    if (value === null || value === undefined) return '';
+                    const str = String(value);
+                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                        return `"${str.replace(/"/g, '""')}"`;
+                    }
+                    return str;
+                };
+
+                const formatStatusForCsv = (status) => {
+                    if (!status) return '';
+                    const normalizedStatus = String(status).toLowerCase();
+                    if (normalizedStatus === 'click_expired') return 'Rejected (Click Expired)';
+                    if (normalizedStatus === 'rejected_cap') return 'Rejected (Cap Hit)';
+                    return String(status).replace(/_/g, ' ');
+                };
+
+                const getCsvCellValue = (row, colId) => {
+                    const val = row[colId];
+                    if (colId === 'offer_id') {
+                        return row.offer_name ? `${row.offer_id} - ${row.offer_name}` : (row.offer_id || '');
+                    }
+                    if (colId === 'publisher_id') {
+                        return row.publisher_name || row.publisher_company
+                            ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
+                            : (row.publisher_id || '');
+                    }
+                    if (colId === 'conversion_status') return formatStatusForCsv(val);
+                    if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(colId)) {
+                        return val === null || val === undefined ? '' : Number(val).toFixed(2);
+                    }
+                    if (colId === 'click_created_at') return formatDate(val) || '';
+                    if (colId === 'referrer' || colId === 'referer') return val ? String(val).trim() : 'Direct';
+                    return val ?? '';
+                };
+
+                const headers = tableColumns.map((c) => c.label);
+                const lines = [headers.map(csvEscape).join(',')];
+                reports.forEach((row) => {
+                    const line = tableColumns.map((col) => csvEscape(getCsvCellValue(row, col.id))).join(',');
+                    lines.push(line);
+                });
+
+                const csvContent = lines.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `report-loaded-${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                toast.success('Export downloaded!');
+                return;
+            }
+
+            toast.info('Preparing full export from server...');
             const params = new URLSearchParams();
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
@@ -375,17 +448,21 @@ function DetailedReports() {
             if (trafficType === 'direct') params.set('noReferrer', 'true');
             if (trafficType === 'referred') params.set('hasReferrer', 'true');
             if (selectedDims.length > 0) params.set('groupBy', selectedDims.join(','));
-            if (selectedMetrics.length > 0) params.set('columns', selectedMetrics.join(','));
+            if (selectedMetrics.length > 0) {
+                params.set('metrics', selectedMetrics.join(','));
+                params.set('columns', selectedMetrics.join(','));
+            }
+
             const blob = await dashboardAPI.exportDetailedCSV(Object.fromEntries(params.entries()));
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `report-${new Date().toISOString().split('T')[0]}.csv`;
+            a.download = `report-full-${new Date().toISOString().split('T')[0]}.csv`;
             document.body.appendChild(a);
             a.click();
             a.remove();
-
-            toast.success('Export downloaded!');
+            window.URL.revokeObjectURL(url);
+            toast.success('Full export downloaded!');
         } catch (error) {
             console.error('Export error:', error);
             toast.error(error.message || 'Failed to export data');
@@ -447,9 +524,48 @@ function DetailedReports() {
                     <button className="btn btn-outline" onClick={() => setShowFilters(!showFilters)}>
                         <FilterIcon /> {showFilters ? 'Hide Filters' : 'Show Filters'}
                     </button>
-                    <button className="btn btn-primary" onClick={handleExport}>
-                        <DownloadIcon /> Export CSV
-                    </button>
+                    <div className="reports-export-dropdown">
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => handleExport()}
+                            type="button"
+                            title={`Export using ${exportMode === 'frontend' ? 'Fast Export (Loaded)' : 'Full Export (Server)'}`}
+                        >
+                            <DownloadIcon /> Export CSV
+                        </button>
+                        <button
+                            className="btn btn-outline reports-export-toggle"
+                            type="button"
+                            onClick={() => setShowExportMenu(prev => !prev)}
+                            title="Choose export mode"
+                        >
+                            <ChevronDownIcon />
+                        </button>
+                        {showExportMenu && (
+                            <div className="reports-export-menu">
+                                <button
+                                    type="button"
+                                    className={`reports-export-menu-item ${exportMode === 'frontend' ? 'active' : ''}`}
+                                    onClick={() => {
+                                        setExportMode('frontend');
+                                        setShowExportMenu(false);
+                                    }}
+                                >
+                                    Fast Export (Loaded)
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`reports-export-menu-item ${exportMode === 'backend' ? 'active' : ''}`}
+                                    onClick={() => {
+                                        setExportMode('backend');
+                                        setShowExportMenu(false);
+                                    }}
+                                >
+                                    Full Export (Server)
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 

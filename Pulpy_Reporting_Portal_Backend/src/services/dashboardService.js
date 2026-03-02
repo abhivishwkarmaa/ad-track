@@ -561,88 +561,121 @@ export class DashboardService {
         end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
       };
 
-      // 1. Current Period Stats
-      // Clicks
-      const [clicksCurrent] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          COUNT(DISTINCT click_uuid) as unique_clicks
-        FROM clicks
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [currentRange.start, currentRange.end, tenantId]
-      );
+      const currentAggregatedSql = `
+        SELECT
+          SUM(CASE WHEN metric = 'clicks' THEN total ELSE 0 END) as clicks_total,
+          SUM(CASE WHEN metric = 'clicks' THEN unique_total ELSE 0 END) as unique_clicks,
+          SUM(CASE WHEN metric = 'conversions' THEN total ELSE 0 END) as conv_total,
+          SUM(CASE WHEN metric = 'conversions' THEN approved ELSE 0 END) as conv_approved,
+          SUM(CASE WHEN metric = 'conversions' THEN pending ELSE 0 END) as conv_pending,
+          SUM(CASE WHEN metric = 'conversions' THEN rejected ELSE 0 END) as conv_rejected,
+          SUM(CASE WHEN metric = 'conversions' THEN revenue ELSE 0 END) as revenue_total,
+          SUM(CASE WHEN metric = 'conversions' THEN payout ELSE 0 END) as payout_total,
+          SUM(CASE WHEN metric = 'impressions' THEN total ELSE 0 END) as impressions_total
+        FROM (
+          SELECT
+            'clicks' as metric,
+            COUNT(*) as total,
+            COUNT(DISTINCT click_uuid) as unique_total,
+            0 as approved,
+            0 as pending,
+            0 as rejected,
+            0 as revenue,
+            0 as payout
+          FROM clicks
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
 
-      // Conversions & Revenue
-      const [conversionsCurrent] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-          COALESCE(SUM(amount), 0) as revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-        FROM conversions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [currentRange.start, currentRange.end, tenantId]
-      );
+          UNION ALL
 
-      // Impressions
-      const [impressionsCurrent] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM impressions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [currentRange.start, currentRange.end, tenantId]
-      );
+          SELECT
+            'conversions' as metric,
+            COUNT(*) as total,
+            0 as unique_total,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected,
+            COALESCE(SUM(amount), 0) as revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
+          FROM conversions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
 
-      // 2. Previous Period Stats
-      const [clicksPrevious] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM clicks
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [previousRange.start, previousRange.end, tenantId]
-      );
+          UNION ALL
 
-      const [conversionsPrevious] = await pool.query(
-        `SELECT 
-          COUNT(*) as total, 
-          COALESCE(SUM(amount), 0) as revenue, 
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-        FROM conversions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [previousRange.start, previousRange.end, tenantId]
-      );
+          SELECT
+            'impressions' as metric,
+            COUNT(*) as total,
+            0 as unique_total,
+            0 as approved,
+            0 as pending,
+            0 as rejected,
+            0 as revenue,
+            0 as payout
+          FROM impressions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        ) agg
+      `;
 
-      const [impressionsPrevious] = await pool.query(
-        `SELECT COUNT(*) as total
-        FROM impressions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [previousRange.start, previousRange.end, tenantId]
-      );
+      const previousAggregatedSql = `
+        SELECT
+          SUM(CASE WHEN metric = 'clicks' THEN total ELSE 0 END) as clicks_total,
+          SUM(CASE WHEN metric = 'conversions' THEN total ELSE 0 END) as conv_total,
+          SUM(CASE WHEN metric = 'conversions' THEN revenue ELSE 0 END) as revenue_total,
+          SUM(CASE WHEN metric = 'conversions' THEN payout ELSE 0 END) as payout_total,
+          SUM(CASE WHEN metric = 'impressions' THEN total ELSE 0 END) as impressions_total
+        FROM (
+          SELECT 'clicks' as metric, COUNT(*) as total, 0 as revenue, 0 as payout
+          FROM clicks
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+
+          UNION ALL
+
+          SELECT 'conversions' as metric, COUNT(*) as total, COALESCE(SUM(amount), 0) as revenue,
+                 COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
+          FROM conversions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+
+          UNION ALL
+
+          SELECT 'impressions' as metric, COUNT(*) as total, 0 as revenue, 0 as payout
+          FROM impressions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        ) agg
+      `;
+
+      const [currentResult, previousResult] = await Promise.all([
+        pool.query(currentAggregatedSql, [
+          tenantId, currentRange.start, currentRange.end,
+          tenantId, currentRange.start, currentRange.end,
+          tenantId, currentRange.start, currentRange.end
+        ]),
+        pool.query(previousAggregatedSql, [
+          tenantId, previousRange.start, previousRange.end,
+          tenantId, previousRange.start, previousRange.end,
+          tenantId, previousRange.start, previousRange.end
+        ])
+      ]);
+
+      const currentStats = currentResult[0]?.[0] || {};
+      const previousStats = previousResult[0]?.[0] || {};
 
       // Compute Values
-      const clicksTotal = parseInt(clicksCurrent[0]?.total || 0);
-      const uniqueClicks = parseInt(clicksCurrent[0]?.unique_clicks || 0);
-      const clicksPrev = parseInt(clicksPrevious[0]?.total || 0);
+      const clicksTotal = parseInt(currentStats.clicks_total || 0);
+      const uniqueClicks = parseInt(currentStats.unique_clicks || 0);
+      const clicksPrev = parseInt(previousStats.clicks_total || 0);
 
-      const convTotal = parseInt(conversionsCurrent[0]?.total || 0);
-      const convApproved = parseInt(conversionsCurrent[0]?.approved || 0);
-      const convPending = parseInt(conversionsCurrent[0]?.pending || 0);
-      const convRejected = parseInt(conversionsCurrent[0]?.rejected || 0);
-      const convPrev = parseInt(conversionsPrevious[0]?.total || 0);
+      const convTotal = parseInt(currentStats.conv_total || 0);
+      const convApproved = parseInt(currentStats.conv_approved || 0);
+      const convPending = parseInt(currentStats.conv_pending || 0);
+      const convRejected = parseInt(currentStats.conv_rejected || 0);
+      const convPrev = parseInt(previousStats.conv_total || 0);
 
-      const revTotal = parseFloat(conversionsCurrent[0]?.revenue || 0);
-      const payoutTotal = parseFloat(conversionsCurrent[0]?.payout || 0);
-      const revPrev = parseFloat(conversionsPrevious[0]?.revenue || 0);
-      const payoutPrev = parseFloat(conversionsPrevious[0]?.payout || 0);
+      const revTotal = parseFloat(currentStats.revenue_total || 0);
+      const payoutTotal = parseFloat(currentStats.payout_total || 0);
+      const revPrev = parseFloat(previousStats.revenue_total || 0);
+      const payoutPrev = parseFloat(previousStats.payout_total || 0);
 
-      const impTotal = parseInt(impressionsCurrent[0]?.total || 0);
-      const impPrev = parseInt(impressionsPrevious[0]?.total || 0);
+      const impTotal = parseInt(currentStats.impressions_total || 0);
+      const impPrev = parseInt(previousStats.impressions_total || 0);
 
       const profit = revTotal - payoutTotal;
       const revenueChange = revTotal - revPrev;
@@ -718,36 +751,33 @@ export class DashboardService {
         end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
       };
 
-      // Clicks
-      const [clicks] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          COUNT(DISTINCT click_uuid) as unique_clicks
-        FROM clicks
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [currentRange.start, currentRange.end, tenantId]
-      );
+      const [clicksResult, conversionsResult] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(DISTINCT click_uuid) as unique_clicks
+           FROM clicks
+           WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
+          [currentRange.start, currentRange.end, tenantId]
+        ),
+        pool.query(
+          `SELECT
+             COUNT(*) as total,
+             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+             COALESCE(SUM(amount), 0) as revenue,
+             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
+           FROM conversions
+           WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
+          [currentRange.start, currentRange.end, tenantId]
+        )
+      ]);
 
-      // Conversions & Revenue
-      const [conversions] = await pool.query(
-        `SELECT 
-          COUNT(*) as total,
-          COUNT(DISTINCT conversion_uuid) as unique_conversions,
-          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-          COALESCE(SUM(amount), 0) as revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-        FROM conversions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?`,
-        [currentRange.start, currentRange.end, tenantId]
-      );
+      const clicks = clicksResult[0];
+      const conversions = conversionsResult[0];
 
-      const uniqueClicks = clicks[0].unique_clicks || 0;
-      const totalConversions = conversions[0].total || 0;
-      const approvedConversions = conversions[0].approved || 0;
-      const revenue = parseFloat(conversions[0].revenue || 0);
-      const payout = parseFloat(conversions[0].payout || 0);
+      const uniqueClicks = clicks[0]?.unique_clicks || 0;
+      const totalConversions = conversions[0]?.total || 0;
+      const approvedConversions = conversions[0]?.approved || 0;
+      const revenue = parseFloat(conversions[0]?.revenue || 0);
+      const payout = parseFloat(conversions[0]?.payout || 0);
       const profit = revenue - payout;
 
       return {

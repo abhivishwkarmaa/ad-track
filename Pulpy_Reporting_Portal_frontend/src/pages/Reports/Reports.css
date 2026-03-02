@@ -628,6 +628,79 @@
     gap: 12px;
 }
 
+.reports-export-dropdown {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.reports-export-toggle {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.reports-export-toggle svg {
+    width: 14px;
+    height: 14px;
+}
+
+.reports-export-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    min-width: 220px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: 40;
+    padding: 6px;
+}
+
+.reports-export-menu-item {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.reports-export-menu-item:hover {
+    background: rgba(33, 150, 243, 0.08);
+}
+
+.reports-export-menu-item.active {
+    background: rgba(33, 150, 243, 0.14);
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .reports-export-dropdown {
+        width: 100%;
+    }
+
+    .reports-export-dropdown .btn.btn-primary {
+        flex: 1;
+        justify-content: center;
+    }
+
+    .reports-export-menu {
+        left: 0;
+        right: 0;
+        min-width: unset;
+    }
+}
+
 /* Ensure table cells don't wrap too much */
 .reports-table td {
     white-space: nowrap;
