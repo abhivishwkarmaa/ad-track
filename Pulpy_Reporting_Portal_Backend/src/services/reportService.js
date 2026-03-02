@@ -167,6 +167,7 @@ export class ReportService {
             wantsMetric('conversions') ||
             wantsMetric('approved_conversions') ||
             wantsMetric('pending_conversions') ||
+            wantsMetric('rejected_conversions') ||
             wantsMetric('revenue') ||
             wantsMetric('payout') ||
             wantsMetric('profit') ||
@@ -185,6 +186,7 @@ export class ReportService {
           if (wantsMetric('conversions')) selectParts.push('COALESCE(va.conversions, 0) as conversions');
           if (wantsMetric('approved_conversions')) selectParts.push('COALESCE(va.approved_conversions, 0) as approved_conversions');
           if (wantsMetric('pending_conversions')) selectParts.push('COALESCE(va.pending_conversions, 0) as pending_conversions');
+          if (wantsMetric('rejected_conversions')) selectParts.push('COALESCE(va.rejected_conversions, 0) as rejected_conversions');
           if (wantsMetric('revenue')) selectParts.push('COALESCE(va.revenue, 0) as revenue');
           if (wantsMetric('payout')) selectParts.push('COALESCE(va.payout, 0) as payout');
           if (wantsMetric('profit')) selectParts.push('COALESCE(va.profit, 0) as profit');
@@ -207,6 +209,7 @@ export class ReportService {
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
                 COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.rejected_conversions, 0) as rejected_conversions,
                 COALESCE(va.revenue, 0) as revenue,
                 COALESCE(va.payout, 0) as payout,
                 COALESCE(va.profit, 0) as profit,
@@ -221,6 +224,7 @@ export class ReportService {
                     COUNT(*) as conversions,
                     SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                     SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                     COALESCE(SUM(conv.amount), 0) as revenue,
                     COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                     COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -283,6 +287,7 @@ export class ReportService {
                 COUNT(*) as conversions,
                 SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                 SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                 COALESCE(SUM(conv.amount), 0) as revenue,
                 COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                 COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -327,6 +332,7 @@ export class ReportService {
               if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
               if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
               if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('rejected_conversions') || includeAllMetrics) resultRow.rejected_conversions = Number(conv.rejected_conversions || 0);
               if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
               if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
               if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
@@ -372,6 +378,7 @@ export class ReportService {
             wantsMetric('conversions') ||
             wantsMetric('approved_conversions') ||
             wantsMetric('pending_conversions') ||
+            wantsMetric('rejected_conversions') ||
             wantsMetric('revenue') ||
             wantsMetric('payout') ||
             wantsMetric('profit') ||
@@ -391,6 +398,7 @@ export class ReportService {
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
                 COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.rejected_conversions, 0) as rejected_conversions,
                 COALESCE(va.revenue, 0) as revenue,
                 COALESCE(va.payout, 0) as payout,
                 COALESCE(va.profit, 0) as profit,
@@ -405,6 +413,7 @@ export class ReportService {
                     COUNT(*) as conversions,
                     SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                     SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                     COALESCE(SUM(conv.amount), 0) as revenue,
                     COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                     COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -465,6 +474,7 @@ export class ReportService {
                 COUNT(*) as conversions,
                 SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                 SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                 COALESCE(SUM(conv.amount), 0) as revenue,
                 COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                 COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -508,6 +518,7 @@ export class ReportService {
               if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
               if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
               if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('rejected_conversions') || includeAllMetrics) resultRow.rejected_conversions = Number(conv.rejected_conversions || 0);
               if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
               if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
               if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
@@ -558,6 +569,7 @@ export class ReportService {
             wantsMetric('conversions') ||
             wantsMetric('approved_conversions') ||
             wantsMetric('pending_conversions') ||
+            wantsMetric('rejected_conversions') ||
             wantsMetric('revenue') ||
             wantsMetric('payout') ||
             wantsMetric('profit') ||
@@ -587,6 +599,7 @@ export class ReportService {
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
                 COALESCE(va.pending_conversions, 0) as pending_conversions,
+                COALESCE(va.rejected_conversions, 0) as rejected_conversions,
                 COALESCE(va.revenue, 0) as revenue,
                 COALESCE(va.payout, 0) as payout,
                 COALESCE(va.profit, 0) as profit,
@@ -603,6 +616,7 @@ export class ReportService {
                     COUNT(*) as conversions,
                     SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                     SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                    SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                     COALESCE(SUM(conv.amount), 0) as revenue,
                     COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                     COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -679,6 +693,7 @@ export class ReportService {
                 COUNT(*) as conversions,
                 SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
                 SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
                 COALESCE(SUM(conv.amount), 0) as revenue,
                 COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
                 COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
@@ -737,6 +752,7 @@ export class ReportService {
               if (wantsMetric('conversions') || includeAllMetrics) resultRow.conversions = Number(conv.conversions || 0);
               if (wantsMetric('approved_conversions') || includeAllMetrics) resultRow.approved_conversions = Number(conv.approved_conversions || 0);
               if (wantsMetric('pending_conversions') || includeAllMetrics) resultRow.pending_conversions = Number(conv.pending_conversions || 0);
+              if (wantsMetric('rejected_conversions') || includeAllMetrics) resultRow.rejected_conversions = Number(conv.rejected_conversions || 0);
               if (wantsMetric('revenue') || includeAllMetrics) resultRow.revenue = Number(conv.revenue || 0);
               if (wantsMetric('payout') || includeAllMetrics) resultRow.payout = Number(conv.payout || 0);
               if (wantsMetric('profit') || includeAllMetrics) resultRow.profit = Number(conv.profit || 0);
@@ -779,18 +795,21 @@ export class ReportService {
           wantsMetric('conversions') ||
           wantsMetric('approved_conversions') ||
           wantsMetric('pending_conversions') ||
+          wantsMetric('rejected_conversions') ||
           wantsMetric('revenue') ||
           wantsMetric('payout') ||
           wantsMetric('profit') ||
           wantsMetric('pending_payout') ||
           wantsMetric('approved_payout');
 
-        if (wantsMetric('clicks')) selects.push('COUNT(*) as clicks');
+        // Use DISTINCT click id so conversion join cannot inflate click counts.
+        if (wantsMetric('clicks')) selects.push('COUNT(DISTINCT c.id) as clicks');
         if (wantsMetric('unique_clicks')) selects.push('COUNT(DISTINCT c.ip) as unique_clicks');
         if (wantsMetric('impressions')) selects.push('0 as impressions');
         if (wantsMetric('conversions')) selects.push('SUM(CASE WHEN conv.id IS NOT NULL THEN 1 ELSE 0 END) as conversions');
         if (wantsMetric('approved_conversions')) selects.push('SUM(CASE WHEN conv.status = \'approved\' THEN 1 ELSE 0 END) as approved_conversions');
         if (wantsMetric('pending_conversions')) selects.push('SUM(CASE WHEN conv.status = \'pending\' THEN 1 ELSE 0 END) as pending_conversions');
+        if (wantsMetric('rejected_conversions')) selects.push('SUM(CASE WHEN conv.status IN (\'rejected\', \'rejected_cap\', \'click_expired\') THEN 1 ELSE 0 END) as rejected_conversions');
         if (wantsMetric('revenue')) selects.push('COALESCE(SUM(conv.amount), 0) as revenue');
         if (wantsMetric('payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as payout');
         if (wantsMetric('profit')) selects.push('COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as profit');

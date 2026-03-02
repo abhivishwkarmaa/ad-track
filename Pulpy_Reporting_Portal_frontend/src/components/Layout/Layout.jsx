@@ -224,7 +224,9 @@ function Layout() {
                         expiredWarningAlert={isExpired ? '⚠ Your subscription has expired. Please renew your plan.' : null}
                     />
                     <main className="layout-content">
-                        <Outlet />
+                        <div className="layout-page-shell">
+                            <Outlet />
+                        </div>
                     </main>
                 </div>
             </div>

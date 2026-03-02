@@ -1,6 +1,6 @@
 .offer-page {
     animation: fadeIn 0.3s ease;
-    padding: 20px;
+    padding: 0 0 20px;
 }
 
 .offer-header {
@@ -771,6 +771,15 @@
 .offer-header-actions {
     display: flex;
     gap: 12px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.offer-two-column-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
 .offer-detail-search {
@@ -833,6 +842,153 @@
     text-transform: capitalize;
 }
 
+/* Offer Detail stats cards (Dashboard-style) */
+.offer-stats-cards-box {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    border: 1px solid var(--border-light);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.offer-stats-cards-inner {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.offer-stat-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    min-width: 0;
+    min-height: 72px;
+    height: 100%;
+    flex: 1 1 100%;
+    max-width: 100%;
+    overflow: visible;
+}
+
+.offer-stat-item:hover {
+    border-color: var(--border-color);
+}
+
+.offer-stat-item-icon {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.offer-stat-item-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.offer-stat-item-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+}
+
+.offer-stat-item-value {
+    font-size: clamp(18px, 1.3vw, 22px);
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1;
+    white-space: nowrap;
+    letter-spacing: -0.2px;
+}
+
+.offer-stat-item-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.45px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.offer-stat-item.stat-item-purple .offer-stat-item-icon {
+    background: rgba(156, 39, 176, 0.15);
+    color: #9C27B0;
+}
+
+.offer-stat-item.stat-item-teal .offer-stat-item-icon {
+    background: rgba(0, 188, 212, 0.15);
+    color: #00BCD4;
+}
+
+.offer-stat-item.stat-item-green .offer-stat-item-icon {
+    background: rgba(76, 175, 80, 0.15);
+    color: #4CAF50;
+}
+
+.offer-stat-item.stat-item-amber .offer-stat-item-icon {
+    background: rgba(255, 152, 0, 0.15);
+    color: #FF9800;
+}
+
+.offer-stat-item.stat-item-red .offer-stat-item-icon {
+    background: rgba(244, 67, 54, 0.15);
+    color: #F44336;
+}
+
+.offer-stat-item.stat-item-profit .offer-stat-item-icon {
+    background: rgba(76, 175, 80, 0.15);
+    color: #2E7D32;
+}
+
+.offer-stat-item.stat-item-profit .offer-stat-item-value {
+    color: #2E7D32;
+}
+
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--bg-primary) 0%,
+        var(--border-light) 50%,
+        var(--bg-primary) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+}
+
+.offer-stat-icon-skeleton {
+    width: 22px;
+    height: 22px;
+}
+
+.offer-stat-value-skeleton {
+    width: 62px;
+    height: 16px;
+}
+
+.offer-stat-label-skeleton {
+    width: 72px;
+    height: 10px;
+}
+
 /* Button Sizes */
 .btn-lg {
     padding: 14px 28px;
@@ -867,8 +1023,13 @@
 }
 
 @media (max-width: 768px) {
+    .offer-header-actions {
+        width: 100%;
+        flex-direction: column;
+    }
+
     .offer-page {
-        padding: 16px;
+        padding: 0 0 16px;
     }
 
     .offer-header {
@@ -1256,7 +1417,7 @@
 
 @media (max-width: 480px) {
     .offer-page {
-        padding: 12px;
+        padding: 0 0 12px;
     }
 
     .offer-header-left h1 {
@@ -1290,6 +1451,32 @@
     .offer-pagination-btn {
         padding: 6px 12px;
         font-size: 12px;
+    }
+}
+
+@media (min-width: 640px) {
+    .offer-stat-item {
+        flex: 0 1 calc((100% - 10px) / 2);
+        max-width: calc((100% - 10px) / 2);
+    }
+}
+
+@media (min-width: 1024px) {
+    .offer-stat-item {
+        flex: 0 1 calc((100% - 30px) / 4);
+        max-width: calc((100% - 30px) / 4);
+    }
+
+    .offer-two-column-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 30px;
+    }
+}
+
+@media (min-width: 1400px) {
+    .offer-stat-item {
+        flex: 0 1 calc((100% - 30px) / 4);
+        max-width: calc((100% - 30px) / 4);
     }
 }
 

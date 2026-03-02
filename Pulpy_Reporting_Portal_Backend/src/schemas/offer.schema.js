@@ -42,6 +42,15 @@ export const searchOffersQuerySchema = {
   },
 };
 
+export const offerStatsQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    date_from: { type: 'string', format: 'date' },
+    date_to: { type: 'string', format: 'date' },
+  },
+};
+
 export const createOfferSchema = {
   type: 'object',
   additionalProperties: false,

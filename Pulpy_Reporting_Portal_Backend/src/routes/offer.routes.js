@@ -5,6 +5,7 @@ import {
   changeOfferStatusSchema,
   createOfferSchema,
   listOffersQuerySchema,
+  offerStatsQuerySchema,
   offerIdParamSchema,
   searchOffersQuerySchema,
   updateAssignmentSchema,
@@ -119,6 +120,7 @@ async function offerRoutes(fastify) {
     {
       schema: {
         params: offerIdParamSchema,
+        querystring: offerStatsQuerySchema,
       },
     },
     offerController.getStats

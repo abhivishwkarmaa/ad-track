@@ -4,7 +4,6 @@ import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
-import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './Reports.css';
 
 // Icons
@@ -76,6 +75,7 @@ const AVAILABLE_METRICS = [
     { id: 'conversions', label: 'Total Conversions' },
     { id: 'approved_conversions', label: 'Approved Conversions' },
     { id: 'pending_conversions', label: 'Pending Conversions' },
+    { id: 'rejected_conversions', label: 'Rejected Conversions' },
     { id: 'revenue', label: 'Advertiser Payout' },
     { id: 'payout', label: 'Publisher Total Payout' },
     { id: 'pending_payout', label: 'Publisher Pending Payout' },
@@ -171,7 +171,9 @@ function DetailedReports() {
     // Checkbox selections
     // Checkbox selections
     const initialDims = searchParams.get('groupBy') ? searchParams.get('groupBy').split(',') : ['offer_id'];
-    const initialMetrics = searchParams.get('metrics') ? searchParams.get('metrics').split(',') : ['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout'];
+    const initialMetrics = searchParams.get('metrics')
+        ? searchParams.get('metrics').split(',')
+        : ['clicks', 'conversions', 'pending_conversions', 'approved_conversions', 'rejected_conversions'];
 
     // If URL has no group params, default to Detailed View (empty group)
     const [selectedDims, setSelectedDims] = useState(initialDims);
@@ -181,7 +183,7 @@ function DetailedReports() {
     const [pendingDims, setPendingDims] = useState(initialDims);
     const [pendingMetrics, setPendingMetrics] = useState(initialMetrics);
 
-    const [showFilters, setShowFilters] = useState(false);
+    const [showFilters, setShowFilters] = useState(true);
 
     // Fetch filter options
     useEffect(() => {
@@ -428,6 +430,9 @@ function DetailedReports() {
         }
     }, [isAggregated, selectedDims, selectedMetrics]);
 
+    const isInitialLoading = loading && reports.length === 0;
+    const isRefreshing = loading && reports.length > 0;
+
     return (
         <div className="reports-page">
             <div className="reports-header">
@@ -602,59 +607,98 @@ function DetailedReports() {
                     <div className="filter-actions">
                         <button className="btn btn-secondary" onClick={() => {
                             setPendingDims(['offer_id']);
-                            setPendingMetrics(['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout']);
+                            setPendingMetrics(['clicks', 'conversions', 'pending_conversions', 'approved_conversions', 'rejected_conversions']);
                             setSelectedDims(['offer_id']);
-                            setSelectedMetrics(['clicks', 'conversions', 'revenue', 'pending_payout', 'approved_payout']);
+                            setSelectedMetrics(['clicks', 'conversions', 'pending_conversions', 'approved_conversions', 'rejected_conversions']);
                         }}>Reset</button>
                         <button className="btn btn-primary" onClick={handleApply} style={{ minWidth: '150px' }}>Apply Report</button>
                     </div>
                 </div>
             )}
 
+            {isRefreshing && (
+                <div className="reports-refresh-indicator" role="status" aria-live="polite">
+                    <span className="reports-refresh-dot" />
+                    Updating report data...
+                </div>
+            )}
+
             <div className="reports-table-container">
-                {loading ? (
-                    <SkeletonTable rows={10} cols={Math.max(tableColumns.length, 6)} />
-                ) : (
-                    <table className="reports-table">
-                        <thead>
+                <div className={`reports-progress-bar ${loading ? 'active' : ''}`} aria-hidden="true" />
+                <table className="reports-table reports-table-desktop">
+                    <thead>
+                        <tr>
+                            {tableColumns.map(col => (
+                                <th key={col.id}>{col.label}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {reports.length === 0 ? (
                             <tr>
-                                {tableColumns.map(col => (
-                                    <th key={col.id}>{col.label}</th>
-                                ))}
+                                <td colSpan={tableColumns.length} style={{ textAlign: 'center', padding: '40px' }}>
+                                    {isInitialLoading ? 'Loading reports...' : 'No data found'}
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            {reports.length === 0 ? (
-                                <tr>
-                                    <td colSpan={tableColumns.length} style={{ textAlign: 'center', padding: '40px' }}>No data found</td>
+                        ) : (
+                            reports.map((row, idx) => (
+                                <tr key={idx}>
+                                    {tableColumns.map(col => {
+                                        const val = row[col.id];
+                                        if (col.id === 'referrer' || col.id === 'referer') {
+                                            const rawVal = val ? String(val).trim() : '';
+                                            if (!rawVal) return <td key={col.id}><span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: 'var(--bg-secondary, #f0f0f0)', color: 'var(--text-secondary, #888)', fontStyle: 'italic' }}>Direct</span></td>;
+                                            return <td key={col.id} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={val}>{val}</td>;
+                                        }
+                                        if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
+                                        if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
+                                        if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
+                                        if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
+                                        if (col.id === 'click_created_at') return <td key={col.id}>{formatDate(val)}</td>;
+                                        if (col.id === 'date_group' || col.id === 'hour_group') return <td key={col.id}>{val}</td>;
+                                        return <td key={col.id}>{val !== undefined && val !== null ? val : '-'}</td>;
+                                    })}
                                 </tr>
-                            ) : (
-                                reports.map((row, idx) => (
-                                    <tr key={idx}>
-                                        {tableColumns.map(col => {
-                                            const val = row[col.id];
-                                            // Referrer: show 'Direct' badge when null/empty/whitespace
-                                            if (col.id === 'referrer' || col.id === 'referer') {
-                                                const rawVal = val ? String(val).trim() : '';
-                                                if (!rawVal) return <td key={col.id}><span style={{ fontSize: '11px', padding: '2px 7px', borderRadius: '10px', background: 'var(--bg-secondary, #f0f0f0)', color: 'var(--text-secondary, #888)', fontStyle: 'italic' }}>Direct</span></td>;
-                                                return <td key={col.id} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={val}>{val}</td>;
-                                            }
-                                            if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
-                                            if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
-                                            if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
-                                            if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
-                                            if (col.id === 'click_created_at') return <td key={col.id}>{formatDate(val)}</td>;
-                                            if (col.id === 'date_group' || col.id === 'hour_group') {
-                                                return <td key={col.id}>{val}</td>;
-                                            }
-                                            return <td key={col.id}>{val !== undefined && val !== null ? val : '-'}</td>;
-                                        })}
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                )}
+                            ))
+                        )}
+                    </tbody>
+                </table>
+
+                <div className="reports-mobile-list">
+                    {reports.length === 0 ? (
+                        <div className="reports-mobile-empty">{isInitialLoading ? 'Loading reports...' : 'No data found'}</div>
+                    ) : (
+                        reports.map((row, idx) => (
+                            <div key={`mobile-row-${idx}`} className="reports-mobile-card">
+                                {tableColumns.map((col) => {
+                                    const val = row[col.id];
+                                    let displayValue = val !== undefined && val !== null ? val : '-';
+
+                                    if (col.id === 'offer_id') {
+                                        displayValue = row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id;
+                                    } else if (col.id === 'publisher_id') {
+                                        displayValue = row.publisher_name || row.publisher_company
+                                            ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
+                                            : row.publisher_id;
+                                    } else if (col.id === 'click_created_at') {
+                                        displayValue = formatDate(val);
+                                    } else if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) {
+                                        displayValue = formatCurrency(val);
+                                    }
+
+                                    return (
+                                        <div className="reports-mobile-item" key={`${col.id}-mobile-val-${idx}`}>
+                                            <span className="reports-mobile-label">{col.label}</span>
+                                            <span className="reports-mobile-value">
+                                                {col.id === 'conversion_status' ? getStatusBadge(val) : displayValue}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
             {/* Pagination */}
             {

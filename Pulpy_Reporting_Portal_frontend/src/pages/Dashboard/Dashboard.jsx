@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
 import { formatDateIST } from '../../utils/dateTime';
+import { getTimelineRange } from '../../utils/timelineRange';
+import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import './Dashboard.css';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -89,6 +91,27 @@ const formatCurrency = (amount) => {
     return `$${parseFloat(amount).toFixed(2)}`;
 };
 
+const StatCard = ({ loading, icon, value, label, className = '' }) => (
+    <div className={`stat-item ${className}`}>
+        <div className="stat-item-icon">
+            {loading ? <span className="skeleton stat-icon-skeleton" /> : icon}
+        </div>
+        <div className="stat-item-content">
+            {loading ? (
+                <>
+                    <span className="skeleton stat-value-skeleton" />
+                    <span className="skeleton stat-label-skeleton" />
+                </>
+            ) : (
+                <>
+                    <span className="stat-item-value">{value}</span>
+                    <span className="stat-item-label">{label}</span>
+                </>
+            )}
+        </div>
+    </div>
+);
+
 // --- SKELETON COMPONENTS ---
 const SkeletonStatCard = () => (
     <div className="stat-card skeleton-stat-card">
@@ -149,6 +172,7 @@ function Dashboard() {
     const { refreshKey } = useRefresh();
 
     const [dateFilter, setDateFilter] = useState('today');
+    const [customRange, setCustomRange] = useState({ from: '', to: '' });
 
     // Per-section state for progressive loading - show data as each API returns
     const [cards, setCards] = useState(null);
@@ -169,81 +193,32 @@ function Dashboard() {
 
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const formatDate = (d) => {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${y}-${m}-${day}`;
-        };
+        const current = getTimelineRange(dateFilter, customRange);
+        const fromDate = current.from ? new Date(current.from) : null;
+        const toDate = current.to ? new Date(current.to) : null;
 
-        const ranges = {
-            today: { from: formatDate(today), to: formatDate(today) },
-            yesterday: (() => {
-                const d = new Date(today);
-                d.setDate(d.getDate() - 1);
-                return { from: formatDate(d), to: formatDate(d) };
-            })(),
-            this_week: (() => {
-                const d = new Date(today);
-                d.setDate(d.getDate() - d.getDay());
-                return { from: formatDate(d), to: formatDate(today) };
-            })(),
-            this_month: (() => {
-                const d = new Date(today.getFullYear(), today.getMonth(), 1);
-                return { from: formatDate(d), to: formatDate(today) };
-            })(),
-            last_month: (() => {
-                const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                const end = new Date(today.getFullYear(), today.getMonth(), 0);
-                return { from: formatDate(start), to: formatDate(end) };
-            })()
-        };
-
-        // Previous period ranges for comparison (today vs yesterday, this week vs previous week, etc.)
-        const prevRanges = {
-            today: (() => {
-                const d = new Date(today);
-                d.setDate(d.getDate() - 1);
-                return { from: formatDate(d), to: formatDate(d) };
-            })(),
-            yesterday: (() => {
-                const d = new Date(today);
-                d.setDate(d.getDate() - 2);
-                return { from: formatDate(d), to: formatDate(d) };
-            })(),
-            this_week: (() => {
-                const weekStart = new Date(today);
-                weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-                const prevEnd = new Date(weekStart);
-                prevEnd.setDate(prevEnd.getDate() - 1);
-                const prevStart = new Date(prevEnd);
-                prevStart.setDate(prevStart.getDate() - 6);
-                return { from: formatDate(prevStart), to: formatDate(prevEnd) };
-            })(),
-            this_month: (() => {
-                const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                const end = new Date(today.getFullYear(), today.getMonth(), 0);
-                return { from: formatDate(start), to: formatDate(end) };
-            })(),
-            last_month: (() => {
-                const start = new Date(today.getFullYear(), today.getMonth() - 2, 1);
-                const end = new Date(today.getFullYear(), today.getMonth() - 1, 0);
-                return { from: formatDate(start), to: formatDate(end) };
-            })()
-        };
+        let previous = null;
+        if (fromDate && toDate) {
+            const dayMs = 24 * 60 * 60 * 1000;
+            const days = Math.max(1, Math.floor((toDate - fromDate) / dayMs) + 1);
+            const prevTo = new Date(fromDate);
+            prevTo.setDate(prevTo.getDate() - 1);
+            const prevFrom = new Date(prevTo);
+            prevFrom.setDate(prevFrom.getDate() - (days - 1));
+            const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            previous = { from: toYmd(prevFrom), to: toYmd(prevTo) };
+        }
 
         const labels = {
             today: { current: 'Today', previous: 'Yesterday' },
             yesterday: { current: 'Yesterday', previous: 'Day before' },
             this_week: { current: 'This Week', previous: 'Previous Week' },
+            last_week: { current: 'Last Week', previous: 'Week before' },
             this_month: { current: 'This Month', previous: 'Previous Month' },
-            last_month: { current: 'Last Month', previous: 'Month before' }
+            last_month: { current: 'Last Month', previous: 'Month before' },
+            custom: { current: 'Custom Range', previous: 'Previous Range' }
         };
 
-        const current = ranges[dateFilter] || ranges.today;
-        const previous = prevRanges[dateFilter] || null;
         const labelsForPeriod = labels[dateFilter] || { current: dateFilter.replace('_', ' '), previous: 'Previous' };
 
         return {
@@ -251,13 +226,17 @@ function Dashboard() {
             previousRange: previous,
             periodLabels: labelsForPeriod
         };
-    }, [dateFilter]);
+    }, [dateFilter, customRange]);
 
     const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
     const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
 
     // Progressive loading - jo API pehle ready ho uska data dikha do, sab ka wait mat karo
     useEffect(() => {
+        if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) {
+            return;
+        }
+
         let cancelled = false;
         const mountCheck = () => !cancelled;
 
@@ -350,6 +329,58 @@ function Dashboard() {
         day: 'numeric'
     }, 'en-US');
 
+    const statCardsConfig = [
+        {
+            key: 'total-clicks',
+            className: 'stat-item-purple',
+            icon: <ClickIcon />,
+            value: formatNumber(cardsData.clicks?.total || 0),
+            label: 'Total Clicks'
+        },
+        {
+            key: 'total-conversions',
+            className: 'stat-item-teal',
+            icon: <ConversionIcon />,
+            value: formatNumber(cardsData.conversions?.total || 0),
+            label: 'Total Conversions'
+        },
+        {
+            key: 'approved-conversions',
+            className: 'stat-item-green',
+            icon: <ConversionIcon />,
+            value: formatNumber(cardsData.conversions?.approved || 0),
+            label: 'Approved Conversions'
+        },
+        {
+            key: 'pending-conversions',
+            className: 'stat-item-amber',
+            icon: <ConversionIcon />,
+            value: formatNumber(cardsData.conversions?.pending || 0),
+            label: 'Pending Conversions'
+        },
+        {
+            key: 'total-revenue',
+            className: 'stat-item-red',
+            icon: <RevenueIcon />,
+            value: formatCurrency(cardsData.revenue?.total || 0),
+            label: 'Total Revenue'
+        },
+        {
+            key: 'approved-payout',
+            className: 'stat-item-green',
+            icon: <RevenueIcon />,
+            value: formatCurrency(cardsData.revenue?.approved_payout || 0),
+            label: 'Approved Payout'
+        },
+        {
+            key: 'profit',
+            className: 'stat-item-profit',
+            icon: <RevenueIcon />,
+            value: formatCurrency((cardsData.revenue?.total || 0) - (cardsData.revenue?.approved_payout || 0)),
+            label: 'Profit'
+        }
+    ];
+
     return (
         <div className="dashboard">
             {/* Header */}
@@ -360,21 +391,13 @@ function Dashboard() {
                 </div>
                 <div className="dashboard-header-right">
 
-                    <div className="date-filter-container">
-                        <label htmlFor="date-filter">Filter:</label>
-                        <select
-                            id="date-filter"
-                            className="date-filter-select"
-                            value={dateFilter}
-                            onChange={(e) => setDateFilter(e.target.value)}
-                        >
-                            <option value="today">Today</option>
-                            <option value="yesterday">Yesterday</option>
-                            <option value="this_week">This Week</option>
-                            <option value="this_month">This Month</option>
-                            <option value="last_month">Last Month</option>
-                        </select>
-                    </div>
+                    <TimelineFilter
+                        value={dateFilter}
+                        customRange={customRange}
+                        onPresetChange={setDateFilter}
+                        onCustomRangeChange={setCustomRange}
+                        className="date-filter-container"
+                    />
                     <span className="welcome-text">Welcome, <strong>{user?.name || user?.fullName || 'User'}</strong></span>
                 </div>
             </div>
@@ -401,71 +424,18 @@ function Dashboard() {
 
             {/* KPI Cards - One box like Quick Actions */}
             <div className="stats-cards-box">
-                {loadingCards ? (
-                    <div className="stats-cards-inner">
-                        {Array.from({ length: 7 }).map((_, i) => (
-                            <div key={i} className="stat-item stat-item-skeleton">
-                                <div className="stat-item-icon skeleton" style={{ width: 32, height: 32, borderRadius: 6 }} />
-                                <div className="stat-item-content">
-                                    <div className="skeleton" style={{ height: 18, width: 60, marginBottom: 4 }} />
-                                    <div className="skeleton" style={{ height: 12, width: 80 }} />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="stats-cards-inner">
-                        <div className="stat-item stat-item-purple">
-                            <div className="stat-item-icon"><ClickIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatNumber(cardsData.clicks?.total || 0)}</span>
-                                <span className="stat-item-label">Total Clicks</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-teal">
-                            <div className="stat-item-icon"><ConversionIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.total || 0)}</span>
-                                <span className="stat-item-label">Total Conversions</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-green">
-                            <div className="stat-item-icon"><ConversionIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.approved || 0)}</span>
-                                <span className="stat-item-label">Approved Conversions</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-amber">
-                            <div className="stat-item-icon"><ConversionIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatNumber(cardsData.conversions?.pending || 0)}</span>
-                                <span className="stat-item-label">Pending Conversions</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-red">
-                            <div className="stat-item-icon"><RevenueIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatCurrency(cardsData.revenue?.total || 0)}</span>
-                                <span className="stat-item-label">Total Revenue</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-green">
-                            <div className="stat-item-icon"><RevenueIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatCurrency(cardsData.revenue?.approved_payout || 0)}</span>
-                                <span className="stat-item-label">Approved Payout</span>
-                            </div>
-                        </div>
-                        <div className="stat-item stat-item-profit">
-                            <div className="stat-item-icon"><RevenueIcon /></div>
-                            <div className="stat-item-content">
-                                <span className="stat-item-value">{formatCurrency((cardsData.revenue?.total || 0) - (cardsData.revenue?.approved_payout || 0))}</span>
-                                <span className="stat-item-label">Profit</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                <div className="stats-cards-inner">
+                    {statCardsConfig.map((card) => (
+                        <StatCard
+                            key={card.key}
+                            loading={loadingCards}
+                            className={card.className}
+                            icon={card.icon}
+                            value={card.value}
+                            label={card.label}
+                        />
+                    ))}
+                </div>
             </div>
 
             <div className="dashboard-content">

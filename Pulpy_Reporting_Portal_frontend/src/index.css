@@ -179,6 +179,15 @@ h3 {
   padding: 0 20px;
 }
 
+/* Mobile-first page wrapper (Tailwind max-w-7xl equivalent) */
+.app-page-container {
+  width: 100%;
+  max-width: 80rem;
+  margin: 0 auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
 .flex {
   display: flex;
 }
@@ -213,6 +222,10 @@ h3 {
 
 .gap-4 {
   gap: 32px;
+}
+
+.rounded-xl {
+  border-radius: var(--radius-xl);
 }
 
 .mt-1 {
@@ -1002,6 +1015,11 @@ select.form-control {
     padding: 0 16px;
   }
 
+  .app-page-container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
   .card {
     padding: 16px;
   }
@@ -1119,6 +1137,11 @@ select.form-control {
     padding: 0 12px;
   }
 
+  .app-page-container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
   .page-title {
     font-size: 18px;
   }
@@ -1148,6 +1171,20 @@ select.form-control {
   .table th,
   .table td {
     padding: 10px 12px;
+  }
+}
+
+@media (min-width: 640px) {
+  .app-page-container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-page-container {
+    padding-left: 2rem;
+    padding-right: 2rem;
   }
 }
 

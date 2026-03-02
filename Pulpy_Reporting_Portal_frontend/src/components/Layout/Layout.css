@@ -6,13 +6,15 @@
 .layout-main {
     flex: 1;
     margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
     display: flex;
     flex-direction: column;
-    transition: margin-left var(--transition-normal);
+    transition: margin-left var(--transition-normal), width var(--transition-normal);
 }
 
 .layout.sidebar-collapsed .layout-main {
     margin-left: var(--sidebar-collapsed-width);
+    width: calc(100% - var(--sidebar-collapsed-width));
 }
 
 .header-mobile-wrapper {
@@ -25,7 +27,7 @@
 
 .layout-content {
     flex: 1;
-    padding: 24px;
+    padding: 16px;
     background: var(--bg-primary);
     min-height: calc(100vh - var(--header-height));
     min-width: 0;
@@ -34,10 +36,23 @@
     transition: padding var(--transition-normal), background-color var(--transition-normal);
 }
 
+.layout-page-shell {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding-left: 0;
+    padding-right: 0;
+    box-sizing: border-box;
+}
+
+.layout-page-shell>* {
+    width: 100%;
+}
+
 /* Tablet (768px - 1024px) */
 @media (min-width: 769px) and (max-width: 1024px) {
     .layout-content {
-        padding: 20px;
+        padding: 14px;
     }
 }
 
@@ -69,7 +84,7 @@
     }
 
     .layout-content {
-        padding: 16px;
+        padding: 10px;
         margin-top: var(--header-height);
         min-height: calc(100vh - var(--header-height));
     }
@@ -78,7 +93,7 @@
 /* Small Mobile (up to 480px) */
 @media (max-width: 480px) {
     .layout-content {
-        padding: 12px;
+        padding: 8px;
     }
 }
 

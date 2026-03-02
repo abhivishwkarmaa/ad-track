@@ -401,8 +401,9 @@ export const offersAPI = {
     getOffer: async (id) => {
         return apiRequest(`/api/admin/offers/${id}`);
     },
-    getOfferStats: async (id) => {
-        return apiRequest(`/api/admin/offers/${id}/stats`);
+    getOfferStats: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/offers/${id}/stats${queryString ? `?${queryString}` : ''}`);
     },
     getOfferDailyStats: async (id, params = {}) => {
         const queryString = new URLSearchParams(params).toString();

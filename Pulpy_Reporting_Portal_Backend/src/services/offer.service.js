@@ -662,13 +662,14 @@ class OfferService {
     }
   }
 
-  async getOfferStats(id, tenantId = null) {
+  async getOfferStats(id, tenantId = null, filters = {}) {
     try {
       // 1. Resolve internal ID
       const offer = await this.getOfferById(id, tenantId);
       if (!offer) {
         return {
           total_clicks: 0,
+          unique_clicks: 0,
           unique_publishers: 0,
           total_impressions: 0,
           total_conversions: 0,
@@ -678,64 +679,149 @@ class OfferService {
           total_revenue: 0,
           total_payout: 0,
           total_profit: 0,
-          conversion_rate: 0
+          conversion_rate: 0,
+          cap_usage: {
+            daily_cap: 0,
+            daily_used: 0,
+            monthly_cap: 0,
+            monthly_used: 0,
+            total_cap: 0,
+            total_used: 0,
+          },
         };
       }
       const internalId = offer.id;
 
-      // ✅ CRITICAL: Add tenant_id filtering to all subqueries for tenant isolation
-      const tenantFilter = tenantId ? ' AND tenant_id = ?' : '';
+      const dateFrom = filters?.date_from || null;
+      const dateTo = filters?.date_to || null;
+      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+      const rangeEndExclusive = dateTo ? toUtcIstEnd(dateTo) : null;
 
-      // Fix: Ensure correct number of params for all 13 subqueries + 2 main query params (id, tenant_id)
-      const params = tenantId
-        ? [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, internalId, tenantId]
-        : [internalId];
+      const buildTimeFilteredWhere = (tableAlias = '') => {
+        const prefix = tableAlias ? `${tableAlias}.` : '';
+        let clause = `${prefix}offer_id = ?`;
+        const params = [internalId];
 
-      const [statsRows] = await pool.query(
-        `SELECT 
-          (SELECT COUNT(*) FROM clicks WHERE offer_id = o.id${tenantFilter}) as total_clicks,
-          (SELECT COUNT(DISTINCT publisher_id) FROM clicks WHERE offer_id = o.id${tenantFilter}) as unique_publishers,
-          (SELECT COUNT(*) FROM impressions WHERE offer_id = o.id${tenantFilter}) as total_impressions,
-          (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_conversions,
-          (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_conversions,
-          (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_conversions,
-          (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'rejected'${tenantFilter}) as rejected_conversions,
-          (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_revenue,
-          (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_revenue,
-          (SELECT COALESCE(SUM(amount), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_revenue,
-          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id${tenantFilter}) as total_payout,
-          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'approved'${tenantFilter}) as approved_payout,
-          (SELECT COALESCE(SUM(payout), 0) FROM conversions WHERE offer_id = o.id AND status = 'pending'${tenantFilter}) as pending_payout
-        FROM offers o
-        WHERE o.id = ?${tenantId ? ' AND o.tenant_id = ?' : ''}`,
-        params
+        if (tenantId) {
+          clause += ` AND ${prefix}tenant_id = ?`;
+          params.push(tenantId);
+        }
+        if (rangeStart) {
+          clause += ` AND ${prefix}created_at >= ?`;
+          params.push(rangeStart);
+        }
+        if (rangeEndExclusive) {
+          clause += ` AND ${prefix}created_at <= ?`;
+          params.push(rangeEndExclusive);
+        }
+
+        return { clause, params };
+      };
+
+      const clicksWhere = buildTimeFilteredWhere();
+      const [clickRows] = await pool.query(
+        `SELECT
+          COUNT(*) AS total_clicks,
+          COUNT(DISTINCT click_uuid) AS unique_clicks,
+          COUNT(DISTINCT publisher_id) AS unique_publishers
+         FROM clicks
+         WHERE ${clicksWhere.clause}`,
+        clicksWhere.params
       );
-      const stats = Array.isArray(statsRows) ? statsRows[0] : statsRows;
 
-      const conversionRate = stats.total_clicks > 0
-        ? ((stats.total_conversions || 0) / stats.total_clicks) * 100
+      const [impressionsRows] = await pool.query(
+        `SELECT COUNT(*) AS total_impressions
+         FROM impressions
+         WHERE ${clicksWhere.clause}`,
+        clicksWhere.params
+      );
+
+      const convWhere = buildTimeFilteredWhere();
+      const [conversionRows] = await pool.query(
+        `SELECT
+          COUNT(*) AS total_conversions,
+          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved_conversions,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_conversions,
+          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected_conversions,
+          COALESCE(SUM(amount), 0) AS total_revenue,
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) AS approved_revenue,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) AS pending_revenue,
+          COALESCE(SUM(payout), 0) AS total_payout,
+          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS approved_payout,
+          COALESCE(SUM(CASE WHEN status = 'pending' THEN payout ELSE 0 END), 0) AS pending_payout
+         FROM conversions
+         WHERE ${convWhere.clause}`,
+        convWhere.params
+      );
+
+      const clickStats = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+      const conversionStats = Array.isArray(conversionRows) ? conversionRows[0] : conversionRows;
+      const impressionsStats = Array.isArray(impressionsRows) ? impressionsRows[0] : impressionsRows;
+
+      const conversionRate = (clickStats.total_clicks || 0) > 0
+        ? ((conversionStats.total_conversions || 0) / clickStats.total_clicks) * 100
         : 0;
 
-      const totalRevenue = parseFloat(stats.total_revenue || 0);
-      const approvedPayout = parseFloat(stats.approved_payout || 0);
+      const totalRevenue = parseFloat(conversionStats.total_revenue || 0);
+      const approvedPayout = parseFloat(conversionStats.approved_payout || 0);
       const totalProfit = totalRevenue - approvedPayout;
 
+      const now = new Date();
+      const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+      const istToday = istNow.toISOString().split('T')[0];
+      const refDate = dateTo || dateFrom || istToday;
+      const [year, month] = refDate.split('-').map(Number);
+      const monthStartDate = new Date(year, month - 1, 1);
+      const monthEndDate = new Date(year, month, 0);
+      const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const monthStart = toUtcIstStart(toYmd(monthStartDate));
+      const monthEnd = toUtcIstEnd(toYmd(monthEndDate));
+      const dayStart = toUtcIstStart(refDate);
+      const dayEnd = toUtcIstEnd(refDate);
+
+      const usageTenantClause = tenantId ? ' AND tenant_id = ?' : '';
+      const usageTenantParams = tenantId ? [tenantId] : [];
+
+      const [dailyUsageRows] = await pool.query(
+        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+        [internalId, ...usageTenantParams, dayStart, dayEnd]
+      );
+      const [monthlyUsageRows] = await pool.query(
+        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+        [internalId, ...usageTenantParams, monthStart, monthEnd]
+      );
+      const [totalUsageRows] = await pool.query(
+        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause}`,
+        [internalId, ...usageTenantParams]
+      );
+
       return {
-        total_clicks: parseInt(stats.total_clicks || 0),
-        unique_publishers: parseInt(stats.unique_publishers || 0),
-        total_impressions: parseInt(stats.total_impressions || 0),
-        total_conversions: parseInt(stats.total_conversions || 0),
-        approved_conversions: parseInt(stats.approved_conversions || 0),
-        pending_conversions: parseInt(stats.pending_conversions || 0),
-        rejected_conversions: parseInt(stats.rejected_conversions || 0),
+        total_clicks: parseInt(clickStats.total_clicks || 0),
+        unique_clicks: parseInt(clickStats.unique_clicks || 0),
+        unique_publishers: parseInt(clickStats.unique_publishers || 0),
+        total_impressions: parseInt(impressionsStats.total_impressions || 0),
+        total_conversions: parseInt(conversionStats.total_conversions || 0),
+        approved_conversions: parseInt(conversionStats.approved_conversions || 0),
+        pending_conversions: parseInt(conversionStats.pending_conversions || 0),
+        rejected_conversions: parseInt(conversionStats.rejected_conversions || 0),
         total_revenue: totalRevenue,
-        approved_revenue: parseFloat(stats.approved_revenue || 0),
-        pending_revenue: parseFloat(stats.pending_revenue || 0),
-        total_payout: parseFloat(stats.total_payout || 0),
+        approved_revenue: parseFloat(conversionStats.approved_revenue || 0),
+        pending_revenue: parseFloat(conversionStats.pending_revenue || 0),
+        total_payout: parseFloat(conversionStats.total_payout || 0),
         approved_payout: approvedPayout,
-        pending_payout: parseFloat(stats.pending_payout || 0),
+        pending_payout: parseFloat(conversionStats.pending_payout || 0),
         total_profit: totalProfit,
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
+        cap_usage: {
+          daily_cap: parseInt(offer.daily_cap || 0),
+          daily_used: parseInt((Array.isArray(dailyUsageRows) ? dailyUsageRows[0]?.used : dailyUsageRows?.used) || 0),
+          monthly_cap: parseInt(offer.monthly_cap || 0),
+          monthly_used: parseInt((Array.isArray(monthlyUsageRows) ? monthlyUsageRows[0]?.used : monthlyUsageRows?.used) || 0),
+          total_cap: parseInt(offer.total_cap || 0),
+          total_used: parseInt((Array.isArray(totalUsageRows) ? totalUsageRows[0]?.used : totalUsageRows?.used) || 0),
+        },
       };
     } catch (error) {
       logger.error('OfferService.getOfferStats error:', error);

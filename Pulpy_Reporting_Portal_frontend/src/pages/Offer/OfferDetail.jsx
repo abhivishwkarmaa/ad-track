@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
@@ -6,6 +6,8 @@ import { useRefresh } from '../../context/RefreshContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
+import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
+import { getTimelineRange } from '../../utils/timelineRange';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -78,7 +80,75 @@ const SearchIcon = () => (
     </svg>
 );
 
+const ClickIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
+);
+
+const ConversionIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+        <polyline points="17 6 23 6 23 12" />
+    </svg>
+);
+
+const RevenueIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <line x1="12" y1="1" x2="12" y2="23" />
+        <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+    </svg>
+);
+
+const RateIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <line x1="19" y1="5" x2="5" y2="19" />
+        <circle cx="6.5" cy="6.5" r="2.5" />
+        <circle cx="17.5" cy="17.5" r="2.5" />
+    </svg>
+);
+
+const OfferStatCard = ({ loading, icon, value, label, className }) => (
+    <div className={`offer-stat-item ${className}`}>
+        <div className="offer-stat-item-icon">
+            {loading ? <span className="skeleton offer-stat-icon-skeleton" /> : icon}
+        </div>
+        <div className="offer-stat-item-content">
+            {loading ? (
+                <>
+                    <span className="skeleton offer-stat-value-skeleton" />
+                    <span className="skeleton offer-stat-label-skeleton" />
+                </>
+            ) : (
+                <>
+                    <span className="offer-stat-item-value">{value}</span>
+                    <span className="offer-stat-item-label">{label}</span>
+                </>
+            )}
+        </div>
+    </div>
+);
+
 function OfferDetail() {
+    const OFFER_TIMELINE_OPTIONS = [
+        { id: 'since_created', label: 'Since Created' },
+        { id: 'today', label: 'Today' },
+        { id: 'yesterday', label: 'Yesterday' },
+        { id: 'this_week', label: 'This Week' },
+        { id: 'last_week', label: 'Last Week' },
+        { id: 'this_month', label: 'This Month' },
+        { id: 'last_month', label: 'Last Month' },
+        { id: 'custom', label: 'Custom Range' },
+    ];
+
+    const toIstYmd = (value) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
+        return istDate.toISOString().split('T')[0];
+    };
+
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
@@ -98,8 +168,9 @@ function OfferDetail() {
 
     // New states for granular data
     const [stats, setStats] = useState(null);
-    const [dailyStats, setDailyStats] = useState([]);
     const [loadingStats, setLoadingStats] = useState(false);
+    const [selectedRange, setSelectedRange] = useState('today');
+    const [customRange, setCustomRange] = useState({ from: '', to: '' });
     const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
     const [searchTerm, setSearchTerm] = useState('');
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
@@ -107,6 +178,18 @@ function OfferDetail() {
     const [searchLoading, setSearchLoading] = useState(false);
     const [showSearchResults, setShowSearchResults] = useState(false);
     const searchContainerRef = useRef(null);
+    const statsRequestRef = useRef(0);
+    const selectedTimelineRange = useMemo(() => {
+        if (selectedRange === 'since_created') {
+            const now = new Date();
+            const istToday = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+            return {
+                from: toIstYmd(offer?.created_at) || istToday,
+                to: istToday,
+            };
+        }
+        return getTimelineRange(selectedRange, customRange);
+    }, [selectedRange, customRange, offer?.created_at]);
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -127,55 +210,48 @@ function OfferDetail() {
             }
         };
 
-        const fetchStats = async () => {
-            if (!id) return;
-            try {
-                setLoadingStats(true);
-
-                // Get date range for last 7 days
-                const endDate = new Date();
-                const startDate = new Date();
-                startDate.setDate(endDate.getDate() - 6);
-
-                const formatDate = (date) => {
-                    const year = date.getFullYear();
-                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                    const day = String(date.getDate()).padStart(2, '0');
-                    return `${year}-${month}-${day}`;
-                };
-
-                const [statsRes, dailyRes] = await Promise.all([
-                    offersAPI.getOfferStats(id),
-                    offersAPI.getOfferDailyStats(id, {
-                        start_date: formatDate(startDate),
-                        end_date: formatDate(endDate)
-                    })
-                ]);
-
-                if (statsRes.success) setStats(statsRes.data);
-                if (dailyRes.success) {
-                    // Frontend filtering as fallback in case backend ignores params
-                    const cutoffDate = formatDate(startDate);
-                    // Filter where date is greater than or equal to cutoff date
-                    // Assumes date is in ISO format YYYY-MM-DD or similar sortable string
-                    const filteredData = dailyRes.data.filter(item => {
-                        const itemDate = item.date.substring(0, 10); // Ensure YYYY-MM-DD
-                        return itemDate >= cutoffDate;
-                    });
-                    setDailyStats(filteredData);
-                }
-            } catch (error) {
-                console.error('Error fetching stats:', error);
-            } finally {
-                setLoadingStats(false);
-            }
-        };
-
         if (id) {
             fetchOfferDetails();
-            fetchStats();
         }
     }, [id, refreshKey]);
+
+    useEffect(() => {
+        if (!id) return;
+        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
+            setStats(null);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            const requestId = ++statsRequestRef.current;
+            try {
+                setLoadingStats(true);
+                setStats(null);
+
+                const response = await offersAPI.getOfferStats(id, {
+                    date_from: selectedTimelineRange.from,
+                    date_to: selectedTimelineRange.to,
+                });
+
+                if (requestId !== statsRequestRef.current) return;
+                if (response.success) {
+                    setStats(response.data || null);
+                } else {
+                    setStats(null);
+                }
+            } catch (statsError) {
+                if (requestId !== statsRequestRef.current) return;
+                console.error('Error fetching offer stats:', statsError);
+                setStats(null);
+            } finally {
+                if (requestId === statsRequestRef.current) {
+                    setLoadingStats(false);
+                }
+            }
+        }, 250);
+
+        return () => clearTimeout(timer);
+    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -361,6 +437,28 @@ function OfferDetail() {
         return String(status).toLowerCase().replace(/\s+/g, '_');
     };
 
+    const formatNumber = (value) => {
+        const num = Number(value || 0);
+        return num.toLocaleString('en-US');
+    };
+
+    const formatCurrency = (value) => {
+        const amount = Number(value || 0);
+        return `${offer.offer_currency} ${amount.toFixed(2)}`;
+    };
+
+    const statsCards = [
+        { key: 'clicks', label: 'Total Clicks', value: formatNumber(stats?.total_clicks), className: 'stat-item-purple', icon: <ClickIcon /> },
+        { key: 'conversions', label: 'Total Conversions', value: formatNumber(stats?.total_conversions), className: 'stat-item-teal', icon: <ConversionIcon /> },
+        { key: 'approved', label: 'Approved Conversions', value: formatNumber(stats?.approved_conversions), className: 'stat-item-green', icon: <ConversionIcon /> },
+        { key: 'pending', label: 'Pending Conversions', value: formatNumber(stats?.pending_conversions), className: 'stat-item-amber', icon: <ConversionIcon /> },
+        { key: 'rejected', label: 'Rejected Conversions', value: formatNumber(stats?.rejected_conversions), className: 'stat-item-red', icon: <ConversionIcon /> },
+        { key: 'conversion-rate', label: 'Conversion Rate', value: `${Number(stats?.conversion_rate || 0).toFixed(2)}%`, className: 'stat-item-amber', icon: <RateIcon /> },
+        { key: 'revenue', label: 'Total Revenue', value: formatCurrency(stats?.total_revenue), className: 'stat-item-red', icon: <RevenueIcon /> },
+        { key: 'payout', label: 'Payout', value: formatCurrency(stats?.approved_payout), className: 'stat-item-green', icon: <RevenueIcon /> },
+        { key: 'profit', label: 'Total Profit', value: formatCurrency(stats?.total_profit), className: 'stat-item-profit', icon: <RevenueIcon /> },
+    ];
+
     return (
         <div className="offer-page">
             <div className="offer-header">
@@ -378,7 +476,7 @@ function OfferDetail() {
                         <p>Offer ID: {offer.public_offer_id || offer.display_id} | Status: <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span></p>
                     </div>
                 </div>
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="offer-header-actions">
                     <div className="offer-search offer-detail-search" ref={searchContainerRef}>
                         <SearchIcon />
                         <input
@@ -420,7 +518,7 @@ function OfferDetail() {
                             </div>
                         )}
                     </div>
-                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap', minWidth: '120px', justifyContent: 'center' }}>
+                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary">
                         <EditIcon />
                         <span>Edit Offer</span>
                     </Link>
@@ -433,7 +531,6 @@ function OfferDetail() {
                                 element.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             }
                         }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                     >
                         <EyeIcon />
                         View Publishers
@@ -441,83 +538,43 @@ function OfferDetail() {
                 </div>
             </div>
 
-            {/* Statistics Cards */}
-            {/* Statistics Cards */}
-            {loadingStats ? (
-                <div style={{ textAlign: 'center', padding: '20px' }}>Loading statistics...</div>
-            ) : stats && (
-                <div className="offer-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Clicks</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>{stats.total_clicks || 0}</div>
+            <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    <div>
+                        <h2 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: '600' }}>Performance Overview</h2>
+                        <div style={{ color: '#64748b', fontSize: '12px' }}>Data as of IST</div>
                     </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Conversions</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{stats.total_conversions || 0}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Approved Conversions</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{stats.approved_conversions || 0}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Pending Conversions</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffb800' }}>{stats.pending_conversions || 0}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Rejected Conversions</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#F44336' }}>{stats.rejected_conversions || 0}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Conversion Rate</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#FF9800' }}>{stats.conversion_rate?.toFixed(2) || '0.00'}%</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Revenue</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#2196F3' }}>{offer.offer_currency} {stats.total_revenue || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Payout</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#9C27B0' }}>{offer.offer_currency} {stats.approved_payout || '0.00'}</div>
-                    </div>
-                    <div className="stat-card" style={{ background: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                        <div className="stat-label" style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>Total Profit</div>
-                        <div className="stat-value" style={{ fontSize: '24px', fontWeight: 'bold', color: '#4CAF50' }}>{offer.offer_currency} {stats.total_profit || '0.00'}</div>
+                    <TimelineFilter
+                        value={selectedRange}
+                        options={OFFER_TIMELINE_OPTIONS}
+                        customRange={customRange}
+                        onPresetChange={setSelectedRange}
+                        onCustomRangeChange={setCustomRange}
+                    />
+                </div>
+
+                <div className="offer-stats-cards-box">
+                    <div className="offer-stats-cards-inner">
+                        {statsCards.map((card) => (
+                            <OfferStatCard
+                                key={card.key}
+                                loading={loadingStats}
+                                icon={card.icon}
+                                value={card.value}
+                                label={card.label}
+                                className={card.className}
+                            />
+                        ))}
                     </div>
                 </div>
-            )}
-
-            {/* Daily Activity */}
-            {dailyStats && dailyStats.length > 0 && (
-                <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
-                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Daily Activity (Last 7 Days)</h2>
-                    <div className="table-responsive">
-                        <table className="table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <thead>
-                                <tr style={{ borderBottom: '2px solid #f0f0f0' }}>
-                                    <th style={{ padding: '12px', textAlign: 'left', color: '#666' }}>Date</th>
-                                    <th style={{ padding: '12px', textAlign: 'right', color: '#666' }}>Clicks</th>
-                                    <th style={{ padding: '12px', textAlign: 'right', color: '#666' }}>Conversions</th>
-                                    <th style={{ padding: '12px', textAlign: 'right', color: '#666' }}>Conversion Rate</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {dailyStats.map((day, index) => (
-                                    <tr key={index} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                                        <td style={{ padding: '12px' }}>{formatDate(day.date)}</td>
-                                        <td style={{ padding: '12px', textAlign: 'right' }}>{day.clicks}</td>
-                                        <td style={{ padding: '12px', textAlign: 'right' }}>{day.conversions}</td>
-                                        <td style={{ padding: '12px', textAlign: 'right' }}>
-                                            {day.clicks > 0 ? ((day.conversions / day.clicks) * 100).toFixed(2) : '0.00'}%
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                {!loadingStats && !stats && (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', border: '1px dashed #d1d5db', borderRadius: '8px', marginTop: '12px' }}>
+                        No data available for this timeline.
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
+            <div className="offer-two-column-grid">
                 {/* Basic Information */}
                 <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
                     <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Basic Information</h2>
