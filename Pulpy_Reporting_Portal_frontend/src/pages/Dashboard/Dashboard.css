@@ -464,7 +464,7 @@
 
 .chart-card,
 .recent-offers-card {
-    min-height: 420px;
+    min-height: 340px;
 }
 
 .card-header {
@@ -720,7 +720,7 @@
 }
 
 .skeleton-chart {
-    height: 300px;
+    height: 240px;
     width: 100%;
 }
 
@@ -860,8 +860,8 @@
 .summary-chart {
     height: auto;
     width: 100%;
-    min-height: 220px;
-    aspect-ratio: 16 / 7;
+    min-height: 180px;
+    aspect-ratio: 16 / 8;
     margin-bottom: 12px;
     flex-shrink: 0;
 }
@@ -878,8 +878,8 @@
 
 .chart-wrapper {
     width: 100%;
-    height: 320px;
-    min-height: 320px;
+    height: 240px;
+    min-height: 240px;
     padding: 8px 16px 16px;
     box-sizing: border-box;
 }
@@ -1231,48 +1231,51 @@
 
 @media (min-width: 768px) {
     .dashboard-content {
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: 1fr;
     }
 
     .chart-card {
-        grid-column: span 6;
+        grid-column: span 1;
     }
 
     .recent-offers-card {
-        grid-column: span 6;
+        grid-column: span 1;
     }
 
     .summary-reports-card {
-        grid-column: span 6;
+        grid-column: span 1;
     }
 
     .offer-stats-card,
     .publisher-stats-card {
-        grid-column: span 6;
+        grid-column: span 1;
     }
 }
 
-/* Desktop (1200px+) - 12-column grid */
-@media (min-width: 1200px) {
+/* Desktop (1024px+) - show sections in pairs */
+@media (min-width: 1024px) {
     .dashboard-content {
-        grid-template-columns: repeat(12, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .chart-card {
-        grid-column: span 8;
+        grid-column: span 1;
     }
 
     .recent-offers-card {
-        grid-column: span 4;
+        grid-column: span 1;
     }
 
     .summary-reports-card {
-        grid-column: span 12;
+        grid-column: span 1;
     }
 
-    .offer-stats-card,
+    .offer-stats-card {
+        grid-column: span 1;
+    }
+
     .publisher-stats-card {
-        grid-column: span 12;
+        grid-column: 1 / -1;
     }
 }
 

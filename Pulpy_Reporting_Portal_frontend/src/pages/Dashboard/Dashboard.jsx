@@ -501,7 +501,7 @@ function Dashboard() {
                 </div>
 
                 {/* Summary — current period vs previous period */}
-                <div className="dashboard-card summary-reports-card" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="dashboard-card summary-reports-card">
                     <div className="card-header">
                         <h3>Performance Summary</h3>
                         <span className="period-indicator">{periodLabels.current} vs {periodLabels.previous}</span>
@@ -632,7 +632,7 @@ function Dashboard() {
                 </div>
 
                 {/* Offer Statistics (Moved Here) */}
-                <div className="dashboard-card offer-stats-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="dashboard-card offer-stats-card">
                     <div className="card-header">
                         <h3>Offer Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>
@@ -677,7 +677,7 @@ function Dashboard() {
                 </div>
 
                 {/* Publisher Statistics */}
-                <div className="dashboard-card publisher-stats-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="dashboard-card publisher-stats-card">
                     <div className="card-header">
                         <h3>Publisher Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>

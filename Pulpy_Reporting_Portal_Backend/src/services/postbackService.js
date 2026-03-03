@@ -285,9 +285,6 @@ export class PostbackService {
               [click_id, tenantId],
               2000  // ✅ 2-second timeout for fast response
             );
-            console.log('dbRows', dbRows);
-            const offer = await getOfferByInternalId(dbRows[0].offer_id, tenantId);
-            console.log('offer', offer);
             if (dbRows && dbRows.length > 0) {
               const dbClick = dbRows[0];
               // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -309,16 +306,22 @@ export class PostbackService {
         // Strategy 3: If still not found and we have tenant_id, try pattern scan (last resort)
         if ((!redisClick || !redisClick.offer_id) && tenantId) {
           try {
+            // Bound SCAN work to avoid controller-level timeout for old clicks.
             // Scan for pattern: click:*:*:*:${click_id}
             let cursor = 0;
             let found = false;
+            let iterations = 0;
+            const maxIterations = 5;
+            const scanStart = Date.now();
+            const maxScanDurationMs = 600;
             do {
               const [newCursor, keys] = await redis.scan(
                 cursor,
                 'MATCH', `click:*:*:*:${click_id}`,
-                'COUNT', 10
+                'COUNT', 100
               );
               cursor = parseInt(newCursor);
+              iterations += 1;
 
               if (keys.length > 0) {
                 // Try first matching key
@@ -329,7 +332,20 @@ export class PostbackService {
                   break;
                 }
               }
-            } while (cursor !== 0 && !found);
+            } while (
+              cursor !== 0 &&
+              !found &&
+              iterations < maxIterations &&
+              (Date.now() - scanStart) < maxScanDurationMs
+            );
+
+            if (!found && cursor !== 0) {
+              logger.debug('Redis SCAN bounded before completion; falling back to DB path', {
+                click_id,
+                iterations,
+                elapsed_ms: Date.now() - scanStart
+              });
+            }
           } catch (scanErr) {
             // Scan failed - log but continue
             logger.debug('Redis SCAN failed, continuing with fallback', scanErr);
@@ -1320,6 +1336,29 @@ export class PostbackService {
     let httpStatus = 0;
     let responseBody = '';
     let errorMessage = null;
+    const normalizedStatus = (conversion?.status || '').toString().toLowerCase();
+
+    // Hard safety gate: never fire publisher postback unless conversion is approved.
+    if (normalizedStatus !== 'approved') {
+      logger.info('Publisher postback skipped: conversion is not approved', {
+        conversion_id: conversion?.id,
+        conversion_uuid: conversion?.conversion_uuid,
+        status: conversion?.status
+      });
+      return {
+        success: false,
+        executed: false,
+        reason: 'Publisher postback only fires for approved conversions'
+      };
+    }
+
+    if (!callbackUrl) {
+      return {
+        success: false,
+        executed: false,
+        reason: 'No callback URL configured'
+      };
+    }
 
     return new Promise((resolve) => {
       try {
