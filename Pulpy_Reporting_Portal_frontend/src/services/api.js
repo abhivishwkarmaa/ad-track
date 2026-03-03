@@ -19,6 +19,7 @@ if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
 const BASE_URL = '';
 const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
 const VERSION_HEADER = 'x-app-version';
+const activeControllers = new Set();
 
 let accessToken = null;
 
@@ -51,8 +52,34 @@ const clearClientSession = () => {
     broadcastLogout();
 };
 
+const clearClientSessionForForceUpdate = () => {
+    clearAccessToken();
+    localStorage.removeItem('track-myads_user');
+    localStorage.removeItem('bng_token');
+};
+
 const redirectToLogin = () => {
     window.location.href = '/login';
+};
+
+const createApiError = (message, { status, code } = {}) => {
+    const error = new Error(message);
+    if (status) error.status = status;
+    if (code) error.code = code;
+    return error;
+};
+
+const abortAllPendingRequests = () => {
+    activeControllers.forEach((controller) => controller.abort());
+    activeControllers.clear();
+};
+
+const activateForceUpdateMode = () => {
+    abortAllPendingRequests();
+    clearClientSessionForForceUpdate();
+    versionService.onForceUpdateFromServer();
+    versionService.goToUpdateRequiredScreen();
+    window.dispatchEvent(new CustomEvent('app-version-outdated'));
 };
 
 const refreshAccessToken = async () => {
@@ -69,6 +96,11 @@ const refreshAccessToken = async () => {
         const data = contentType && contentType.includes('application/json')
             ? await response.json()
             : null;
+
+        if (response.status === 426 || data?.error === 'CLIENT_VERSION_OUTDATED') {
+            activateForceUpdateMode();
+            return false;
+        }
 
         if (!response.ok || !data?.success || !data?.data?.token) {
             return false;
@@ -96,7 +128,10 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
     const isApiRoute = endpoint.startsWith('/api/');
 
     if (isApiRoute && endpoint !== '/api/app/version' && versionService.isApiBlockedByVersionGuard()) {
-        throw new Error('CLIENT_VERSION_OUTDATED');
+        throw createApiError('CLIENT_VERSION_OUTDATED', {
+            status: 426,
+            code: 'CLIENT_VERSION_OUTDATED',
+        });
     }
 
     if (!skipIdleCheck && storedUser && isIdle()) {
@@ -117,6 +152,7 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
 
     const config = {
         ...options,
+        signal: undefined,
         credentials: 'include',
         headers: {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
@@ -128,6 +164,10 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             ...options.headers,
         },
     };
+
+    const controller = new AbortController();
+    activeControllers.add(controller);
+    config.signal = controller.signal;
 
     try {
         const response = await fetch(url, config);
@@ -172,18 +212,30 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
         }
 
         if (response.status === 426 || data?.error === 'CLIENT_VERSION_OUTDATED') {
-            versionService.onForceUpdateFromServer();
-            window.dispatchEvent(new CustomEvent('app-version-outdated'));
-            throw new Error('CLIENT_VERSION_OUTDATED');
+            activateForceUpdateMode();
+            throw createApiError('CLIENT_VERSION_OUTDATED', {
+                status: 426,
+                code: 'CLIENT_VERSION_OUTDATED',
+            });
         }
 
         if (!response.ok) {
             const errorMessage = data?.message || data?.error || `API request failed (${response.status})`;
-            throw new Error(errorMessage);
+            throw createApiError(errorMessage, { status: response.status, code: data?.error });
         }
 
         return data;
     } catch (error) {
+        if (error?.name === 'AbortError') {
+            if (versionService.isApiBlockedByVersionGuard()) {
+                throw createApiError('CLIENT_VERSION_OUTDATED', {
+                    status: 426,
+                    code: 'CLIENT_VERSION_OUTDATED',
+                });
+            }
+            throw createApiError('REQUEST_ABORTED');
+        }
+
         // ✅ Don't show error messages for session expiry
         if (error.message === 'SESSION_EXPIRED') {
             throw error;
@@ -194,6 +246,8 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             throw error;
         }
         throw new Error(error?.toString() || 'API request failed');
+    } finally {
+        activeControllers.delete(controller);
     }
 };
 
@@ -217,6 +271,12 @@ export const authAPI = {
     },
     refresh: async () => {
         const success = await refreshAccessToken();
+        if (!success && versionService.isApiBlockedByVersionGuard()) {
+            throw createApiError('CLIENT_VERSION_OUTDATED', {
+                status: 426,
+                code: 'CLIENT_VERSION_OUTDATED',
+            });
+        }
         if (!success) {
             throw new Error('SESSION_EXPIRED');
         }
@@ -356,9 +416,11 @@ export const dashboardAPI = {
         }
 
         if (response.status === 426) {
-            versionService.onForceUpdateFromServer();
-            window.dispatchEvent(new CustomEvent('app-version-outdated'));
-            throw new Error('CLIENT_VERSION_OUTDATED');
+            activateForceUpdateMode();
+            throw createApiError('CLIENT_VERSION_OUTDATED', {
+                status: 426,
+                code: 'CLIENT_VERSION_OUTDATED',
+            });
         }
 
         if (!response.ok) {

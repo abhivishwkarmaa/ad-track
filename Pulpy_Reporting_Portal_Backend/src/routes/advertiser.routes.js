@@ -1,5 +1,6 @@
 import advertiserController from '../controllers/advertiser.controller.js';
 import { authenticateAdmin } from '../middleware/auth.js';
+import { enforceClientVersion } from '../middleware/versionValidation.js';
 import {
   advertiserIdParamSchema,
   createAdvertiserSchema,
@@ -10,6 +11,7 @@ import {
 async function advertiserRoutes(fastify) {
   // Protect all advertiser routes with JWT
   fastify.addHook('onRequest', authenticateAdmin);
+  fastify.addHook('preHandler', enforceClientVersion);
 
   fastify.post(
     '/api/admin/advertisers',

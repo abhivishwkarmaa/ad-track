@@ -54,6 +54,10 @@ export function AuthProvider({ children }) {
             try {
                 await authAPI.refresh();
             } catch (err) {
+                if (err?.status === 426 || err?.code === 'CLIENT_VERSION_OUTDATED') {
+                    setLoading(false);
+                    return;
+                }
                 await handleLogout({ redirect: true, broadcast: true });
             } finally {
                 setLoading(false);
@@ -124,7 +128,13 @@ export function AuthProvider({ children }) {
                 return { success: false, error: response.message || 'Login failed' };
             }
         } catch (error) {
-            console.error('Login error:', error);
+            if (error?.status === 426 || error?.code === 'CLIENT_VERSION_OUTDATED') {
+                return {
+                    success: false,
+                    code: 'CLIENT_VERSION_OUTDATED',
+                    status: 426,
+                };
+            }
             return {
                 success: false,
                 error: error.message || 'An error occurred during login. Please try again.'

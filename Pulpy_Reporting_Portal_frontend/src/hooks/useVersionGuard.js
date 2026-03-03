@@ -26,6 +26,7 @@ export default function useVersionGuard() {
 
     const activateForceMode = useCallback(() => {
         versionService.onForceUpdateFromServer();
+        versionService.goToUpdateRequiredScreen();
         setState((prev) => ({
             ...prev,
             isSoftUpdateVisible: false,
@@ -46,6 +47,7 @@ export default function useVersionGuard() {
 
             setState((prev) => {
                 if (next.isForceUpdateRequired) {
+                    versionService.goToUpdateRequiredScreen();
                     return {
                         ...prev,
                         ...next,
@@ -87,7 +89,7 @@ export default function useVersionGuard() {
         if (!reloaded) {
             setState((prev) => ({
                 ...prev,
-                retryMessage: 'Please wait a few seconds before refreshing again.',
+                retryMessage: 'Update still in progress. Please try again shortly.',
             }));
         }
     }, []);

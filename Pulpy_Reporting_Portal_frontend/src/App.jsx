@@ -85,7 +85,7 @@ function ChangePasswordPrompt() {
   );
 }
 
-function AppRoutes() {
+function AppRoutes({ retryMessage, refreshNow }) {
   const { isAuthenticated } = useAuth();
 
   // Check domain context
@@ -104,6 +104,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
         <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
+        <Route path="/update-required" element={<ForceUpdateScreen retryMessage={retryMessage} onRefresh={refreshNow} />} />
         <Route
           path="/"
           element={
@@ -217,7 +218,7 @@ function App() {
         <AuthProvider>
           <ToastProvider>
             <RefreshProvider>
-              <AppRoutes />
+              <AppRoutes retryMessage={retryMessage} refreshNow={refreshNow} />
               <RefreshButton />
               {isSoftUpdateVisible && (
                 <SoftUpdateModal

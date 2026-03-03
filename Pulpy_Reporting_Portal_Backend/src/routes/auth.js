@@ -1,5 +1,6 @@
 import authController from '../controllers/authController.js';
 import { authenticateAdmin } from '../middleware/auth.js';
+import { enforceClientVersion } from '../middleware/versionValidation.js';
 
 async function authRoutes(fastify, options) {
   // Public routes (no auth required)
@@ -10,10 +11,10 @@ async function authRoutes(fastify, options) {
   fastify.post('/register', authController.register);
   // Protected route (requires auth)
   fastify.get('/profile', {
-    preHandler: authenticateAdmin,
+    preHandler: [authenticateAdmin, enforceClientVersion],
   }, authController.getProfile);
   fastify.patch('/profile', {
-    preHandler: authenticateAdmin,
+    preHandler: [authenticateAdmin, enforceClientVersion],
   }, authController.updateProfile.bind(authController));
 
   // Password Reset (Public)
@@ -23,15 +24,15 @@ async function authRoutes(fastify, options) {
 
   // Change Password (Authenticated)
   fastify.post('/change-password/request-otp', {
-    preHandler: authenticateAdmin
+    preHandler: [authenticateAdmin, enforceClientVersion]
   }, authController.requestOtp.bind(authController));
 
   fastify.post('/change-password/verify-otp', {
-    preHandler: authenticateAdmin
+    preHandler: [authenticateAdmin, enforceClientVersion]
   }, authController.verifyResetOtp.bind(authController));
 
   fastify.post('/change-password/reset', {
-    preHandler: authenticateAdmin
+    preHandler: [authenticateAdmin, enforceClientVersion]
   }, authController.resetPassword.bind(authController));
 }
 

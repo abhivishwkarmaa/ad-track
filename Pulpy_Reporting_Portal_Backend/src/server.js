@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger, responseLogger } from './middleware/requestLogger.js';
-import { enforceClientVersion } from './middleware/versionValidation.js';
 
 // Load environment variables
 dotenv.config();
@@ -77,7 +76,6 @@ async function initializeServer() {
 
   // Register middleware
   fastify.addHook('onRequest', requestLogger);
-  fastify.addHook('onRequest', enforceClientVersion);
 
   // Tenant resolution middleware (runs before routes)
   // This extracts tenant from subdomain and attaches to request context

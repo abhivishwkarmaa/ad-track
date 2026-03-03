@@ -1,10 +1,12 @@
 import reportController from '../controllers/reportController.js';
 import dashboardController from '../controllers/dashboardController.js';
 import { authenticateAdmin } from '../middleware/auth.js';
+import { enforceClientVersion } from '../middleware/versionValidation.js';
 
 async function reportRoutes(fastify, options) {
   // Apply auth middleware to all report routes
   fastify.addHook('onRequest', authenticateAdmin);
+  fastify.addHook('preHandler', enforceClientVersion);
 
   // Dashboard endpoints
   fastify.get('/dashboard', dashboardController.getDashboard);

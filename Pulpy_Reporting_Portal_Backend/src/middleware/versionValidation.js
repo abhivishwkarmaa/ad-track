@@ -1,26 +1,26 @@
 import appVersionService from '../services/appVersion.service.js';
+import logger from '../utils/logger.js';
 
 const VERSION_HEADER = 'x-app-version';
-const EXCLUDED_PATHS = new Set(['/api/app/version', '/health']);
-
-const getRequestPath = (request) => (request.url || '').split('?')[0];
-
-const shouldValidateVersion = (request) => {
-  const path = getRequestPath(request);
-
-  if (EXCLUDED_PATHS.has(path)) {
-    return false;
-  }
-
-  return path.startsWith('/api/');
-};
+const INTERNAL_CALL_HEADER = 'x-internal-call';
 
 export async function enforceClientVersion(request, reply) {
-  if (!shouldValidateVersion(request)) {
+  if (request.headers[INTERNAL_CALL_HEADER] === 'true') {
+    logger.warn('Skipping client version validation for internal call', {
+      url: request.url,
+      method: request.method,
+      ip: request.ip,
+    });
     return;
   }
 
   const clientVersion = request.headers[VERSION_HEADER];
+  if (!clientVersion) {
+    return reply.code(400).send({
+      error: 'VERSION_HEADER_REQUIRED',
+    });
+  }
+
   const isAllowed = appVersionService.isClientVersionAllowed(clientVersion);
 
   if (!isAllowed) {

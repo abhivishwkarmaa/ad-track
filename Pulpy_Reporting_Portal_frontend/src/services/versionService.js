@@ -3,7 +3,7 @@ import { CURRENT_APP_VERSION } from '../config/appVersion';
 const VERSION_ENDPOINT = '/api/app/version';
 const VERSION_HEADER = 'x-app-version';
 const FORCE_AFTER_MS = 15 * 60 * 1000;
-const RELOAD_GUARD_WINDOW_MS = 15000;
+const RELOAD_GUARD_WINDOW_MS = 10000;
 const LAST_RELOAD_KEY = 'app:last-version-reload-at';
 
 let forceUpdateMode = false;
@@ -78,7 +78,7 @@ const reloadApp = () => {
     }
 
     localStorage.setItem(LAST_RELOAD_KEY, String(Date.now()));
-    window.location.reload();
+    window.location.reload(true);
     return true;
 };
 
@@ -125,6 +125,12 @@ const onForceUpdateFromServer = () => {
     setForceUpdateMode(true);
 };
 
+const goToUpdateRequiredScreen = () => {
+    if (window.location.pathname !== '/update-required') {
+        window.location.href = '/update-required';
+    }
+};
+
 const subscribe = (listener) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -138,6 +144,7 @@ export default {
     forceAfterMs: FORCE_AFTER_MS,
     getCurrentVersion: () => CURRENT_APP_VERSION,
     isApiBlockedByVersionGuard,
+    goToUpdateRequiredScreen,
     onForceUpdateFromServer,
     reloadApp,
     subscribe,
