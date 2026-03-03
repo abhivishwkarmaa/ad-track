@@ -359,6 +359,13 @@ function Dashboard() {
             label: 'Pending Conversions'
         },
         {
+            key: 'click-expired',
+            className: 'stat-item-neutral',
+            icon: <ConversionIcon />,
+            value: formatNumber(cardsData.conversions?.click_expired || cardsData.conversions?.click_expired_conversions || 0),
+            label: 'Click Expired'
+        },
+        {
             key: 'total-revenue',
             className: 'stat-item-red',
             icon: <RevenueIcon />,

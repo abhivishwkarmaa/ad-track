@@ -953,6 +953,11 @@
     color: #F44336;
 }
 
+.offer-stat-item.stat-item-neutral .offer-stat-item-icon {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
 .offer-stat-item.stat-item-profit .offer-stat-item-icon {
     background: rgba(76, 175, 80, 0.15);
     color: #2E7D32;

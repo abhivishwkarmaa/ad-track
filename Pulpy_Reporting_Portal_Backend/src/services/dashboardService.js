@@ -91,7 +91,8 @@ export class DashboardService {
           COUNT(*) as total,
           SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+          SUM(CASE WHEN status IN ('rejected', 'rejected_cap') THEN 1 ELSE 0 END) as rejected,
+          SUM(CASE WHEN status = 'click_expired' THEN 1 ELSE 0 END) as click_expired,
           COALESCE(SUM(amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
         FROM conversions
@@ -203,6 +204,7 @@ export class DashboardService {
           approved: parseInt(conversionsCurrent[0]?.approved || 0),
           pending: parseInt(conversionsCurrent[0]?.pending || 0),
           rejected: parseInt(conversionsCurrent[0]?.rejected || 0),
+          click_expired: parseInt(conversionsCurrent[0]?.click_expired || 0),
         },
         clicks: {
           total: parseInt(clicksCurrent[0]?.total || 0),
@@ -569,6 +571,7 @@ export class DashboardService {
           SUM(CASE WHEN metric = 'conversions' THEN approved ELSE 0 END) as conv_approved,
           SUM(CASE WHEN metric = 'conversions' THEN pending ELSE 0 END) as conv_pending,
           SUM(CASE WHEN metric = 'conversions' THEN rejected ELSE 0 END) as conv_rejected,
+          SUM(CASE WHEN metric = 'conversions' THEN click_expired ELSE 0 END) as conv_click_expired,
           SUM(CASE WHEN metric = 'conversions' THEN revenue ELSE 0 END) as revenue_total,
           SUM(CASE WHEN metric = 'conversions' THEN payout ELSE 0 END) as payout_total,
           SUM(CASE WHEN metric = 'impressions' THEN total ELSE 0 END) as impressions_total
@@ -580,6 +583,7 @@ export class DashboardService {
             0 as approved,
             0 as pending,
             0 as rejected,
+            0 as click_expired,
             0 as revenue,
             0 as payout
           FROM clicks
@@ -593,7 +597,8 @@ export class DashboardService {
             0 as unique_total,
             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected,
+            SUM(CASE WHEN status IN ('rejected', 'rejected_cap') THEN 1 ELSE 0 END) as rejected,
+            SUM(CASE WHEN status = 'click_expired' THEN 1 ELSE 0 END) as click_expired,
             COALESCE(SUM(amount), 0) as revenue,
             COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
           FROM conversions
@@ -608,6 +613,7 @@ export class DashboardService {
             0 as approved,
             0 as pending,
             0 as rejected,
+            0 as click_expired,
             0 as revenue,
             0 as payout
           FROM impressions
@@ -667,6 +673,7 @@ export class DashboardService {
       const convApproved = parseInt(currentStats.conv_approved || 0);
       const convPending = parseInt(currentStats.conv_pending || 0);
       const convRejected = parseInt(currentStats.conv_rejected || 0);
+      const convClickExpired = parseInt(currentStats.conv_click_expired || 0);
       const convPrev = parseInt(previousStats.conv_total || 0);
 
       const revTotal = parseFloat(currentStats.revenue_total || 0);
@@ -708,6 +715,8 @@ export class DashboardService {
           approved: convApproved,
           pending: convPending,
           rejected: convRejected,
+          click_expired: convClickExpired,
+          click_expired_conversions: convClickExpired,
           conversion_rate: conversionRate,
           approval_rate: `${approvalRateValue}%`,
           label: 'CONVERSIONS',

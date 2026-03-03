@@ -267,6 +267,11 @@
     color: #F44336;
 }
 
+.stat-item-neutral .stat-item-icon {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
 .stat-item-profit .stat-item-icon {
     background: rgba(76, 175, 80, 0.15);
     color: #2E7D32;
@@ -449,7 +454,7 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 16px;
-    align-items: start;
+    align-items: stretch;
 }
 
 .dashboard-card {
@@ -460,11 +465,23 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    height: 100%;
 }
+
+.chart-card { grid-area: chart; }
+.recent-offers-card { grid-area: live; }
+.summary-reports-card { grid-area: summary; }
+.offer-stats-card { grid-area: offer; }
+.publisher-stats-card { grid-area: publisher; }
 
 .chart-card,
 .recent-offers-card {
     min-height: 340px;
+}
+
+.summary-reports-card,
+.offer-stats-card {
+    min-height: 460px;
 }
 
 .card-header {
@@ -878,10 +895,26 @@
 
 .chart-wrapper {
     width: 100%;
-    height: 240px;
+    flex: 1;
     min-height: 240px;
-    padding: 8px 16px 16px;
+    padding: 12px 16px;
     box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chart-wrapper>.recharts-responsive-container,
+.chart-wrapper>.skeleton-chart {
+    width: 100% !important;
+    height: 220px !important;
+    max-width: 100%;
+}
+
+.offer-stats-card .activity-table {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
 }
 
 .summary-grid {
@@ -1232,6 +1265,12 @@
 @media (min-width: 768px) {
     .dashboard-content {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "chart"
+            "live"
+            "summary"
+            "offer"
+            "publisher";
     }
 
     .chart-card {
@@ -1250,12 +1289,21 @@
     .publisher-stats-card {
         grid-column: span 1;
     }
+
+    .summary-reports-card,
+    .offer-stats-card {
+        min-height: 440px;
+    }
 }
 
 /* Desktop (1024px+) - show sections in pairs */
 @media (min-width: 1024px) {
     .dashboard-content {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+            "chart live"
+            "summary offer"
+            "publisher publisher";
     }
 
     .chart-card {
@@ -1276,6 +1324,11 @@
 
     .publisher-stats-card {
         grid-column: 1 / -1;
+    }
+
+    .summary-reports-card,
+    .offer-stats-card {
+        min-height: 500px;
     }
 }
 
@@ -1408,8 +1461,9 @@
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         min-width: 320px;
-        height: 260px;
+        height: auto;
         min-height: 260px;
+        justify-content: flex-start;
     }
 
     .card-header {
