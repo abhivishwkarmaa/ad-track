@@ -35,6 +35,9 @@ import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { RefreshProvider } from './context/RefreshContext';
 import RefreshButton from './components/RefreshButton/RefreshButton';
+import useVersionGuard from './hooks/useVersionGuard';
+import SoftUpdateModal from './components/Version/SoftUpdateModal';
+import ForceUpdateScreen from './components/Version/ForceUpdateScreen';
 import './App.css';
 
 function PrivateRoute({ children }) {
@@ -178,6 +181,15 @@ function AppRoutes() {
 
 function App() {
   const [isMaintenance, setIsMaintenance] = useState(false);
+  const {
+    latestVersion,
+    releaseNotes,
+    isSoftUpdateVisible,
+    isForceUpdateMode,
+    retryMessage,
+    refreshNow,
+    dismissSoftUpdate,
+  } = useVersionGuard();
 
   useEffect(() => {
     const handleMaintenance = () => {
@@ -191,6 +203,10 @@ function App() {
     };
   }, []);
 
+  if (isForceUpdateMode) {
+    return <ForceUpdateScreen retryMessage={retryMessage} onRefresh={refreshNow} />;
+  }
+
   if (isMaintenance) {
     return <Maintenance />;
   }
@@ -203,6 +219,14 @@ function App() {
             <RefreshProvider>
               <AppRoutes />
               <RefreshButton />
+              {isSoftUpdateVisible && (
+                <SoftUpdateModal
+                  latestVersion={latestVersion}
+                  releaseNotes={releaseNotes}
+                  onRefreshNow={refreshNow}
+                  onLater={dismissSoftUpdate}
+                />
+              )}
             </RefreshProvider>
           </ToastProvider>
         </AuthProvider>

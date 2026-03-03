@@ -1,4 +1,6 @@
 import { getLastActivity, markActivity, broadcastLogout } from '../utils/activityTracker';
+import { CURRENT_APP_VERSION } from '../config/appVersion';
+import versionService from './versionService';
 
 // 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
 // ✅ CORRECT: Use relative paths for API calls
@@ -16,6 +18,7 @@ if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
 
 const BASE_URL = '';
 const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
+const VERSION_HEADER = 'x-app-version';
 
 let accessToken = null;
 
@@ -57,6 +60,9 @@ const refreshAccessToken = async () => {
         const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
             method: 'POST',
             credentials: 'include',
+            headers: {
+                [VERSION_HEADER]: CURRENT_APP_VERSION,
+            },
         });
 
         const contentType = response.headers.get('content-type');
@@ -87,6 +93,11 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
 
     const url = `${BASE_URL}${endpoint}`;
     const storedUser = getStoredUser();
+    const isApiRoute = endpoint.startsWith('/api/');
+
+    if (isApiRoute && endpoint !== '/api/app/version' && versionService.isApiBlockedByVersionGuard()) {
+        throw new Error('CLIENT_VERSION_OUTDATED');
+    }
 
     if (!skipIdleCheck && storedUser && isIdle()) {
         clearClientSession();
@@ -111,6 +122,7 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
             ...(!skipAuth && token && { 'Authorization': `Bearer ${token}` }),
             ...(trackActivity && { 'X-User-Activity': '1' }),
+            [VERSION_HEADER]: CURRENT_APP_VERSION,
             // 🔒 STRICT: Never add tenant headers (x-tenant-slug, x-tenant-id, etc.)
             // Tenant is resolved by backend from Host header (subdomain) ONLY
             ...options.headers,
@@ -157,6 +169,12 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             // Dispatch event for App.jsx to handle
             window.dispatchEvent(new CustomEvent('server-maintenance'));
             throw new Error('SERVER_MAINTENANCE');
+        }
+
+        if (response.status === 426 || data?.error === 'CLIENT_VERSION_OUTDATED') {
+            versionService.onForceUpdateFromServer();
+            window.dispatchEvent(new CustomEvent('app-version-outdated'));
+            throw new Error('CLIENT_VERSION_OUTDATED');
         }
 
         if (!response.ok) {
@@ -325,6 +343,7 @@ export const dashboardAPI = {
                 credentials: 'include',
                 headers: {
                     ...(token && { Authorization: `Bearer ${token}` }),
+                    [VERSION_HEADER]: CURRENT_APP_VERSION,
                 },
             });
         };
@@ -334,6 +353,12 @@ export const dashboardAPI = {
             const refreshed = await refreshAccessToken();
             if (!refreshed) throw new Error('Session expired. Please login again.');
             response = await requestCsv(accessToken);
+        }
+
+        if (response.status === 426) {
+            versionService.onForceUpdateFromServer();
+            window.dispatchEvent(new CustomEvent('app-version-outdated'));
+            throw new Error('CLIENT_VERSION_OUTDATED');
         }
 
         if (!response.ok) {

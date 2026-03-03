@@ -647,8 +647,8 @@ function Dashboard() {
                     {loadingOfferStats ? (
                         <SkeletonTable rows={5} cols={8} />
                     ) : offerStatistics && offerStatistics.length > 0 ? (
-                        <div className="activity-table">
-                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
+                        <div className="activity-table stats-table stats-table-offer">
+                            <div className="table-header">
                                 <span>Offer</span>
                                 <span>Clicks</span>
                                 <span>Total Conv</span>
@@ -662,8 +662,7 @@ function Dashboard() {
                                 <Link
                                     to={`/offer/detail/${stat.display_id || stat.offer_id}`}
                                     key={stat.offer_id || index}
-                                    className="table-row"
-                                    style={{ gridTemplateColumns: 'minmax(200px, 2fr) 1fr 1fr 1fr 1fr 1fr 1fr 1fr', textDecoration: 'none', color: 'inherit' }}
+                                    className="table-row table-row-link"
                                 >
                                     <div className="offer-name-cell" title={stat.offer_name}>
                                         <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
@@ -690,10 +689,10 @@ function Dashboard() {
                         <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
                     {loadingPublisherStats ? (
-                        <SkeletonTable rows={5} cols={9} />
+                        <SkeletonTable rows={5} cols={8} />
                     ) : publisherStatistics && publisherStatistics.length > 0 ? (
-                        <div className="activity-table">
-                            <div className="table-header" style={{ gridTemplateColumns: 'minmax(150px, 2fr) 1fr 1fr 1fr 1fr 1.5fr 1.5fr 1.5fr' }}>
+                        <div className="activity-table stats-table stats-table-publisher">
+                            <div className="table-header">
                                 <span>Publisher</span>
                                 <span>Clicks</span>
                                 <span>Total Conv</span>
@@ -707,7 +706,6 @@ function Dashboard() {
                                 <div
                                     key={stat.publisher_id || index}
                                     className="table-row"
-                                    style={{ gridTemplateColumns: 'minmax(150px, 2fr) 1fr 1fr 1fr 1fr 1.5fr 1.5fr 1.5fr' }}
                                 >
                                     <div className="offer-name-cell" title={stat.publisher_name}>
                                         <span className="id-badge">#{stat.public_id}</span> {stat.publisher_name}

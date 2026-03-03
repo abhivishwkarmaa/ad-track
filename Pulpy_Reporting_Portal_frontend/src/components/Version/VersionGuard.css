@@ -1,0 +1,98 @@
+.version-soft-update-backdrop {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 9998;
+}
+
+.version-soft-update-card {
+    width: 100%;
+    max-width: 380px;
+    background: #ffffff;
+    color: #111827;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+}
+
+.version-soft-update-card h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+}
+
+.version-soft-update-card p {
+    margin: 0 0 8px;
+    color: #4b5563;
+}
+
+.version-meta {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.version-notes {
+    font-size: 13px;
+    color: #1f2937;
+}
+
+.version-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.version-primary,
+.version-secondary {
+    border: none;
+    border-radius: 8px;
+    padding: 9px 12px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.version-primary {
+    background: #ff6b35;
+    color: #ffffff;
+}
+
+.version-secondary {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.version-force-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(17, 24, 39, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.version-force-card {
+    width: 100%;
+    max-width: 560px;
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+}
+
+.version-force-card h2 {
+    margin: 0 0 10px;
+    color: #111827;
+}
+
+.version-force-card p {
+    margin: 0 0 16px;
+    color: #4b5563;
+}
+
+.version-retry-message {
+    margin-top: 10px;
+    color: #b91c1c;
+}
+

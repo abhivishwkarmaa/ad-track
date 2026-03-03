@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger, responseLogger } from './middleware/requestLogger.js';
+import { enforceClientVersion } from './middleware/versionValidation.js';
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +25,7 @@ import contactRoutes from './routes/contact.js';
 import testPostbackRoutes from './routes/testPostback.js';
 import subscriptionRoutes from './routes/subscription.js';
 import dashboardRoutes from './routes/dashboard.js';
+import appVersionRoutes from './routes/appVersion.js';
 
 const fastify = Fastify({
   logger: logger,
@@ -42,7 +44,7 @@ async function initializeServer() {
     origin: true, // allow all origins/ports
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-User-Activity'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-User-Activity', 'X-App-Version'],
     exposedHeaders: ['Content-Length', 'Content-Type'],
   });
 
@@ -75,6 +77,7 @@ async function initializeServer() {
 
   // Register middleware
   fastify.addHook('onRequest', requestLogger);
+  fastify.addHook('onRequest', enforceClientVersion);
 
   // Tenant resolution middleware (runs before routes)
   // This extracts tenant from subdomain and attaches to request context
@@ -98,6 +101,7 @@ async function initializeServer() {
   });
 
   // Register routes
+  await fastify.register(appVersionRoutes, { prefix: '/api/app' });
   await fastify.register(authRoutes, { prefix: '/api/auth' });
   await fastify.register(adminRoutes, { prefix: '/api/admin' });
   await fastify.register(tenantRoutes, { prefix: '/api/admin' }); // Tenant management (admin subdomain only)

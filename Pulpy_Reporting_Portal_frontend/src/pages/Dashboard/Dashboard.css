@@ -1039,6 +1039,38 @@
     max-height: 400px;
 }
 
+.stats-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.stats-table .table-header,
+.stats-table .table-row {
+    grid-template-columns: var(--stats-table-columns);
+    min-width: max-content;
+    align-items: center;
+}
+
+.stats-table-offer {
+    --stats-table-columns: minmax(220px, 2.2fr) repeat(5, minmax(88px, 1fr)) minmax(110px, 1.1fr) minmax(110px, 1.1fr);
+}
+
+.stats-table-publisher {
+    --stats-table-columns: minmax(220px, 2.2fr) repeat(4, minmax(88px, 1fr)) repeat(3, minmax(110px, 1.2fr));
+}
+
+.table-row-link {
+    text-decoration: none;
+    color: inherit;
+}
+
+.offer-name-cell {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
 .table-header {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -1269,8 +1301,8 @@
             "chart"
             "live"
             "summary"
-            "offer"
-            "publisher";
+            "publisher"
+            "offer";
     }
 
     .chart-card {
@@ -1296,14 +1328,44 @@
     }
 }
 
+/* Tablet-only responsiveness for restructured layout */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .dashboard-content {
+        grid-template-columns: 1fr !important;
+        grid-template-areas:
+            "chart"
+            "live"
+            "summary"
+            "publisher"
+            "offer" !important;
+    }
+
+    .chart-card,
+    .recent-offers-card {
+        min-height: 320px;
+    }
+
+    .summary-reports-card,
+    .offer-stats-card,
+    .publisher-stats-card {
+        min-height: auto;
+    }
+
+    .offer-stats-card .activity-table,
+    .publisher-stats-card .activity-table {
+        max-height: 320px;
+        min-height: 0;
+    }
+}
+
 /* Desktop (1024px+) - show sections in pairs */
 @media (min-width: 1024px) {
     .dashboard-content {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-areas:
             "chart live"
-            "summary offer"
-            "publisher publisher";
+            "summary publisher"
+            "offer offer";
     }
 
     .chart-card {
@@ -1319,11 +1381,11 @@
     }
 
     .offer-stats-card {
-        grid-column: span 1;
+        grid-column: 1 / -1;
     }
 
     .publisher-stats-card {
-        grid-column: 1 / -1;
+        grid-column: span 1;
     }
 
     .summary-reports-card,
@@ -1448,9 +1510,9 @@
         -webkit-overflow-scrolling: touch;
     }
 
-    .table-header,
-    .table-row {
-        min-width: 600px;
+    .stats-table .table-header,
+    .stats-table .table-row {
+        min-width: max-content;
         gap: 8px;
         padding: 10px 12px;
         font-size: 11px;
@@ -1516,5 +1578,27 @@
         min-width: 280px;
         height: 240px;
         min-height: 240px;
+    }
+}
+
+/* Final responsive guardrails (keep at file end) */
+.dashboard-content {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+        "chart"
+        "live"
+        "summary"
+        "publisher"
+        "offer";
+}
+
+@media (min-width: 1280px) {
+    .dashboard-content {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+            "chart live"
+            "summary publisher"
+            "offer offer";
     }
 }
