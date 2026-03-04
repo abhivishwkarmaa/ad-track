@@ -24,7 +24,7 @@ const TENANT_STATES = {
     SUSPENDED: 'SUSPENDED'
 };
 
-const SKIP_PREFIXES = ['/api/auth', '/api/subscription/status', '/api/contact', '/api/app/version'];
+const SKIP_PREFIXES = ['/api/auth', '/api/subscription/status', '/api/contact'];
 const SKIP_PATHS = new Set(['/health']);
 
 const getRequestPath = (request) => (request.url || '').split('?')[0];

@@ -7,7 +7,7 @@ const baseURL = 'https://your-domain.com';
 const offerId = 'o0108';
 const publisherId = 'af0064';
 const advertiserId = 'ad7877';
-const clickId = '123e4567-e89b-12d3-a456-426614174000';
+const clickId = '123e4567-e89b-12d3-a456-716614174000';
 
 // Test 1: Standard tracking URL generation
 console.log('1. Standard Tracking URL:');

@@ -571,6 +571,14 @@ export class AssignmentService {
         updateFields.push('capping_conversions_duration = ?', 'capping_conversions_amount = ?');
         updateValues.push(data.capping_conversions?.duration || null, data.capping_conversions?.amount || null);
       }
+      if (data.payout_override !== undefined) {
+        updateFields.push('payout_override = ?');
+        updateValues.push(data.payout_override ?? null);
+      }
+      if (data.conversion_approval_percentage !== undefined) {
+        updateFields.push('conversion_approval_percentage = ?');
+        updateValues.push(data.conversion_approval_percentage ?? null);
+      }
       if (data.callback_url !== undefined) {
         updateFields.push('callback_url = ?');
         updateValues.push(data.callback_url || null);

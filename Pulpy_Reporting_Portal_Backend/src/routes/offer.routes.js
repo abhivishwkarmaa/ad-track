@@ -1,6 +1,5 @@
 import offerController from '../controllers/offer.controller.js';
 import { authenticateAdmin } from '../middleware/auth.js';
-import { enforceClientVersion } from '../middleware/versionValidation.js';
 import {
   assignmentIdParamSchema,
   changeOfferStatusSchema,
@@ -14,8 +13,6 @@ import {
 } from '../schemas/offer.schema.js';
 
 async function offerRoutes(fastify) {
-  fastify.addHook('preHandler', enforceClientVersion);
-
   // Protected routes (create/update/delete/status)
   fastify.post(
     '/api/admin/offers',

@@ -2,12 +2,10 @@ import adminController from '../controllers/adminController.js';
 import contactController from '../controllers/contactController.js';
 import { authenticateAdmin, requireSuperAdmin } from '../middleware/auth.js';
 import { requireAdminSubdomain } from '../middleware/tenant.js';
-import { enforceClientVersion } from '../middleware/versionValidation.js';
 
 async function adminRoutes(fastify) {
   // Apply auth middleware to all admin routes
   fastify.addHook('onRequest', authenticateAdmin);
-  fastify.addHook('preHandler', enforceClientVersion);
 
   // Publisher routes
   fastify.post('/publishers', adminController.createPublisher);

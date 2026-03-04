@@ -1,6 +1,5 @@
 import subscriptionController from '../controllers/subscriptionController.js';
 import { authenticateAdmin } from '../middleware/auth.js';
-import { enforceClientVersion } from '../middleware/versionValidation.js';
 
 /**
  * Subscription Routes
@@ -16,42 +15,42 @@ export default async function subscriptionRoutes(fastify, options) {
 
     // Get subscription status for a tenant
     fastify.get('/admin/subscriptions/:tenantId', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.getSubscriptionStatus);
 
     // Activate subscription
     fastify.post('/admin/subscriptions/:tenantId/activate', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.activateSubscription);
 
     // Extend subscription by N days
     fastify.post('/admin/subscriptions/:tenantId/extend', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.extendSubscription);
 
     // Set custom subscription end date
     fastify.post('/admin/subscriptions/:tenantId/set-end-date', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.setSubscriptionEndDate);
 
     // Suspend tenant
     fastify.post('/admin/subscriptions/:tenantId/suspend', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.suspendTenant);
 
     // Unsuspend tenant
     fastify.post('/admin/subscriptions/:tenantId/unsuspend', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.unsuspendTenant);
 
     // Reset trial (special cases only)
     fastify.post('/admin/subscriptions/:tenantId/reset-trial', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.resetTrial);
 
     // Get subscription history
     fastify.get('/admin/subscriptions/:tenantId/history', {
-        preHandler: [authenticateAdmin, enforceClientVersion]
+        preHandler: authenticateAdmin
     }, subscriptionController.getSubscriptionHistory);
 
     // ============================================
@@ -61,6 +60,6 @@ export default async function subscriptionRoutes(fastify, options) {
     // Get current tenant's subscription status
     // This endpoint is accessible by tenant users to view their own subscription
     fastify.get('/subscription/status', {
-        preHandler: [authenticateAdmin, enforceClientVersion] // Tenant users are also authenticated via this middleware
+        preHandler: authenticateAdmin // Tenant users are also authenticated via this middleware
     }, subscriptionController.getCurrentTenantStatus);
 }

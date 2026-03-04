@@ -1,6 +1,4 @@
 import { getLastActivity, markActivity, broadcastLogout } from '../utils/activityTracker';
-import { CURRENT_APP_VERSION } from '../config/appVersion';
-import versionService from './versionService';
 
 // 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
 // ✅ CORRECT: Use relative paths for API calls
@@ -18,8 +16,6 @@ if (import.meta.env.PROD && import.meta.env.VITE_API_URL) {
 
 const BASE_URL = '';
 const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
-const VERSION_HEADER = 'x-app-version';
-const activeControllers = new Set();
 
 let accessToken = null;
 
@@ -52,34 +48,8 @@ const clearClientSession = () => {
     broadcastLogout();
 };
 
-const clearClientSessionForForceUpdate = () => {
-    clearAccessToken();
-    localStorage.removeItem('track-myads_user');
-    localStorage.removeItem('bng_token');
-};
-
 const redirectToLogin = () => {
     window.location.href = '/login';
-};
-
-const createApiError = (message, { status, code } = {}) => {
-    const error = new Error(message);
-    if (status) error.status = status;
-    if (code) error.code = code;
-    return error;
-};
-
-const abortAllPendingRequests = () => {
-    activeControllers.forEach((controller) => controller.abort());
-    activeControllers.clear();
-};
-
-const activateForceUpdateMode = () => {
-    abortAllPendingRequests();
-    clearClientSessionForForceUpdate();
-    versionService.onForceUpdateFromServer();
-    versionService.goToUpdateRequiredScreen();
-    window.dispatchEvent(new CustomEvent('app-version-outdated'));
 };
 
 const refreshAccessToken = async () => {
@@ -87,20 +57,12 @@ const refreshAccessToken = async () => {
         const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
             method: 'POST',
             credentials: 'include',
-            headers: {
-                [VERSION_HEADER]: CURRENT_APP_VERSION,
-            },
         });
 
         const contentType = response.headers.get('content-type');
         const data = contentType && contentType.includes('application/json')
             ? await response.json()
             : null;
-
-        if (response.status === 426 || data?.error === 'CLIENT_VERSION_OUTDATED') {
-            activateForceUpdateMode();
-            return false;
-        }
 
         if (!response.ok || !data?.success || !data?.data?.token) {
             return false;
@@ -125,14 +87,6 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
 
     const url = `${BASE_URL}${endpoint}`;
     const storedUser = getStoredUser();
-    const isApiRoute = endpoint.startsWith('/api/');
-
-    if (isApiRoute && endpoint !== '/api/app/version' && versionService.isApiBlockedByVersionGuard()) {
-        throw createApiError('CLIENT_VERSION_OUTDATED', {
-            status: 426,
-            code: 'CLIENT_VERSION_OUTDATED',
-        });
-    }
 
     if (!skipIdleCheck && storedUser && isIdle()) {
         clearClientSession();
@@ -152,22 +106,16 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
 
     const config = {
         ...options,
-        signal: undefined,
         credentials: 'include',
         headers: {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
             ...(!skipAuth && token && { 'Authorization': `Bearer ${token}` }),
             ...(trackActivity && { 'X-User-Activity': '1' }),
-            [VERSION_HEADER]: CURRENT_APP_VERSION,
             // 🔒 STRICT: Never add tenant headers (x-tenant-slug, x-tenant-id, etc.)
             // Tenant is resolved by backend from Host header (subdomain) ONLY
             ...options.headers,
         },
     };
-
-    const controller = new AbortController();
-    activeControllers.add(controller);
-    config.signal = controller.signal;
 
     try {
         const response = await fetch(url, config);
@@ -211,31 +159,13 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             throw new Error('SERVER_MAINTENANCE');
         }
 
-        if (response.status === 426 || data?.error === 'CLIENT_VERSION_OUTDATED') {
-            activateForceUpdateMode();
-            throw createApiError('CLIENT_VERSION_OUTDATED', {
-                status: 426,
-                code: 'CLIENT_VERSION_OUTDATED',
-            });
-        }
-
         if (!response.ok) {
             const errorMessage = data?.message || data?.error || `API request failed (${response.status})`;
-            throw createApiError(errorMessage, { status: response.status, code: data?.error });
+            throw new Error(errorMessage);
         }
 
         return data;
     } catch (error) {
-        if (error?.name === 'AbortError') {
-            if (versionService.isApiBlockedByVersionGuard()) {
-                throw createApiError('CLIENT_VERSION_OUTDATED', {
-                    status: 426,
-                    code: 'CLIENT_VERSION_OUTDATED',
-                });
-            }
-            throw createApiError('REQUEST_ABORTED');
-        }
-
         // ✅ Don't show error messages for session expiry
         if (error.message === 'SESSION_EXPIRED') {
             throw error;
@@ -246,8 +176,6 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             throw error;
         }
         throw new Error(error?.toString() || 'API request failed');
-    } finally {
-        activeControllers.delete(controller);
     }
 };
 
@@ -271,12 +199,6 @@ export const authAPI = {
     },
     refresh: async () => {
         const success = await refreshAccessToken();
-        if (!success && versionService.isApiBlockedByVersionGuard()) {
-            throw createApiError('CLIENT_VERSION_OUTDATED', {
-                status: 426,
-                code: 'CLIENT_VERSION_OUTDATED',
-            });
-        }
         if (!success) {
             throw new Error('SESSION_EXPIRED');
         }
@@ -403,7 +325,6 @@ export const dashboardAPI = {
                 credentials: 'include',
                 headers: {
                     ...(token && { Authorization: `Bearer ${token}` }),
-                    [VERSION_HEADER]: CURRENT_APP_VERSION,
                 },
             });
         };
@@ -413,14 +334,6 @@ export const dashboardAPI = {
             const refreshed = await refreshAccessToken();
             if (!refreshed) throw new Error('Session expired. Please login again.');
             response = await requestCsv(accessToken);
-        }
-
-        if (response.status === 426) {
-            activateForceUpdateMode();
-            throw createApiError('CLIENT_VERSION_OUTDATED', {
-                status: 426,
-                code: 'CLIENT_VERSION_OUTDATED',
-            });
         }
 
         if (!response.ok) {

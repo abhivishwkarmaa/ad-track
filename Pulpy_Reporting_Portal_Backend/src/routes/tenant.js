@@ -1,7 +1,6 @@
 import tenantController from '../controllers/tenantController.js';
 import { authenticateAdmin, requireSuperAdmin } from '../middleware/auth.js';
 import { requireAdminSubdomain } from '../middleware/tenant.js';
-import { enforceClientVersion } from '../middleware/versionValidation.js';
 
 async function tenantRoutes(fastify, options) {
   // All tenant routes require:
@@ -12,7 +11,6 @@ async function tenantRoutes(fastify, options) {
   // Apply middleware to all routes in this plugin
   fastify.addHook('onRequest', requireAdminSubdomain);
   fastify.addHook('onRequest', authenticateAdmin);
-  fastify.addHook('preHandler', enforceClientVersion);
   fastify.addHook('onRequest', requireSuperAdmin);
 
   // Create tenant

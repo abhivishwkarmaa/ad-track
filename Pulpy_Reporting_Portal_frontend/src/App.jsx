@@ -35,9 +35,6 @@ import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { RefreshProvider } from './context/RefreshContext';
 import RefreshButton from './components/RefreshButton/RefreshButton';
-import useVersionGuard from './hooks/useVersionGuard';
-import SoftUpdateModal from './components/Version/SoftUpdateModal';
-import ForceUpdateScreen from './components/Version/ForceUpdateScreen';
 import './App.css';
 
 function PrivateRoute({ children }) {
@@ -85,7 +82,7 @@ function ChangePasswordPrompt() {
   );
 }
 
-function AppRoutes({ retryMessage, refreshNow }) {
+function AppRoutes() {
   const { isAuthenticated } = useAuth();
 
   // Check domain context
@@ -104,7 +101,6 @@ function AppRoutes({ retryMessage, refreshNow }) {
       <Routes>
         <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
         <Route path="/forgot-password" element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/" />} />
-        <Route path="/update-required" element={<ForceUpdateScreen retryMessage={retryMessage} onRefresh={refreshNow} />} />
         <Route
           path="/"
           element={
@@ -182,15 +178,6 @@ function AppRoutes({ retryMessage, refreshNow }) {
 
 function App() {
   const [isMaintenance, setIsMaintenance] = useState(false);
-  const {
-    latestVersion,
-    releaseNotes,
-    isSoftUpdateVisible,
-    isForceUpdateMode,
-    retryMessage,
-    refreshNow,
-    dismissSoftUpdate,
-  } = useVersionGuard();
 
   useEffect(() => {
     const handleMaintenance = () => {
@@ -204,10 +191,6 @@ function App() {
     };
   }, []);
 
-  if (isForceUpdateMode) {
-    return <ForceUpdateScreen retryMessage={retryMessage} onRefresh={refreshNow} />;
-  }
-
   if (isMaintenance) {
     return <Maintenance />;
   }
@@ -218,16 +201,8 @@ function App() {
         <AuthProvider>
           <ToastProvider>
             <RefreshProvider>
-              <AppRoutes retryMessage={retryMessage} refreshNow={refreshNow} />
+              <AppRoutes />
               <RefreshButton />
-              {isSoftUpdateVisible && (
-                <SoftUpdateModal
-                  latestVersion={latestVersion}
-                  releaseNotes={releaseNotes}
-                  onRefreshNow={refreshNow}
-                  onLater={dismissSoftUpdate}
-                />
-              )}
             </RefreshProvider>
           </ToastProvider>
         </AuthProvider>
