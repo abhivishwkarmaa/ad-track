@@ -100,6 +100,119 @@ const CLICK_EXPIRED_STATUS = 'click_expired';
 const APPROVAL_ELIGIBLE_STATUSES = new Set(['approved', 'pending']);
 const DETERMINISTIC_APPROVAL_VERSION = 'v2';
 const BOOTSTRAP_APPROVAL_TTL_SECONDS = 8 * 24 * 60 * 60;
+const APPROVAL_CONTROL_TTL_SECONDS = 8 * 24 * 60 * 60;
+const APPROVAL_TOLERANCE_PERCENT = Number(process.env.APPROVAL_TOLERANCE_PERCENT || 2);
+
+const APPROVAL_CONTROL_LUA = `
+local totalKey = KEYS[1]
+local approvedKey = KEYS[2]
+local percentageKey = KEYS[3]
+
+local percentageArg = ARGV[1]
+local toleranceArg = ARGV[2]
+local bucketArg = ARGV[3]
+local ttlArg = ARGV[4]
+
+if not percentageArg then
+  return redis.error_reply('percentage argument required')
+end
+if not toleranceArg then
+  return redis.error_reply('tolerance argument required')
+end
+if not bucketArg then
+  return redis.error_reply('bucket argument required')
+end
+if not ttlArg then
+  return redis.error_reply('ttl argument required')
+end
+
+local percentage = tonumber(percentageArg)
+local tolerance = tonumber(toleranceArg)
+local bucket = tonumber(bucketArg)
+local ttl = tonumber(ttlArg)
+
+if not percentage then
+  return redis.error_reply('percentage must be numeric')
+end
+if not tolerance then
+  return redis.error_reply('tolerance must be numeric')
+end
+if not bucket then
+  return redis.error_reply('bucket must be numeric')
+end
+if not ttl then
+  return redis.error_reply('ttl must be numeric')
+end
+
+if percentage < 0 then percentage = 0 end
+if percentage > 100 then percentage = 100 end
+if tolerance < 0 then tolerance = 0 end
+if bucket < 0 then bucket = 0 end
+if bucket > 9999 then bucket = 9999 end
+
+local storedPercentage = redis.call('GET', percentageKey)
+if (not storedPercentage) or storedPercentage ~= percentageArg then
+  redis.call('DEL', totalKey)
+  redis.call('DEL', approvedKey)
+  redis.call('SET', percentageKey, percentageArg, 'EX', ttl)
+end
+
+local total = redis.call('INCR', totalKey)
+redis.call('EXPIRE', totalKey, ttl)
+redis.call('EXPIRE', approvedKey, ttl)
+redis.call('EXPIRE', percentageKey, ttl)
+
+local approvedRaw = redis.call('GET', approvedKey)
+local approved = 0
+if approvedRaw then
+  approved = tonumber(approvedRaw) or 0
+end
+
+local targetApproved = math.floor((percentage * total) / 100)
+local maxPercent = percentage + tolerance
+if maxPercent > 100 then maxPercent = 100 end
+local maxAllowed = math.ceil((maxPercent * total) / 100)
+
+local status = 'pending'
+if percentage >= 100 then
+  if approved < maxAllowed then
+    approved = redis.call('INCR', approvedKey)
+    status = 'approved'
+  end
+elseif percentage > 0 then
+  if approved >= maxAllowed then
+    status = 'pending'
+  elseif approved < targetApproved then
+    approved = redis.call('INCR', approvedKey)
+    status = 'approved'
+  else
+    local threshold = math.floor((percentage * 100) + 0.5)
+    if bucket < threshold and (approved + 1) <= maxAllowed then
+      approved = redis.call('INCR', approvedKey)
+      status = 'approved'
+    end
+  end
+end
+
+redis.call('EXPIRE', approvedKey, ttl)
+
+return {
+  status,
+  tostring(total),
+  tostring(approved),
+  tostring(targetApproved),
+  tostring(maxAllowed),
+  tostring(percentage),
+  tostring(tolerance)
+}
+`;
+
+if (typeof redis.approvalControl !== 'function') {
+  redis.defineCommand('approvalControl', {
+    numberOfKeys: 3,
+    lua: APPROVAL_CONTROL_LUA,
+  });
+}
 
 const generateConversionUuid = (tenantId, offerId, publisherId) => {
   return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
@@ -165,6 +278,12 @@ const getDeterministicApprovalStatusFromSeed = (seed, percentage) => {
   return bucket < threshold ? 'approved' : 'pending';
 };
 
+const getDeterministicBucketFromSeed = (seed) => {
+  const hash = crypto.createHash('sha256').update(seed).digest('hex');
+  const bucketBase = parseInt(hash.slice(0, 8), 16);
+  return bucketBase % 10000;
+};
+
 const getIstDateKey = () => {
   const now = new Date();
   const istTime = new Date(now.getTime() + (330 * 60 * 1000));
@@ -181,6 +300,24 @@ const buildBootstrapApprovalKey = ({ tenantId, offerId, publisherId, assignmentI
     String(assignmentId ?? ''),
     dateKey
   ].join(':');
+};
+
+const buildApprovalControlKeys = ({ tenantId, offerId, publisherId, assignmentId, dateKey }) => {
+  const base = [
+    'approval_control',
+    DETERMINISTIC_APPROVAL_VERSION,
+    String(tenantId ?? ''),
+    String(offerId ?? ''),
+    String(publisherId ?? ''),
+    String(assignmentId ?? ''),
+    dateKey
+  ].join(':');
+
+  return {
+    totalKey: `${base}:total`,
+    approvedKey: `${base}:approved`,
+    percentageKey: `${base}:percentage`,
+  };
 };
 
 export class PostbackService {
@@ -238,7 +375,38 @@ export class PostbackService {
         assignmentId,
         decisionKey
       });
-      return getDeterministicApprovalStatusFromSeed(seed, numericPercentage);
+      const bucket = getDeterministicBucketFromSeed(seed);
+      const controlKeys = buildApprovalControlKeys({
+        tenantId,
+        offerId,
+        publisherId,
+        assignmentId,
+        dateKey
+      });
+
+      const result = await redis.approvalControl(
+        controlKeys.totalKey,
+        controlKeys.approvedKey,
+        controlKeys.percentageKey,
+        numericPercentage.toString(),
+        String(APPROVAL_TOLERANCE_PERCENT),
+        String(bucket),
+        String(APPROVAL_CONTROL_TTL_SECONDS)
+      );
+
+      if (!Array.isArray(result) || result.length < 1) {
+        logger.warn('Unexpected approvalControl response; falling back to seed decision', {
+          tenantId,
+          offerId,
+          publisherId,
+          assignmentId,
+          decisionKey,
+          result
+        });
+        return getDeterministicApprovalStatusFromSeed(seed, numericPercentage);
+      }
+
+      return result[0] === 'approved' ? 'approved' : 'pending';
     } catch (error) {
       logger.error('Failed to evaluate deterministic approval status', {
         error: error.message,
@@ -426,7 +594,6 @@ export class PostbackService {
 
           // 2. Validate Offer / Fetch Payout (in-file lookup by internal id)
           const offer = await getOfferByInternalId(clickData.offer_id, tenantId);
-          console.log('offer', offer);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
