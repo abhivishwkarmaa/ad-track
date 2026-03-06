@@ -6,8 +6,8 @@ import { replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import https from 'https';
 import http from 'http';
+import crypto from 'crypto';
 
-import { clickQueue } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
 // ---------- In-file lookups (no external findById/getOfferById) ----------
@@ -95,92 +95,11 @@ function checkOfferValidity(offer) {
 
 // ---------- End in-file lookups ----------
 
-const APPROVAL_KEY_PREFIX = 'approval';
-const APPROVAL_SCRIPT_KEY_COUNT = 3;
 const CLICK_EXPIRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CLICK_EXPIRED_STATUS = 'click_expired';
-
-const DETERMINISTIC_APPROVAL_LUA = `
-local totalKey = KEYS[1]
-local approvedKey = KEYS[2]
-local percentageKey = KEYS[3]
-
-local percentageArg = ARGV[1]
-if not percentageArg then
-  return redis.error_reply('percentage argument required')
-end
-
-local percentage = tonumber(percentageArg)
-if not percentage then
-  return redis.error_reply('percentage argument must be numeric')
-end
-
-local storedPercentage = redis.call('GET', percentageKey)
-if not storedPercentage or storedPercentage ~= percentageArg then
-  redis.call('DEL', totalKey)
-  redis.call('DEL', approvedKey)
-  redis.call('SET', percentageKey, percentageArg)
-end
-
-local total = redis.call('INCR', totalKey)
-local approvedRaw = redis.call('GET', approvedKey)
-local approvedCount = 0
-if approvedRaw then
-  approvedCount = tonumber(approvedRaw)
-end
-
-local expected = (percentage * total) / 100
-local status = 'pending'
-
-if approvedCount < expected then
-  approvedCount = redis.call('INCR', approvedKey)
-  status = 'approved'
-end
-
-return {
-  status,
-  tostring(total),
-  tostring(approvedCount),
-  string.format('%.10f', expected),
-  tostring(percentage)
-}
-`;
-
-if (typeof redis.deterministicApproval !== 'function') {
-  redis.defineCommand('deterministicApproval', {
-    numberOfKeys: APPROVAL_SCRIPT_KEY_COUNT,
-    lua: DETERMINISTIC_APPROVAL_LUA,
-  });
-}
-
-const normalizeApprovalKeySegment = (value, label) => {
-  if (value === undefined || value === null || value === '') {
-    throw new Error(`Missing ${label} for deterministic approval`);
-  }
-
-  const segment = String(value).trim();
-  if (!segment) {
-    throw new Error(`Empty ${label} provided for deterministic approval`);
-  }
-
-  return segment.replace(/\s+/g, '_');
-};
-
-const buildApprovalKeys = ({ tenantId, offerId, publisherId, assignmentId }) => {
-  const tenantSegment = normalizeApprovalKeySegment(tenantId, 'tenantId');
-  const offerSegment = normalizeApprovalKeySegment(offerId, 'offerId');
-  const publisherSegment = normalizeApprovalKeySegment(publisherId, 'publisherId');
-  const assignmentSegment = normalizeApprovalKeySegment(assignmentId, 'assignmentId');
-
-  const base = `${APPROVAL_KEY_PREFIX}:${tenantSegment}:${offerSegment}:${publisherSegment}:${assignmentSegment}`;
-
-  return {
-    base,
-    totalKey: `${base}:total`,
-    approvedKey: `${base}:approved`,
-    percentageKey: `${base}:percentage`,
-  };
-};
+const APPROVAL_ELIGIBLE_STATUSES = new Set(['approved', 'pending']);
+const DETERMINISTIC_APPROVAL_VERSION = 'v2';
+const BOOTSTRAP_APPROVAL_TTL_SECONDS = 8 * 24 * 60 * 60;
 
 const generateConversionUuid = (tenantId, offerId, publisherId) => {
   return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
@@ -193,12 +112,84 @@ const isClickOlderThan24Hours = (clickTimeValue) => {
   return (Date.now() - clickTime) >= CLICK_EXPIRY_WINDOW_MS;
 };
 
+const resolveExpiredRevenueAmount = async ({ amount, offerId, tenantId }) => {
+  const parsedAmount = Number(amount);
+  if (Number.isFinite(parsedAmount) && parsedAmount > 0) return parsedAmount;
+
+  try {
+    const offer = await getOfferByInternalId(offerId, tenantId);
+    const advertiserAmount = Number(offer?.advertiser_amount);
+    if (Number.isFinite(advertiserAmount) && advertiserAmount > 0) return advertiserAmount;
+  } catch (error) {
+    logger.warn('Failed to resolve expired conversion amount from offer; defaulting to 0', {
+      offerId,
+      tenantId,
+      error: error.message
+    });
+  }
+
+  return 0;
+};
+
+const normalizeConversionStatus = (rawStatus) => {
+  const normalized = String(rawStatus || 'approved').trim().toLowerCase();
+  if (normalized === 'expired') return CLICK_EXPIRED_STATUS;
+  if (normalized === CLICK_EXPIRED_STATUS) return CLICK_EXPIRED_STATUS;
+  if (normalized === 'approved' || normalized === 'pending' || normalized === 'rejected' || normalized === 'rejected_cap') {
+    return normalized;
+  }
+  return 'approved';
+};
+
+const buildDeterministicApprovalSeed = ({ tenantId, offerId, publisherId, assignmentId, decisionKey }) => {
+  const normalizedDecisionKey = String(decisionKey || '').trim();
+  if (!normalizedDecisionKey) {
+    throw new Error('Missing decision key for deterministic approval');
+  }
+
+  return [
+    DETERMINISTIC_APPROVAL_VERSION,
+    String(tenantId ?? ''),
+    String(offerId ?? ''),
+    String(publisherId ?? ''),
+    String(assignmentId ?? ''),
+    normalizedDecisionKey
+  ].join(':');
+};
+
+const getDeterministicApprovalStatusFromSeed = (seed, percentage) => {
+  const hash = crypto.createHash('sha256').update(seed).digest('hex');
+  const bucketBase = parseInt(hash.slice(0, 8), 16);
+  const bucket = bucketBase % 10000; // 0..9999
+  const threshold = Math.round(percentage * 100); // 0.01% granularity
+  return bucket < threshold ? 'approved' : 'pending';
+};
+
+const getIstDateKey = () => {
+  const now = new Date();
+  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+  return istTime.toISOString().slice(0, 10);
+};
+
+const buildBootstrapApprovalKey = ({ tenantId, offerId, publisherId, assignmentId, dateKey }) => {
+  return [
+    'approval_bootstrap',
+    DETERMINISTIC_APPROVAL_VERSION,
+    String(tenantId ?? ''),
+    String(offerId ?? ''),
+    String(publisherId ?? ''),
+    String(assignmentId ?? ''),
+    dateKey
+  ].join(':');
+};
+
 export class PostbackService {
   async determineDeterministicApprovalStatus({
     tenantId,
     offerId,
     publisherId,
     assignmentId,
+    decisionKey,
     approvalPercentage,
     fallbackStatus = 'pending'
   }) {
@@ -220,37 +211,42 @@ export class PostbackService {
 
     if (numericPercentage < 0) numericPercentage = 0;
     if (numericPercentage > 100) numericPercentage = 100;
+    if (numericPercentage <= 0) return 'pending';
+    if (numericPercentage >= 100) return 'approved';
 
     try {
-      const keys = buildApprovalKeys({ tenantId, offerId, publisherId, assignmentId });
-      const result = await redis.deterministicApproval(
-        keys.totalKey,
-        keys.approvedKey,
-        keys.percentageKey,
-        numericPercentage.toString()
-      );
+      // Bootstrap trust signal: first eligible conversion per assignment/day is approved.
+      // Applies only when percentage is in mixed mode (0 < p < 100).
+      const dateKey = getIstDateKey();
+      const bootstrapKey = buildBootstrapApprovalKey({
+        tenantId,
+        offerId,
+        publisherId,
+        assignmentId,
+        dateKey
+      });
 
-      if (!Array.isArray(result) || result.length < 1) {
-        logger.warn('Unexpected response from deterministic approval script; defaulting to fallback status', {
-          tenantId,
-          offerId,
-          publisherId,
-          assignmentId,
-          result
-        });
-        return fallbackStatus;
+      const bootstrapClaim = await redis.set(bootstrapKey, '1', 'EX', BOOTSTRAP_APPROVAL_TTL_SECONDS, 'NX');
+      if (bootstrapClaim === 'OK') {
+        return 'approved';
       }
 
-      const status = result[0] === 'approved' ? 'approved' : 'pending';
-
-      return status;
+      const seed = buildDeterministicApprovalSeed({
+        tenantId,
+        offerId,
+        publisherId,
+        assignmentId,
+        decisionKey
+      });
+      return getDeterministicApprovalStatusFromSeed(seed, numericPercentage);
     } catch (error) {
       logger.error('Failed to evaluate deterministic approval status', {
         error: error.message,
         tenantId,
         offerId,
         publisherId,
-        assignmentId
+        assignmentId,
+        decisionKey
       });
       return fallbackStatus;
     }
@@ -259,6 +255,7 @@ export class PostbackService {
   async processPostback(query, request) {
     try {
       const { click_id, rcid, amount, status = 'approved' } = query;
+      const normalizedIncomingStatus = normalizeConversionStatus(status);
 
       if (!click_id && !rcid) {
         throw new Error('Either click_id or rcid is required');
@@ -383,6 +380,11 @@ export class PostbackService {
 
           const redisClickTimestamp = redisClick.created_at || redisClick.timestamp;
           if (isClickOlderThan24Hours(redisClickTimestamp)) {
+            const expiredAmount = await resolveExpiredRevenueAmount({
+              amount,
+              offerId: clickData.offer_id,
+              tenantId
+            });
             const expiredConversionData = {
               click_uuid: click_id,
               offer_id: clickData.offer_id,
@@ -391,7 +393,7 @@ export class PostbackService {
               tenant_id: tenantId,
               rcid: rcid || redisClick.rcid || uuidv4(),
               status: CLICK_EXPIRED_STATUS,
-              amount: 0,
+              amount: expiredAmount,
               payout: 0,
               ip: extractIP(request),
               timestamp: new Date().toISOString(),
@@ -414,9 +416,10 @@ export class PostbackService {
             });
 
             return {
-              success: false,
+              success: true,
               message: 'Click expired (older than 24 hours)',
               error_type: 'click_expired',
+              status: CLICK_EXPIRED_STATUS,
               duplicate: false
             };
           }
@@ -444,7 +447,6 @@ export class PostbackService {
 
           // Fetch Publisher (in-file lookup by internal id)
           const publisher = await getPublisherByInternalId(clickData.publisher_id, tenantId);
-          logger.info('offeyfcjhcdjdcffjdfkr', offer);
           let offerPayout = parseFloat(offer.advertiser_amount);
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
@@ -463,14 +465,20 @@ export class PostbackService {
             assignment_id: assignment?.id ?? assignment?.internal_id
           }, '[POSTBACK] Redis path – Payout debug');
           // 4. Status Determination
-          let finalStatus = status;
-          if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
+          let finalStatus = normalizedIncomingStatus;
+          if (
+            APPROVAL_ELIGIBLE_STATUSES.has(finalStatus) &&
+            assignment?.conversion_approval_percentage !== null &&
+            assignment?.conversion_approval_percentage !== undefined
+          ) {
             finalStatus = await this.determineDeterministicApprovalStatus({
               tenantId,
               offerId: clickData.offer_id,
               publisherId: clickData.publisher_id,
               assignmentId: assignment.internal_id ?? assignment.id,
-              approvalPercentage: assignment.conversion_approval_percentage
+              decisionKey: rcid || click_id || redisClick.rcid || redisClick.tid,
+              approvalPercentage: assignment.conversion_approval_percentage,
+              fallbackStatus: finalStatus
             });
           }
 
@@ -479,6 +487,8 @@ export class PostbackService {
 
           // 5. Store Conversion in Redis - UTC ENFORCEMENT: Store UTC timestamp only
           // ✅ CRITICAL: Include tenant_id in conversion data
+          const finalAmount = conversionAmount;
+          const finalPayout = finalStatus === CLICK_EXPIRED_STATUS ? 0 : payout;
           const conversionData = {
             click_uuid: click_id,
             offer_id: clickData.offer_id,
@@ -487,8 +497,8 @@ export class PostbackService {
             tenant_id: tenantId, // ✅ CRITICAL: Include tenant_id
             rcid: rcid || redisClick.rcid || uuidv4(),
             status: finalStatus,
-            amount: conversionAmount,
-            payout: payout,
+            amount: finalAmount,
+            payout: finalPayout,
             ip: extractIP(request),
             timestamp: new Date().toISOString(),
             postback_payload: JSON.stringify({ query, headers: request.headers }),
@@ -673,7 +683,11 @@ export class PostbackService {
         const expiredPublisherId = click.publisher_id;
         const expiredPublisherOfferId = click.publisher_offer_id;
         const expiredConversionUuid = generateConversionUuid(tenantId, expiredOfferId, expiredPublisherId);
-        const expiredConversionAmount = 0;
+        const expiredConversionAmount = await resolveExpiredRevenueAmount({
+          amount,
+          offerId: expiredOfferId,
+          tenantId
+        });
         const expiredConversionPayout = 0;
         const expiredConversionRcid = rcid || click?.rcid || uuidv4();
 
@@ -729,9 +743,10 @@ export class PostbackService {
         });
 
         return {
-          success: false,
+          success: true,
           message: 'Conversion rejected(click_expired)',
           error_type: 'click_expired',
+          status: CLICK_EXPIRED_STATUS,
           conversion: null,
           duplicate: false,
         };
@@ -830,16 +845,25 @@ export class PostbackService {
       }, '[POSTBACK] DB path – Payout debug');
 
       // Determine conversion status based on conversion_approval_percentage
-      let finalStatus = status;
-      if (assignment?.conversion_approval_percentage !== null && assignment?.conversion_approval_percentage !== undefined) {
+      let finalStatus = normalizedIncomingStatus;
+      if (
+        APPROVAL_ELIGIBLE_STATUSES.has(finalStatus) &&
+        assignment?.conversion_approval_percentage !== null &&
+        assignment?.conversion_approval_percentage !== undefined
+      ) {
         finalStatus = await this.determineDeterministicApprovalStatus({
           tenantId,
           offerId,
           publisherId,
           assignmentId: assignment.internal_id ?? assignment.id,
-          approvalPercentage: assignment.conversion_approval_percentage
+          decisionKey: rcid || click?.click_uuid || click_id || click?.tid,
+          approvalPercentage: assignment.conversion_approval_percentage,
+          fallbackStatus: finalStatus
         });
       }
+
+      const finalAmount = conversionAmount;
+      const finalPayout = finalStatus === CLICK_EXPIRED_STATUS ? 0 : payout;
 
       // Extract IP
       const ip = extractIP(request);
@@ -975,8 +999,8 @@ export class PostbackService {
           tenantId,
           rcid || click?.rcid || uuidv4(),
           finalStatus,
-          conversionAmount,
-          payout,
+          finalAmount,
+          finalPayout,
           ip,
           JSON.stringify(postbackPayload),
         ]
@@ -996,8 +1020,8 @@ export class PostbackService {
         const statsKeyPub = `stats:pub:${publisherId || 0}:${tenantIdVal}:${today}`;
 
         // Revenue: ALWAYS increment (Advertiser Revenue)
-        statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, conversionAmount);
-        statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, conversionAmount);
+        statsPipe.incrbyfloat(`${statsKeyOffer}:revenue`, finalAmount);
+        statsPipe.incrbyfloat(`${statsKeyPub}:revenue`, finalAmount);
 
         // Track conversions as total + per-status buckets.
         const normalizedStatus = (finalStatus || 'pending').toLowerCase();
@@ -1008,8 +1032,8 @@ export class PostbackService {
           statsPipe.incr(`${statsKeyOffer}:approved_conversions`);
           statsPipe.incr(`${statsKeyPub}:approved_conversions`);
           // Payout: ONLY Approved
-          statsPipe.incrbyfloat(`${statsKeyOffer}:payout`, payout);
-          statsPipe.incrbyfloat(`${statsKeyPub}:payout`, payout);
+          statsPipe.incrbyfloat(`${statsKeyOffer}:payout`, finalPayout);
+          statsPipe.incrbyfloat(`${statsKeyPub}:payout`, finalPayout);
         } else if (normalizedStatus === 'pending') {
           statsPipe.incr(`${statsKeyOffer}:pending_conversions`);
           statsPipe.incr(`${statsKeyPub}:pending_conversions`);
@@ -1032,12 +1056,12 @@ export class PostbackService {
           // Publisher Cap
           if (assignment && assignment.id) {
             // Publisher budget uses payout
-            await cacheService.incrementCap('publisher', assignment.id, assignment, payout, tenantId);
+            await cacheService.incrementCap('publisher', assignment.id, assignment, finalPayout, tenantId);
           }
           // Offer Cap
           if (offer && offer.id) {
             // Offer budget uses revenue (amount)
-            await cacheService.incrementCap('offer', offer.id, offer, conversionAmount, tenantId);
+            await cacheService.incrementCap('offer', offer.id, offer, finalAmount, tenantId);
           }
         }
       } catch (capErr) {

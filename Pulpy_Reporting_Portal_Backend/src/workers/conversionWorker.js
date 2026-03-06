@@ -556,7 +556,16 @@ async function fireAffiliatePostbacks(items) {
             };
             const click = { tid: c.tid };
 
-            await postbackService.sendPublisherPostback(c.callback_url, conversion, click);
+            const postbackResult = await postbackService.sendPublisherPostback(c.callback_url, conversion, click);
+            if (!postbackResult?.success) {
+                logger.warn(`⚠️ Affiliate Postback Not Marked Fired (request failed): ${c.callback_url}`, {
+                    conversion_id: c.id,
+                    tenant_id: c.tenant_id,
+                    status: c.status,
+                    reason: postbackResult?.reason || postbackResult?.error || 'unknown'
+                });
+                return;
+            }
             try {
                 await pool.query(
                     'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',

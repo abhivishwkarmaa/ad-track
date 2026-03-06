@@ -20,7 +20,7 @@ export const postbackQuerySchema = Joi.object({
   click_id: Joi.string().allow('', null).optional(),
   rcid: Joi.string().allow('', null).optional(),
   amount: Joi.number().positive().optional(),
-  status: Joi.string().valid('approved', 'rejected', 'pending').default('approved'),
+  status: Joi.string().valid('approved', 'rejected', 'pending', 'click_expired', 'expired').default('approved'),
 });
 
 export const testConversionSchema = Joi.object({
@@ -32,7 +32,7 @@ export const testAffiliatePostbackSchema = Joi.object({
   publisher_id: Joi.alternatives().try(Joi.number(), Joi.string()).required(),
   affiliate_click_id: Joi.string().optional(),
   rcid: Joi.string().optional(), // Alias for affiliate_click_id
-  status: Joi.string().valid('approved', 'rejected', 'pending').default('approved'),
+  status: Joi.string().valid('approved', 'rejected', 'pending', 'click_expired', 'expired').default('approved'),
   payout: Joi.number().optional(),
   amount: Joi.number().optional(),
   txid: Joi.string().optional(),

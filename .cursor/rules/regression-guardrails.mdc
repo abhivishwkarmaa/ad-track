@@ -1,0 +1,37 @@
+---
+description: Prevent silent update regressions in API refactors
+alwaysApply: true
+---
+
+# Regression Guardrails (Backend + Frontend)
+
+When changing request/response fields, validators, SQL update logic, or refactoring service methods, follow this checklist before finishing.
+
+## 1) Field Mapping Integrity (mandatory)
+- If a field exists in create flow, verify update flow also maps it (and vice versa when expected).
+- Keep field names aligned across: frontend payload, validator schema, controller, service update builder, DB columns, and response formatter.
+- During refactors, do not remove existing update mappings unless a migration/design note explicitly says so.
+
+## 2) Dynamic SQL Update Safety
+- For dynamic `updateFields` builders, verify every editable form field has a corresponding `updateFields.push(...)`.
+- If API returns success on update, verify meaningful persistence (not just request accepted).
+- Prefer reading back updated row after UPDATE and returning that object.
+
+## 3) Refactor Change Audit
+- For touched service files, compare old vs new behavior for create, update, and format methods.
+- If capping/status/ID logic is changed, run a targeted audit for unrelated fields (e.g., payout, approval %, notes).
+- Use git diff/history to confirm no accidental field-drop regression.
+
+## 4) Minimum Verification Before Completion
+- Run lints for edited files.
+- Run at least one real update-path verification (API or test) for the changed fields.
+- If verification is skipped, explicitly state what remains unverified and why.
+
+## 5) Response Discipline
+- Do not claim "fixed" until persistence is validated.
+- Mention restart requirement when runtime uses stale server process.
+
+## 6) Conversion Postback Policy (strict)
+- Fire publisher postback URL only when conversion status is exactly `approved`.
+- For any non-approved status (including `pending`, `rejected`, `failed`, `hold`, `cancelled`, `rejected_cap`, `click_expired`), do not fire publisher postback.
+- If conversion status changes from non-approved to `approved`, postback may be fired once according to idempotency safeguards.
