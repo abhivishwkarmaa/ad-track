@@ -95,7 +95,7 @@ function checkOfferValidity(offer) {
 
 // ---------- End in-file lookups ----------
 
-const CLICK_EXPIRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const CLICK_EXPIRY_WINDOW_MS = 1 * 60 * 60 * 1000;
 const CLICK_EXPIRED_STATUS = 'click_expired';
 const APPROVAL_ELIGIBLE_STATUSES = new Set(['approved', 'pending']);
 const DETERMINISTIC_APPROVAL_VERSION = 'v2';
@@ -218,7 +218,7 @@ const generateConversionUuid = (tenantId, offerId, publisherId) => {
   return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
 };
 
-const isClickOlderThan24Hours = (clickTimeValue) => {
+const isClickOlderThan1Hour = (clickTimeValue) => {
   if (!clickTimeValue) return false;
   const clickTime = new Date(clickTimeValue).getTime();
   if (!Number.isFinite(clickTime)) return false;
@@ -547,7 +547,7 @@ export class PostbackService {
           });
 
           const redisClickTimestamp = redisClick.created_at || redisClick.timestamp;
-          if (isClickOlderThan24Hours(redisClickTimestamp)) {
+          if (isClickOlderThan1Hour(redisClickTimestamp)) {
             const expiredAmount = await resolveExpiredRevenueAmount({
               amount,
               offerId: clickData.offer_id,
@@ -585,7 +585,7 @@ export class PostbackService {
 
             return {
               success: true,
-              message: 'Click expired (older than 24 hours)',
+              message: 'Click expired (older than 1 hour)',
               error_type: 'click_expired',
               status: CLICK_EXPIRED_STATUS,
               duplicate: false
@@ -845,7 +845,7 @@ export class PostbackService {
         throw new Error('Cannot process postback without click_id or rcid');
       }
 
-      if (click && isClickOlderThan24Hours(click.created_at || click.timestamp)) {
+      if (click && isClickOlderThan1Hour(click.created_at || click.timestamp)) {
         const expiredOfferId = click.offer_id;
         const expiredPublisherId = click.publisher_id;
         const expiredPublisherOfferId = click.publisher_offer_id;
