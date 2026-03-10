@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRefresh } from '../../context/RefreshContext';
@@ -190,6 +190,7 @@ function Dashboard() {
     const [loadingOfferStats, setLoadingOfferStats] = useState(true);
     const [performanceComparison, setPerformanceComparison] = useState([]);
     const [loadingComparison, setLoadingComparison] = useState(true);
+    const cardsRequestSeqRef = useRef(0);
 
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
@@ -244,6 +245,7 @@ function Dashboard() {
         const prevParams = previousRange
             ? { previous_from: previousRange.from, previous_to: previousRange.to }
             : {};
+        const cardsReqId = ++cardsRequestSeqRef.current;
 
         setLoadingCards(true);
         setLoadingPerformance(true);
@@ -254,9 +256,22 @@ function Dashboard() {
         setLoadingComparison(true);
 
         dashboardAPI.getDashboardCards(baseParams)
-            .then(res => mountCheck() && res.success && setCards(res.data || {}))
-            .catch(err => mountCheck() && console.error('Cards error:', err))
-            .finally(() => mountCheck() && setLoadingCards(false));
+            .then(res => {
+                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
+                if (mountCheck() && !isStaleResponse && res.success) {
+                    setCards(res.data || {});
+                }
+            })
+            .catch(err => {
+                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
+                mountCheck() && console.error('Cards error:', err);
+            })
+            .finally(() => {
+                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
+                if (mountCheck() && !isStaleResponse) {
+                    setLoadingCards(false);
+                }
+            });
 
         dashboardAPI.getPerformance({ ...baseParams, group_by: groupBy })
             .then(res => mountCheck() && res.success && setPerformanceChart(res.data || []))

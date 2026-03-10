@@ -52,12 +52,14 @@ export class DashboardService {
     prevFromDate.setDate(prevFromDate.getDate() - diffDays + 1);
     const prevFrom = prevFromDate.toISOString().split('T')[0];
 
-    return {
+    const computed = {
       currentFrom: dateFrom,
       currentTo: dateTo,
       previousFrom: prevFrom,
       previousTo: prevTo
     };
+
+    return computed;
   }
 
   async getDashboardStats(filters = {}, tenantId) {
@@ -579,7 +581,7 @@ export class DashboardService {
           SELECT
             'clicks' as metric,
             COUNT(*) as total,
-            COUNT(DISTINCT click_uuid) as unique_total,
+            COUNT(*) as unique_total,
             0 as approved,
             0 as pending,
             0 as rejected,
@@ -648,17 +650,16 @@ export class DashboardService {
         ) agg
       `;
 
-      const [currentResult, previousResult] = await Promise.all([
-        pool.query(currentAggregatedSql, [
-          tenantId, currentRange.start, currentRange.end,
-          tenantId, currentRange.start, currentRange.end,
-          tenantId, currentRange.start, currentRange.end
-        ]),
-        pool.query(previousAggregatedSql, [
-          tenantId, previousRange.start, previousRange.end,
-          tenantId, previousRange.start, previousRange.end,
-          tenantId, previousRange.start, previousRange.end
-        ])
+      const currentResult = await pool.query(currentAggregatedSql, [
+        tenantId, currentRange.start, currentRange.end,
+        tenantId, currentRange.start, currentRange.end,
+        tenantId, currentRange.start, currentRange.end
+      ]);
+
+      const previousResult = await pool.query(previousAggregatedSql, [
+        tenantId, previousRange.start, previousRange.end,
+        tenantId, previousRange.start, previousRange.end,
+        tenantId, previousRange.start, previousRange.end
       ]);
 
       const currentStats = currentResult[0]?.[0] || {};
@@ -762,7 +763,7 @@ export class DashboardService {
 
       const [clicksResult, conversionsResult] = await Promise.all([
         pool.query(
-          `SELECT COUNT(DISTINCT click_uuid) as unique_clicks
+          `SELECT COUNT(*) as unique_clicks
            FROM clicks
            WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
           [currentRange.start, currentRange.end, tenantId]

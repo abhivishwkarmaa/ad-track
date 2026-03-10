@@ -323,6 +323,7 @@ export class DashboardController {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
       };
+
       const data = await dashboardService.getOfferStatistics(filters, tenantId);
       return reply.send({
         success: true,
