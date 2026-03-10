@@ -898,37 +898,103 @@ class OfferService {
     }
   }
 
-  async getOfferPublisherStats(id, tenantId = null) {
+  async getOfferPublisherStats(id, tenantId = null, filters = {}) {
     try {
       // 1. Resolve internal ID
       const offer = await this.getOfferById(id, tenantId);
       if (!offer) return [];
       const internalId = offer.id;
 
-      // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
+      const dateFrom = filters?.date_from || null;
+      const dateTo = filters?.date_to || null;
+      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+      const rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
+
+      // Assigned publishers for this offer + offer-scoped performance metrics (dashboard-style)
       let query = `SELECT 
-          c.publisher_id,
+          p.id as publisher_id,
+          p.public_publisher_id as public_id,
+          COALESCE(p.company_name, p.first_name, p.email, 'Unknown') as publisher_name,
           p.email as publisher_email,
-          p.company_name as publisher_company,
-          COUNT(DISTINCT c.id) as click_count,
-          COUNT(DISTINCT conv.id) as conversion_count,
-          COALESCE(SUM(conv.amount), 0) as revenue,
-          COALESCE(SUM(conv.payout), 0) as payout
-        FROM clicks c
-        LEFT JOIN publishers p ON c.publisher_id = p.id
-        LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
-        WHERE c.offer_id = ?`;
+          COALESCE(c.total_clicks, 0) as clicks,
+          COALESCE(conv.total_conversions, 0) as conversions,
+          COALESCE(conv.pending_conversions, 0) as pending_conversions,
+          COALESCE(conv.approved_conversions, 0) as approved_conversions,
+          COALESCE(conv.approved_payout, 0) as approved_payout,
+          COALESCE(conv.total_revenue, 0) as total_revenue,
+          (COALESCE(conv.total_revenue, 0) - COALESCE(conv.approved_payout, 0)) as total_profit
+        FROM publisher_offers po
+        INNER JOIN publishers p ON po.publisher_id = p.id
+        LEFT JOIN (
+          SELECT
+            publisher_id,
+            COUNT(*) as total_clicks
+          FROM clicks
+          WHERE offer_id = ?`;
       const params = [internalId];
 
       if (tenantId) {
-        query += ' AND c.tenant_id = ?';
+        query += ' AND tenant_id = ?';
+        params.push(tenantId);
+      }
+      if (rangeStart) {
+        query += ' AND created_at >= ?';
+        params.push(rangeStart);
+      }
+      if (rangeEnd) {
+        query += ' AND created_at <= ?';
+        params.push(rangeEnd);
+      }
+
+      query += `
+          GROUP BY publisher_id
+        ) c ON c.publisher_id = p.id
+        LEFT JOIN (
+          SELECT
+            publisher_id,
+            COUNT(*) as total_conversions,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as approved_payout,
+            COALESCE(SUM(amount), 0) as total_revenue
+          FROM conversions
+          WHERE offer_id = ?`;
+      params.push(internalId);
+
+      if (tenantId) {
+        query += ' AND tenant_id = ?';
+        params.push(tenantId);
+      }
+      if (rangeStart) {
+        query += ' AND created_at >= ?';
+        params.push(rangeStart);
+      }
+      if (rangeEnd) {
+        query += ' AND created_at <= ?';
+        params.push(rangeEnd);
+      }
+
+      query += `
+          GROUP BY publisher_id
+        ) conv ON conv.publisher_id = p.id
+        WHERE po.offer_id = ?`;
+      params.push(internalId);
+
+      if (tenantId) {
+        query += ' AND po.tenant_id = ?';
         params.push(tenantId);
       }
 
-      query += ' GROUP BY c.publisher_id, p.email, p.company_name ORDER BY click_count DESC';
+      query += `
+        GROUP BY p.id, p.public_publisher_id, p.company_name, p.first_name, p.email,
+                 c.total_clicks, conv.total_conversions, conv.pending_conversions,
+                 conv.approved_conversions, conv.approved_payout, conv.total_revenue
+        ORDER BY conversions DESC, clicks DESC, publisher_name ASC`;
 
-      const [clicksByPublisherRows] = await pool.query(query, params);
-      return Array.isArray(clicksByPublisherRows) ? clicksByPublisherRows : [];
+      const [publisherStatsRows] = await pool.query(query, params);
+      return Array.isArray(publisherStatsRows) ? publisherStatsRows : [];
     } catch (error) {
       logger.error('OfferService.getOfferPublisherStats error:', error);
       throw error;

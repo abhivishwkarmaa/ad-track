@@ -34,7 +34,7 @@ const getStoredUser = () => {
     if (!user) return null;
     try {
         return JSON.parse(user);
-    } catch (e) {
+    } catch {
         return null;
     }
 };
@@ -70,7 +70,7 @@ const refreshAccessToken = async () => {
 
         setAccessToken(data.data.token);
         return true;
-    } catch (error) {
+    } catch {
         return false;
     }
 };
@@ -131,7 +131,7 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
             const text = await response.text();
             try {
                 data = JSON.parse(text);
-            } catch (e) {
+            } catch {
                 // If parsing fails, create error object
                 data = {
                     message: text || `HTTP ${response.status} ${response.statusText}`,
@@ -418,8 +418,9 @@ export const offersAPI = {
     getOfferRecentConversions: async (id) => {
         return apiRequest(`/api/admin/offers/${id}/recent-conversions`);
     },
-    getOfferPublisherStats: async (id) => {
-        return apiRequest(`/api/admin/offers/${id}/publisher-stats`);
+    getOfferPublisherStats: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/offers/${id}/publisher-stats${queryString ? `?${queryString}` : ''}`);
     },
     getOfferForEdit: async (id) => {
         return apiRequest(`/api/admin/offers/${id}/edit`);

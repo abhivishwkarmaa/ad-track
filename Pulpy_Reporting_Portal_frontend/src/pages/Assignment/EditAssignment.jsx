@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
@@ -9,8 +9,24 @@ import './Assignment.css';
 function EditAssignment() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const toast = useToast();
     const { refreshKey } = useRefresh();
+    const returnToFromQuery = new URLSearchParams(location.search).get('returnTo');
+    const returnToFromState = location.state?.returnTo;
+    const returnTo = returnToFromQuery || returnToFromState;
+
+    const goBackToOrigin = useCallback(() => {
+        if (typeof returnTo === 'string' && returnTo.startsWith('/')) {
+            navigate(returnTo);
+            return;
+        }
+        if (window.history.length > 1) {
+            navigate(-1);
+            return;
+        }
+        navigate('/assignment/manage');
+    }, [navigate, returnTo]);
     const [loading, setLoading] = useState(false);
     const [loadingAssignment, setLoadingAssignment] = useState(true);
     const [assignment, setAssignment] = useState(null);
@@ -85,7 +101,7 @@ function EditAssignment() {
             } catch (err) {
                 console.error('Error fetching assignment:', err);
                 toast.error('Failed to load assignment');
-                navigate('/assignment/manage');
+                goBackToOrigin();
             } finally {
                 setLoadingAssignment(false);
             }
@@ -94,7 +110,7 @@ function EditAssignment() {
         if (id) {
             fetchAssignment();
         }
-    }, [id, navigate, toast, refreshKey]);
+    }, [id, toast, refreshKey, goBackToOrigin]);
 
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -129,7 +145,7 @@ function EditAssignment() {
 
             await assignmentsAPI.updateAssignment(targetId, assignmentData);
             toast.success('Assignment updated successfully!');
-            navigate('/assignment/manage');
+            goBackToOrigin();
         } catch (error) {
             console.error('Error updating assignment:', error);
             toast.error(error.message || 'Failed to update assignment');
@@ -339,7 +355,7 @@ function EditAssignment() {
                         <button type="submit" className="btn btn-success" disabled={loading}>
                             {loading ? 'Updating...' : 'Update Assignment'}
                         </button>
-                        <button type="button" className="btn btn-secondary" onClick={() => navigate('/assignment/manage')}>
+                        <button type="button" className="btn btn-secondary" onClick={goBackToOrigin}>
                             Cancel
                         </button>
                     </div>

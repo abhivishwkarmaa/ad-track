@@ -171,6 +171,7 @@ async function offerRoutes(fastify) {
     {
       schema: {
         params: offerIdParamSchema,
+        querystring: offerStatsQuerySchema,
       },
     },
     offerController.getPublisherStats

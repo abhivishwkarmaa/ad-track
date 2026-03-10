@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
@@ -151,6 +151,7 @@ function OfferDetail() {
 
     const { id } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const toast = useToast();
     const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(true);
@@ -159,7 +160,7 @@ function OfferDetail() {
     const [publishers, setPublishers] = useState([]);
     const [loadingPublishers, setLoadingPublishers] = useState(false);
     const [offers, setOffers] = useState([]);
-    const [assignments, setAssignments] = useState([]);
+    const [, setAssignments] = useState([]);
     const [loadingAssignments, setLoadingAssignments] = useState(false);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
     const [editingAssignmentIndex, setEditingAssignmentIndex] = useState(null);
@@ -169,6 +170,8 @@ function OfferDetail() {
     // New states for granular data
     const [stats, setStats] = useState(null);
     const [loadingStats, setLoadingStats] = useState(false);
+    const [publisherStats, setPublisherStats] = useState([]);
+    const [loadingPublisherStats, setLoadingPublisherStats] = useState(false);
     const [selectedRange, setSelectedRange] = useState('today');
     const [customRange, setCustomRange] = useState({ from: '', to: '' });
     const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
@@ -179,6 +182,7 @@ function OfferDetail() {
     const [showSearchResults, setShowSearchResults] = useState(false);
     const searchContainerRef = useRef(null);
     const statsRequestRef = useRef(0);
+    const publisherStatsRequestRef = useRef(0);
     const selectedTimelineRange = useMemo(() => {
         if (selectedRange === 'since_created') {
             const now = new Date();
@@ -246,6 +250,42 @@ function OfferDetail() {
             } finally {
                 if (requestId === statsRequestRef.current) {
                     setLoadingStats(false);
+                }
+            }
+        }, 250);
+
+        return () => clearTimeout(timer);
+    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+
+    useEffect(() => {
+        if (!id) return;
+        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
+            setPublisherStats([]);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            const requestId = ++publisherStatsRequestRef.current;
+            try {
+                setLoadingPublisherStats(true);
+                const response = await offersAPI.getOfferPublisherStats(id, {
+                    date_from: selectedTimelineRange.from,
+                    date_to: selectedTimelineRange.to,
+                });
+
+                if (requestId !== publisherStatsRequestRef.current) return;
+                if (response.success) {
+                    setPublisherStats(Array.isArray(response.data) ? response.data : []);
+                } else {
+                    setPublisherStats([]);
+                }
+            } catch (publisherStatsError) {
+                if (requestId !== publisherStatsRequestRef.current) return;
+                console.error('Error fetching offer publisher stats:', publisherStatsError);
+                setPublisherStats([]);
+            } finally {
+                if (requestId === publisherStatsRequestRef.current) {
+                    setLoadingPublisherStats(false);
                 }
             }
         }, 250);
@@ -682,6 +722,46 @@ function OfferDetail() {
                 </div>
             )}
 
+            <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
+                <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Publisher Stats</h2>
+                {loadingPublisherStats ? (
+                    <div className="loading-spinner-small" style={{ display: 'block', margin: '20px auto' }}></div>
+                ) : publisherStats.length > 0 ? (
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Publisher</th>
+                                    <th>Clicks</th>
+                                    <th>Total Conv</th>
+                                    <th>Pending Conv</th>
+                                    <th>Approved Conv</th>
+                                    <th>Approved Payout</th>
+                                    <th>Total Profit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {publisherStats.map((pub) => (
+                                    <tr key={pub.publisher_id}>
+                                        <td>{pub.publisher_name || pub.publisher_email || '-'}</td>
+                                        <td>{formatNumber(pub.clicks)}</td>
+                                        <td>{formatNumber(pub.conversions)}</td>
+                                        <td>{formatNumber(pub.pending_conversions)}</td>
+                                        <td>{formatNumber(pub.approved_conversions)}</td>
+                                        <td>{formatCurrency(pub.approved_payout)}</td>
+                                        <td>{formatCurrency(pub.total_profit)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', border: '1px dashed #d1d5db', borderRadius: '8px' }}>
+                        No publisher stats available for this timeline.
+                    </div>
+                )}
+            </div>
+
             {/* Publisher Assignments Management */}
             <div id="publisherSection" className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -1059,7 +1139,11 @@ function OfferDetail() {
                                             className="icon-btn"
                                             onClick={() => {
                                                 if (assignment.assignment_id) {
-                                                    navigate(`/assignment/edit/${assignment.assignment_id}`);
+                                                    const currentUrl = `${location.pathname}${location.search}${location.hash}`;
+                                                    const returnToParam = encodeURIComponent(currentUrl);
+                                                    navigate(`/assignment/edit/${assignment.assignment_id}?returnTo=${returnToParam}`, {
+                                                        state: { returnTo: currentUrl }
+                                                    });
                                                 } else {
                                                     toast.error('Please save the assignment first before editing.');
                                                 }
@@ -1237,40 +1321,6 @@ function OfferDetail() {
                 </div>
             )}
 
-            {/* Clicks by Publisher */}
-            {offer.clicks_by_publisher && offer.clicks_by_publisher.length > 0 && (
-                <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Performance by Publisher</h2>
-                    <div className="offer-table-container">
-                        <table className="offer-table">
-                            <thead>
-                                <tr>
-                                    <th>Publisher</th>
-                                    <th>Email</th>
-                                    <th>Company</th>
-                                    <th>Clicks</th>
-                                    <th>Conversions</th>
-                                    <th>Revenue</th>
-                                    <th>Payout</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {offer.clicks_by_publisher.map((pub, index) => (
-                                    <tr key={index}>
-                                        <td>{pub.publisher_email}</td>
-                                        <td>{pub.publisher_email}</td>
-                                        <td>{pub.publisher_company}</td>
-                                        <td>{pub.click_count}</td>
-                                        <td>{pub.conversion_count}</td>
-                                        <td>{offer.offer_currency} {pub.revenue}</td>
-                                        <td>{offer.offer_currency} {pub.payout}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

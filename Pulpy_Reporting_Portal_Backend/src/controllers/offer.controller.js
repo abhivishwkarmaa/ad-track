@@ -269,7 +269,7 @@ class OfferController {
         return reply.code(400).send(buildError('Tenant context required', 400, 'Bad Request'));
       }
       
-      const stats = await offerService.getOfferPublisherStats(request.params.id, tenantId);
+      const stats = await offerService.getOfferPublisherStats(request.params.id, tenantId, request.query || {});
       return reply.send(buildSuccess(stats));
     } catch (error) {
       logger.error('OfferController.getPublisherStats error:', error);
