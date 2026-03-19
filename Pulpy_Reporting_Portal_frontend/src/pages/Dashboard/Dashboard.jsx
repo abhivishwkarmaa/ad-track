@@ -138,15 +138,35 @@ const SkeletonList = ({ rows = 5 }) => (
     </div>
 );
 
-const SkeletonTable = ({ rows = 5, cols = 8 }) => (
-    <div className="activity-table">
-        <div className="table-header" style={{ gridTemplateColumns: `minmax(150px, 2fr) repeat(${cols - 1}, 1fr)` }}>
+const ProgressBar = ({ visible }) => (
+    <div style={{
+        height: '2px',
+        width: '100%',
+        backgroundColor: '#e2e8f0',
+        overflow: 'hidden',
+        visibility: visible ? 'visible' : 'hidden',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+    }}>
+        <div className="progress-bar-animate" style={{
+            height: '100%',
+            backgroundColor: 'var(--primary-color)',
+            width: '30%',
+            animation: 'progressBarAnim 1s infinite alternate ease-in-out'
+        }} />
+    </div>
+);
+
+const SkeletonTable = ({ rows = 5, cols = 8, className = "" }) => (
+    <div className={`activity-table ${className}`}>
+        <div className="table-header">
             {Array.from({ length: cols }).map((_, i) => (
                 <span key={i} className="skeleton" style={{ height: 12, display: 'block' }} />
             ))}
         </div>
         {Array.from({ length: rows }).map((_, ri) => (
-            <div key={ri} className="skeleton-table-row table-row" style={{ gridTemplateColumns: `minmax(150px, 2fr) repeat(${cols - 1}, 1fr)` }}>
+            <div key={ri} className="skeleton-table-row table-row">
                 {Array.from({ length: cols }).map((_, ci) => (
                     <div key={ci} className="skeleton" style={{ height: 12 }} />
                 ))}
@@ -166,8 +186,86 @@ const SkeletonSummary = () => (
     </div>
 );
 
+const SortableHeader = ({ label, field, currentSort, onSort, align = 'left' }) => {
+    const isActive = currentSort.by === field;
+    const isAsc = isActive && currentSort.order === 'ASC';
+
+    return (
+        <div 
+            className={`sortable-header ${isActive ? 'active' : ''} align-${align}`} 
+            onClick={() => onSort(field)}
+            style={{ 
+                cursor: 'pointer', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start',
+                gap: '6px', 
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s ease',
+                borderRadius: '4px',
+                userSelect: 'none',
+                width: '100%',
+                height: '100%'
+            }}
+        >
+            <span style={{ fontWeight: isActive ? '700' : 'normal', color: isActive ? 'var(--primary-color)' : 'inherit' }}>
+                {label}
+            </span>
+            <span style={{ fontSize: '12px', opacity: isActive ? 1 : 0.4, transition: 'transform 0.2s ease' }}>
+                {isActive ? (isAsc ? '▲' : '▼') : '↕'}
+            </span>
+        </div>
+    );
+};
+
+const Pagination = ({ current, total, limit, onPageChange }) => {
+    const totalPages = Math.ceil(total / limit);
+    if (totalPages <= 1) return null;
+
+    return (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', padding: '16px 20px', borderTop: '1px solid var(--border-color)' }}>
+            <button 
+                className={`secondary-button ${current === 1 ? 'disabled' : ''}`}
+                onClick={() => current > 1 && onPageChange(current - 1)}
+                disabled={current === 1}
+                style={{ padding: '6px 12px', fontSize: '13px' }}
+            >
+                Previous
+            </button>
+            <span style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                Page {current} of {totalPages}
+            </span>
+            <button 
+                className={`secondary-button ${current === totalPages ? 'disabled' : ''}`}
+                onClick={() => current < totalPages && onPageChange(current + 1)}
+                disabled={current === totalPages}
+                style={{ padding: '6px 12px', fontSize: '13px' }}
+            >
+                Next
+            </button>
+        </div>
+    );
+};
+
 // --- MAIN DASHBOARD COMPONENT ---
 function Dashboard() {
+    return (
+        <>
+            <style>
+                {`
+                    @keyframes progressBarAnim {
+                        0% { transform: translateX(-100%); }
+                        100% { transform: translateX(333%); }
+                    }
+                    .dashboard-card { position: relative; overflow: hidden; }
+                `}
+            </style>
+            <DashboardContent />
+        </>
+    );
+}
+
+function DashboardContent() {
     const { user } = useAuth();
     const { refreshKey } = useRefresh();
 
@@ -190,6 +288,17 @@ function Dashboard() {
     const [loadingOfferStats, setLoadingOfferStats] = useState(true);
     const [performanceComparison, setPerformanceComparison] = useState([]);
     const [loadingComparison, setLoadingComparison] = useState(true);
+
+    // Sorting state for statistics tables
+    const [offerSort, setOfferSort] = useState({ by: 'clicks', order: 'DESC' });
+    const [pubSort, setPubSort] = useState({ by: 'conversions', order: 'DESC' });
+
+    // Pagination state
+    const [offerPage, setOfferPage] = useState(1);
+    const [totalOffers, setTotalOffers] = useState(0);
+    const [pubPage, setPubPage] = useState(1);
+    const [totalPublishers, setTotalPublishers] = useState(0);
+
     const cardsRequestSeqRef = useRef(0);
 
     // Date range calculator (current period + previous period for comparison)
@@ -232,52 +341,38 @@ function Dashboard() {
     const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
     const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
 
-    // Progressive loading - jo API pehle ready ho uska data dikha do, sab ka wait mat karo
+    // 1. Core Dashboard Data (Cards, Charts, Summary) - Depends on Date Range
     useEffect(() => {
-        if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) {
-            return;
-        }
+        if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
 
         let cancelled = false;
         const mountCheck = () => !cancelled;
-
-        const params = { ...baseParams, group_by: groupBy };
-        const prevParams = previousRange
-            ? { previous_from: previousRange.from, previous_to: previousRange.to }
-            : {};
         const cardsReqId = ++cardsRequestSeqRef.current;
 
         setLoadingCards(true);
         setLoadingPerformance(true);
         setLoadingSummary(true);
         setLoadingLiveOffers(true);
-        setLoadingPublisherStats(true);
-        setLoadingOfferStats(true);
         setLoadingComparison(true);
 
+        // Fetch Cards
         dashboardAPI.getDashboardCards(baseParams)
             .then(res => {
-                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
-                if (mountCheck() && !isStaleResponse && res.success) {
-                    setCards(res.data || {});
-                }
+                const isStale = cardsReqId !== cardsRequestSeqRef.current;
+                if (mountCheck() && !isStale && res.success) setCards(res.data || {});
             })
-            .catch(err => {
-                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
-                mountCheck() && console.error('Cards error:', err);
-            })
+            .catch(err => mountCheck() && console.error('Cards error:', err))
             .finally(() => {
-                const isStaleResponse = cardsReqId !== cardsRequestSeqRef.current;
-                if (mountCheck() && !isStaleResponse) {
-                    setLoadingCards(false);
-                }
+                if (mountCheck() && cardsReqId === cardsRequestSeqRef.current) setLoadingCards(false);
             });
 
+        // Fetch Chart
         dashboardAPI.getPerformance({ ...baseParams, group_by: groupBy })
             .then(res => mountCheck() && res.success && setPerformanceChart(res.data || []))
             .catch(err => mountCheck() && console.error('Performance error:', err))
             .finally(() => mountCheck() && setLoadingPerformance(false));
 
+        // Fetch Summary
         dashboardAPI.getPerformanceSummary(baseParams)
             .then(res => mountCheck() && res.success && setSummary(res.data || {}))
             .catch(err => mountCheck() && console.error('Summary error:', err))
@@ -291,22 +386,15 @@ function Dashboard() {
             setSummaryPrevious(null);
         }
 
+        // Fetch Live Offers (Static limit)
         dashboardAPI.getLiveOffers({ limit: 5 })
             .then(res => mountCheck() && res.success && setLiveOffers(res.data || []))
             .catch(err => mountCheck() && console.error('Live offers error:', err))
             .finally(() => mountCheck() && setLoadingLiveOffers(false));
 
-        dashboardAPI.getPublisherStatistics(baseParams)
-            .then(res => mountCheck() && res.success && setPublisherStatistics(res.data || []))
-            .catch(err => mountCheck() && console.error('Publisher stats error:', err))
-            .finally(() => mountCheck() && setLoadingPublisherStats(false));
-
-        dashboardAPI.getOfferStatistics(baseParams)
-            .then(res => mountCheck() && res.success && setOfferStatistics(res.data || []))
-            .catch(err => mountCheck() && console.error('Offer stats error:', err))
-            .finally(() => mountCheck() && setLoadingOfferStats(false));
-
+        // Fetch Comparison
         if (previousRange) {
+            const prevParams = { previous_from: previousRange.from, previous_to: previousRange.to };
             dashboardAPI.getPerformanceComparison({ ...baseParams, ...prevParams, group_by: groupBy })
                 .then(res => mountCheck() && res.success && setPerformanceComparison(res.data || []))
                 .catch(err => mountCheck() && console.error('Comparison error:', err))
@@ -319,6 +407,55 @@ function Dashboard() {
         return () => { cancelled = true; };
     }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
 
+    // 2. Offer Statistics - Depends on sorting and page
+    useEffect(() => {
+        if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
+        let cancelled = false;
+        setLoadingOfferStats(true);
+        dashboardAPI.getOfferStatistics({ ...baseParams, sort_by: offerSort.by, order_by: offerSort.order, page: offerPage })
+            .then(res => {
+                if (!cancelled && res.success) {
+                    setOfferStatistics(res.data.data || []);
+                    setTotalOffers(res.data.total || 0);
+                }
+            })
+            .catch(err => !cancelled && console.error('Offer stats error:', err))
+            .finally(() => !cancelled && setLoadingOfferStats(false));
+        return () => { cancelled = true; };
+    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey]);
+
+    // 3. Publisher Statistics - Depends on sorting and page
+    useEffect(() => {
+        if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
+        let cancelled = false;
+        setLoadingPublisherStats(true);
+        dashboardAPI.getPublisherStatistics({ ...baseParams, sort_by: pubSort.by, order_by: pubSort.order, page: pubPage })
+            .then(res => {
+                if (!cancelled && res.success) {
+                    setPublisherStatistics(res.data.data || []);
+                    setTotalPublishers(res.data.total || 0);
+                }
+            })
+            .catch(err => !cancelled && console.error('Publisher stats error:', err))
+            .finally(() => !cancelled && setLoadingPublisherStats(false));
+        return () => { cancelled = true; };
+    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey]);
+
+    const handleOfferSort = (field) => {
+        setOfferPage(1); // Reset to page 1 on sort change
+        setOfferSort(prev => ({
+            by: field,
+            order: prev.by === field && prev.order === 'DESC' ? 'ASC' : 'DESC'
+        }));
+    };
+
+    const handlePubSort = (field) => {
+        setPubPage(1); // Reset to page 1 on sort change
+        setPubSort(prev => ({
+            by: field,
+            order: prev.by === field && prev.order === 'DESC' ? 'ASC' : 'DESC'
+        }));
+    };
     const processChartData = (data) => {
         if (!data || data.length === 0) return [];
         if (data.length === 1) {
@@ -659,41 +796,50 @@ function Dashboard() {
                         <h3>Offer Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
-                    {loadingOfferStats ? (
-                        <SkeletonTable rows={5} cols={8} />
+                    <ProgressBar visible={loadingOfferStats} />
+                    {loadingOfferStats && offerStatistics.length === 0 ? (
+                        <SkeletonTable rows={5} cols={8} className="stats-table stats-table-offer" />
                     ) : offerStatistics && offerStatistics.length > 0 ? (
-                        <div className="activity-table stats-table stats-table-offer">
-                            <div className="table-header">
-                                <span>Offer</span>
-                                <span>Clicks</span>
-                                <span>Total Conv</span>
-                                <span>Approved</span>
-                                <span>Pending</span>
-                                <span>CR</span>
-                                <span>Payout</span>
-                                <span>Profit</span>
+                        <>
+                            <div className="activity-table stats-table stats-table-offer">
+                                <div className="table-header">
+                                <div className="sortable-header align-left" style={{ cursor: 'default', display: 'flex', alignItems: 'center', padding: '0 12px', fontWeight: '700', textTransform: 'uppercase', fontSize: '11px', color: '#64748b' }}>Offer</div>
+                                    <SortableHeader label="Clicks" field="clicks" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Total Conv" field="conversions" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Approved" field="approved_conversions" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Pending" field="pending_conversions" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="CR" field="conversion_ratio" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Payout" field="affiliate_payout" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Profit" field="profit" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                </div>
+                                {offerStatistics.map((stat, index) => (
+                                    <Link
+                                        to={`/offer/detail/${stat.display_id || stat.offer_id}`}
+                                        key={stat.offer_id || index}
+                                        className="table-row table-row-link"
+                                    >
+                                        <div className="offer-name-cell align-left" title={stat.offer_name}>
+                                            <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
+                                        </div>
+                                        <span className="align-center">{formatNumber(stat.clicks)}</span>
+                                        <span className="align-center">{formatNumber(stat.conversions)}</span>
+                                        <span className="align-center" style={{ color: 'green' }}>{formatNumber(stat.approved_conversions || 0)}</span>
+                                        <span className="align-center" style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions || 0)}</span>
+                                        <span className="align-center">{stat.conversion_ratio}%</span>
+                                        <span className="align-center">{formatCurrency(stat.affiliate_payout)}</span>
+                                        <span className="align-center" style={{ color: stat.profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontWeight: '600' }}>
+                                            {formatCurrency(stat.profit)}
+                                        </span>
+                                    </Link>
+                                ))}
                             </div>
-                            {offerStatistics.map((stat, index) => (
-                                <Link
-                                    to={`/offer/detail/${stat.display_id || stat.offer_id}`}
-                                    key={stat.offer_id || index}
-                                    className="table-row table-row-link"
-                                >
-                                    <div className="offer-name-cell" title={stat.offer_name}>
-                                        <span className="id-badge">{stat.display_id}</span> {stat.offer_name}
-                                    </div>
-                                    <span>{formatNumber(stat.clicks)}</span>
-                                    <span>{formatNumber(stat.conversions)}</span>
-                                    <span style={{ color: 'green' }}>{formatNumber(stat.approved_conversions || 0)}</span>
-                                    <span style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions || 0)}</span>
-                                    <span>{stat.conversion_ratio}%</span>
-                                    <span>{formatCurrency(stat.affiliate_payout)}</span>
-                                    <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
-                                        {formatCurrency(stat.profit)}
-                                    </span>
-                                </Link>
-                            ))}
-                        </div>
+                            <Pagination 
+                                current={offerPage} 
+                                total={totalOffers} 
+                                limit={10} 
+                                onPageChange={setOfferPage} 
+                            />
+                        </>
                     ) : <div className="no-data">No offer statistics available</div>}
                 </div>
 
@@ -703,40 +849,49 @@ function Dashboard() {
                         <h3>Publisher Statistics</h3>
                         <Link to="/reports" className="view-all">View Full Report</Link>
                     </div>
-                    {loadingPublisherStats ? (
-                        <SkeletonTable rows={5} cols={8} />
+                    <ProgressBar visible={loadingPublisherStats} />
+                    {loadingPublisherStats && publisherStatistics.length === 0 ? (
+                        <SkeletonTable rows={5} cols={8} className="stats-table stats-table-publisher" />
                     ) : publisherStatistics && publisherStatistics.length > 0 ? (
-                        <div className="activity-table stats-table stats-table-publisher">
-                            <div className="table-header">
-                                <span>Publisher</span>
-                                <span>Clicks</span>
-                                <span>Total Conv</span>
-                                <span>Approved</span>
-                                <span>Pending</span>
-                                <span>Pub Rev</span>
-                                <span>Revenue</span>
-                                <span>Profit</span>
-                            </div>
-                            {publisherStatistics.map((stat, index) => (
-                                <div
-                                    key={stat.publisher_id || index}
-                                    className="table-row"
-                                >
-                                    <div className="offer-name-cell" title={stat.publisher_name}>
-                                        <span className="id-badge">#{stat.public_id}</span> {stat.publisher_name}
-                                    </div>
-                                    <span>{formatNumber(stat.clicks)}</span>
-                                    <span>{formatNumber(stat.conversions)}</span>
-                                    <span style={{ color: 'green' }}>{formatNumber(stat.approved_conversions)}</span>
-                                    <span style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions)}</span>
-                                    <span>{formatCurrency(stat.publisher_revenue)}</span>
-                                    <span>{formatCurrency(stat.total_revenue)}</span>
-                                    <span className={stat.profit >= 0 ? 'profit-positive' : 'profit-negative'}>
-                                        {formatCurrency(stat.profit)}
-                                    </span>
+                        <>
+                            <div className="activity-table stats-table stats-table-publisher">
+                                <div className="table-header">
+                                <div className="sortable-header align-left" style={{ cursor: 'default', display: 'flex', alignItems: 'center', padding: '0 12px', fontWeight: '700', textTransform: 'uppercase', fontSize: '11px', color: '#64748b' }}>Publisher</div>
+                                    <SortableHeader label="Clicks" field="clicks" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Total Conv" field="conversions" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Approved" field="approved_conversions" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Pending" field="pending_conversions" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Pub Rev" field="affiliate_payout" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Revenue" field="total_revenue" currentSort={pubSort} onSort={handlePubSort} align="center" />
+                                    <SortableHeader label="Profit" field="profit" currentSort={pubSort} onSort={handlePubSort} align="center" />
                                 </div>
-                            ))}
-                        </div>
+                                {publisherStatistics.map((stat, index) => (
+                                    <div
+                                        key={stat.publisher_id || index}
+                                        className="table-row"
+                                    >
+                                        <div className="offer-name-cell align-left" title={stat.publisher_name}>
+                                            <span className="id-badge">{stat.public_id}</span> {stat.publisher_name}
+                                        </div>
+                                        <span className="align-center">{formatNumber(stat.clicks)}</span>
+                                        <span className="align-center">{formatNumber(stat.conversions)}</span>
+                                        <span className="align-center" style={{ color: 'green' }}>{formatNumber(stat.approved_conversions)}</span>
+                                        <span className="align-center" style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions)}</span>
+                                        <span className="align-center">{formatCurrency(stat.affiliate_payout)}</span>
+                                        <span className="align-center">{formatCurrency(stat.total_revenue)}</span>
+                                        <span className="align-center" style={{ color: stat.profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontWeight: '600' }}>
+                                            {formatCurrency(stat.profit)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                            <Pagination 
+                                current={pubPage} 
+                                total={totalPublishers} 
+                                limit={10} 
+                                onPageChange={setPubPage} 
+                            />
+                        </>
                     ) : <div className="no-data">No publisher statistics available</div>}
                 </div>
             </div>

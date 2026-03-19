@@ -1,0 +1,120 @@
+%%{init: {'theme': 'base', 'flowchart': {'curve': 'linear', 'nodeSpacing': 45, 'rankSpacing': 55}}}%%
+flowchart LR
+    %% ---------------- Tracking ----------------
+    subgraph T[Tracking Flow]
+        direction LR
+        A[Publisher Traffic] --> B[/click endpoint/]
+        B --> C[Tenant + Offer + Publisher Validation]
+        C --> D[Redis Click Hash + stream:clicks]
+        D --> E[Click Worker]
+        E --> F[(clicks table)]
+    end
+
+    %% ---------------- Attribution ----------------
+    subgraph A2[Attribution Flow]
+        direction LR
+        G[Merchant Postback] --> H[/postback endpoint/]
+        H --> I[Redis-first Context Resolution]
+        I --> J[Deterministic Status + Capping]
+        J --> K[Redis conversion payload + stream:conversions]
+        K --> L[Conversion Worker]
+        L --> M[(conversions table)]
+        L --> N[(daily_offer_stats / daily_click_stats)]
+        L --> O[Affiliate Callback if approved]
+    end
+
+    %% ---------------- Reporting ----------------
+    subgraph R2[Reporting Flow]
+        direction LR
+        P[React Dashboard] --> Q[/api/admin/reports/*/]
+        Q --> F
+        Q --> M
+        Q --> N
+        Q --> R[Charts / KPI / Live Logs UI]
+    end
+
+    %% ---------------- Visual style ----------------
+    classDef ext fill:#eaf2ff,stroke:#2f5fb3,stroke-width:1px,color:#0f1d40;
+    classDef api fill:#fff3e8,stroke:#d97706,stroke-width:1px,color:#5b2d00;
+    classDef worker fill:#eefcf3,stroke:#15803d,stroke-width:1px,color:#0f3d22;
+    classDef db fill:#f5f3ff,stroke:#6d28d9,stroke-width:1px,color:#2f0d76;
+    classDef ui fill:#ecfeff,stroke:#0e7490,stroke-width:1px,color:#083344;
+
+    class A,G,P,R,O ext;
+    class B,H,Q api;
+    class E,L worker;
+    class F,M,N db;
+    class C,D,I,J,K ui;
+
+---
+
+%% Detailed version (same straight-line theme, more engineering steps)
+%%{init: {'theme': 'base', 'flowchart': {'curve': 'linear', 'nodeSpacing': 40, 'rankSpacing': 52}}}%%
+flowchart LR
+    %% Edge ingress
+    A1[Publisher Traffic Source] --> A2[/click?offer_id&pub_id/]
+    A2 --> A3[Resolve tenant from subdomain]
+    A3 --> A4[Resolve offer + publisher + assignment]
+    A4 --> A5[Targeting / cap checks]
+    A5 --> A6[Generate click_uuid + redirect URL]
+    A6 --> A7[HSET click payload]
+    A7 --> A8[XADD stream:clicks]
+    A8 --> A9[HTTP Redirect Response]
+
+    %% Click persistence lane
+    A8 --> B1[Click Worker Consumer Group]
+    B1 --> B2[Read click hash payload]
+    B2 --> B3[Batch insert clicks]
+    B3 --> B4[(clicks)]
+    B3 --> B5[(daily_offer_stats clicks)]
+
+    %% Conversion lane
+    C1[Merchant / Advertiser] --> C2[/postback?click_id|rcid/]
+    C2 --> C3[Redis-first context fetch]
+    C3 --> C4{Found in Redis?}
+    C4 -->|Yes| C5[Use in-memory click context]
+    C4 -->|No| C6[Fallback DB click lookup]
+    C6 --> C5
+    C5 --> C7[Normalize status + approval % logic]
+    C7 --> C8[Cap enforcement + reject_cap handling]
+    C8 --> C9[SET conversion payload]
+    C9 --> C10[XADD stream:conversions]
+    C10 --> C11[Return 200 to merchant]
+
+    %% Conversion worker lane
+    C10 --> D1[Conversion Worker Consumer Group]
+    D1 --> D2[Validate parent click]
+    D2 --> D3[Batch insert conversions]
+    D3 --> D4[(conversions)]
+    D3 --> D5[(daily_offer_stats conversions/revenue/payout)]
+    D3 --> D6{status == approved?}
+    D6 -->|Yes| D7[Fire affiliate callback URL]
+    D6 -->|No| D8[Skip callback]
+    D7 --> D9[(affiliate_postback_logs)]
+
+    %% Reporting lane
+    E1[React Dashboard / Live Logs] --> E2[/api/admin/reports/*]
+    E2 --> E3[Tenant-scoped report queries]
+    E3 --> B4
+    E3 --> D4
+    E3 --> D5
+    E3 --> E4[Cards + Charts + Tables]
+
+    %% Styling
+    classDef ext fill:#e8f4ff,stroke:#2563eb,stroke-width:1px,color:#0b2b66;
+    classDef api fill:#fff7ed,stroke:#ea580c,stroke-width:1px,color:#7c2d12;
+    classDef proc fill:#ecfeff,stroke:#0891b2,stroke-width:1px,color:#0c4a6e;
+    classDef worker fill:#f0fdf4,stroke:#16a34a,stroke-width:1px,color:#14532d;
+    classDef store fill:#f5f3ff,stroke:#7c3aed,stroke-width:1px,color:#3b0764;
+    classDef dec fill:#fef9c3,stroke:#ca8a04,stroke-width:1px,color:#713f12;
+
+    class A1,C1,E1,E4,A9,C11,D7,D8 ext;
+    class A2,C2,E2 api;
+    class A3,A4,A5,A6,A7,A8,C3,C5,C6,C7,C8,C9,C10,E3 proc;
+    class B1,B2,B3,D1,D2,D3 worker;
+    class B4,B5,D4,D5,D9 store;
+    class C4,D6 dec;
+
+
+
+./same

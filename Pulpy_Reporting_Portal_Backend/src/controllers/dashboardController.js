@@ -320,8 +320,11 @@ export class DashboardController {
 
       const filters = {
         limit: request.query.limit,
+        page: request.query.page,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        sort_by: request.query.sort_by,
+        order_by: request.query.order_by,
       };
 
       const data = await dashboardService.getOfferStatistics(filters, tenantId);
@@ -348,8 +351,11 @@ export class DashboardController {
 
       const filters = {
         limit: request.query.limit,
+        page: request.query.page,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        sort_by: request.query.sort_by,
+        order_by: request.query.order_by,
       };
 
       const data = await dashboardService.getPublisherStatistics(filters, tenantId);

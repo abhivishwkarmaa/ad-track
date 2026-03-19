@@ -879,17 +879,25 @@ export class DashboardService {
   async getOfferStatistics(filters = {}, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const limit = parseInt(filters.limit || 50);
       const dateBoundaries = this.getDateBoundaries();
       const dateFrom = filters.date_from || dateBoundaries.monthStart;
       const dateTo = filters.date_to || dateBoundaries.todayStart;
 
-      logger.info('getOfferStatistics filters:', { dateFrom, dateTo, limit, tenantId });
-
       const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
-      // Fixed query using subqueries to avoid Cartesian Product issue
+      const sortBy = filters.sort_by || 'clicks';
+      const orderBy = filters.order_by || 'DESC';
+
+      // Validate sort fields to prevent SQL injection
+      const allowedSortFields = ['clicks', 'conversions', 'approved_conversions', 'pending_conversions', 'affiliate_payout', 'advertiser_payout', 'profit', 'offer_name', 'conversion_ratio'];
+      const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'clicks';
+      const finalOrderBy = orderBy.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+      const page = parseInt(filters.page || 1);
+      const limit = parseInt(filters.limit || 10);
+      const offset = (page - 1) * limit;
+
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
@@ -901,60 +909,63 @@ export class DashboardService {
           COALESCE(conv.pending_conversions, 0) as pending_conversions,
           COALESCE(conv.affiliate_payout, 0) as affiliate_payout,
           COALESCE(conv.advertiser_payout, 0) as advertiser_payout,
-          COALESCE(conv.profit, 0) as profit
+          COALESCE(conv.profit, 0) as profit,
+          CASE WHEN COALESCE(c.total_clicks, 0) > 0 
+               THEN (COALESCE(conv.total_conversions, 0) / COALESCE(c.total_clicks, 0) * 100) 
+               ELSE 0 END as conversion_ratio
         FROM offers o
-        -- Aggregate clicks separately first
         LEFT JOIN (
-          SELECT 
-            offer_id, 
-            COUNT(*) as total_clicks 
-          FROM clicks 
-          WHERE tenant_id = ?
-            AND created_at BETWEEN ? AND ?
+          SELECT offer_id, COUNT(*) as total_clicks FROM clicks 
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) c ON o.id = c.offer_id
-        -- Aggregate conversions and payouts separately
         LEFT JOIN (
-          SELECT 
-            offer_id, 
-            COUNT(*) as total_conversions,
+          SELECT offer_id, COUNT(*) as total_conversions,
             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
-            -- FINANCIAL SEPARATION: Payout = approved only, Revenue = ALL conversions
             SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
             SUM(amount) as advertiser_payout,
             (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
-          WHERE tenant_id = ?
-            AND created_at BETWEEN ? AND ?
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) conv ON o.id = conv.offer_id
         WHERE o.status != 'remove' AND o.tenant_id = ?
-        ORDER BY clicks DESC, conversions DESC, o.name ASC
-        LIMIT ?
+        ORDER BY ${finalSortBy} ${finalOrderBy}, clicks DESC, conversions DESC
+        LIMIT ? OFFSET ?
         `,
-        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit]
+        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit, offset]
       );
 
-      return rows.map(row => {
-        const clicks = parseInt(row.clicks || 0);
-        const conversions = parseInt(row.conversions || 0);
-        const conversionRatio = clicks > 0 ? ((conversions / clicks) * 100).toFixed(2) : '0.00';
+      const [totalRows] = await pool.query(
+        `SELECT COUNT(*) as total FROM offers WHERE status != 'remove' AND tenant_id = ?`,
+        [tenantId]
+      );
 
-        return {
-          offer_id: row.offer_id,
-          display_id: row.display_id,
-          offer_name: row.offer_name,
-          clicks: clicks,
-          conversions: conversions,
-          approved_conversions: parseInt(row.approved_conversions || 0),
-          pending_conversions: parseInt(row.pending_conversions || 0),
-          conversion_ratio: parseFloat(conversionRatio),
-          affiliate_payout: parseFloat(row.affiliate_payout || 0),
-          advertiser_payout: parseFloat(row.advertiser_payout || 0),
-          profit: parseFloat(row.profit || 0)
-        };
-      });
+      return {
+        data: rows.map(row => {
+          const clicks = parseInt(row.clicks || 0);
+          const conversions = parseInt(row.conversions || 0);
+          const conversionRatio = clicks > 0 ? ((conversions / clicks) * 100).toFixed(2) : '0.00';
+
+          return {
+            offer_id: row.offer_id,
+            display_id: row.display_id,
+            offer_name: row.offer_name,
+            clicks: clicks,
+            conversions: conversions,
+            approved_conversions: parseInt(row.approved_conversions || 0),
+            pending_conversions: parseInt(row.pending_conversions || 0),
+            conversion_ratio: parseFloat(conversionRatio),
+            affiliate_payout: parseFloat(row.affiliate_payout || 0),
+            advertiser_payout: parseFloat(row.advertiser_payout || 0),
+            profit: parseFloat(row.profit || 0)
+          };
+        }),
+        total: totalRows[0]?.total || 0,
+        page,
+        limit
+      };
     } catch (error) {
       logger.error('DashboardService.getOfferStatistics error:', error);
       throw error;
@@ -1051,15 +1062,24 @@ export class DashboardService {
   async getPublisherStatistics(filters = {}, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const limit = parseInt(filters.limit || 50);
       const dateBoundaries = this.getDateBoundaries();
       const dateFrom = filters.date_from || dateBoundaries.monthStart;
       const dateTo = filters.date_to || dateBoundaries.todayStart;
 
-      logger.info('getPublisherStatistics filters:', { dateFrom, dateTo, limit, tenantId });
-
       const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+      const sortBy = filters.sort_by || 'conversions';
+      const orderBy = filters.order_by || 'DESC';
+
+      // Validate sort fields
+      const allowedSortFields = ['clicks', 'conversions', 'approved_conversions', 'pending_conversions', 'affiliate_payout', 'total_revenue', 'profit', 'publisher_name'];
+      const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'conversions';
+      const finalOrderBy = orderBy.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+      const page = parseInt(filters.page || 1);
+      const limit = parseInt(filters.limit || 10);
+      const offset = (page - 1) * limit;
 
       const [rows] = await pool.query(
         `SELECT 
@@ -1074,48 +1094,50 @@ export class DashboardService {
           COALESCE(conv.profit, 0) as profit
         FROM publishers p
         LEFT JOIN (
-          SELECT 
-            publisher_id, 
-            COUNT(*) as total_clicks 
-          FROM clicks 
-          WHERE tenant_id = ?
-            AND created_at BETWEEN ? AND ?
+          SELECT publisher_id, COUNT(*) as total_clicks FROM clicks 
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id
         ) c ON p.id = c.publisher_id
         LEFT JOIN (
-          SELECT 
-            publisher_id, 
-            COUNT(*) as total_conversions,
+          SELECT publisher_id, COUNT(*) as total_conversions,
             SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
             SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
-            -- FINANCIAL SEPARATION: Payout = approved only, Revenue = ALL conversions
             SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as affiliate_payout,
             SUM(amount) as advertiser_payout,
             (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
           FROM conversions 
-          WHERE tenant_id = ?
-            AND created_at BETWEEN ? AND ?
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id
         ) conv ON p.id = conv.publisher_id
         WHERE p.status != 'suspended' AND p.tenant_id = ?
-        ORDER BY conversions DESC, clicks DESC, publisher_name ASC
-        LIMIT ?
+        ORDER BY ${finalSortBy} ${finalOrderBy}, conversions DESC, clicks DESC
+        LIMIT ? OFFSET ?
         `,
-        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit]
+        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit, offset]
       );
 
-      return rows.map(row => ({
-        publisher_id: row.publisher_id,
-        public_id: row.public_id,
-        publisher_name: row.publisher_name,
-        clicks: parseInt(row.clicks || 0),
-        conversions: parseInt(row.conversions || 0),
-        approved_conversions: parseInt(row.approved_conversions || 0),
-        pending_conversions: parseInt(row.pending_conversions || 0),
-        publisher_revenue: parseFloat(row.affiliate_payout || 0),
-        total_revenue: parseFloat(row.total_revenue || 0),
-        profit: parseFloat(row.profit || 0)
-      }));
+      const [totalRows] = await pool.query(
+        `SELECT COUNT(*) as total FROM publishers WHERE status != 'suspended' AND tenant_id = ?`,
+        [tenantId]
+      );
+
+      return {
+        data: rows.map(row => ({
+          publisher_id: row.publisher_id,
+          public_id: row.public_id,
+          publisher_name: row.publisher_name,
+          clicks: parseInt(row.clicks || 0),
+          conversions: parseInt(row.conversions || 0),
+          approved_conversions: parseInt(row.approved_conversions || 0),
+          pending_conversions: parseInt(row.pending_conversions || 0),
+          publisher_revenue: parseFloat(row.affiliate_payout || 0),
+          total_revenue: parseFloat(row.total_revenue || 0),
+          profit: parseFloat(row.profit || 0)
+        })),
+        total: totalRows[0]?.total || 0,
+        page,
+        limit
+      };
     } catch (error) {
       logger.error('DashboardService.getPublisherStatistics error:', error);
       throw error;
@@ -1132,7 +1154,11 @@ export class DashboardService {
         previous_from,
         previous_to,
         limit = 10,
-        group_by = 'hour'
+        group_by = 'hour',
+        offer_sort_by,
+        offer_order_by,
+        pub_sort_by,
+        pub_order_by
       } = filters;
 
       const summaryPromise = reportService.getSummary({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
@@ -1160,8 +1186,8 @@ export class DashboardService {
         summaryPromise,
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
-        this.getPublisherStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
-        this.getOfferStatistics({ date_from, date_to, limit }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
+        this.getPublisherStatistics({ date_from, date_to, limit, sort_by: pub_sort_by, order_by: pub_order_by }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
+        this.getOfferStatistics({ date_from, date_to, limit, sort_by: offer_sort_by, order_by: offer_order_by }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
         performanceComparisonPromise
       ]);
 

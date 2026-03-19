@@ -1,0 +1,62 @@
+
+
+  VITE v7.2.7  ready in 122 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://10.158.190.52:5173/
+
+================================================================================
+🗄️  DATABASE CONNECTION INITIALIZATION
+   ┌─ Configuration ────────────────────────────────────────────────────
+   │ Host: 94.136.187.247
+   ns: true
+   └────────────────────────────────
+es to allow union type keyword at "#/properties/fallback_enabled" (strictTypes)
+strict mode: use allowUnionTypes to allow union type keyword at "#/properties/fallback_enabled" (strictTypes)
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Server listen
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Server listening at http://0.0.0.0:5001"}
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"\n🚀 Server s
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"\n🚀 Server started successfully!"}
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"   Listening 
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"   Listening on 0.0.0.0:5001"}
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"   Environmen
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"   Environment: development\n"}
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"ℹ️ Workers ski
+{"level":"INFO","time":1773902785299,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"ℹ️ Workers skipped in API process (managed separately)"}
+   ┌─ Connection Test ──────────────────────────────────────�─────────────────────────────────────────────────────────────
+
+{"level":"INFO","time":1773902787313,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"✅ Redis conn
+{"level":"INFO","time":1773902787313,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"✅ Redis connection ready"}
+{"level":"INFO","time":1773902796553,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","reqId":"req-1","req
+{"level":"INFO","time":1773902796553,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","reqId":"req-1","req":{"method":"POST","url":"/api/auth/login","hostname":"panzcon.localhost:5173","remoteAddress":"127.0.0.1","r
+{"level":"INFO","time":1773902796553,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","reqId":"req-1","req":{"method":"POST","urst"}
+(node:37228) [FSTDEP016] DeprecationWarning: You are accessing the deprecated "request.routeConfig" property.
+(node:37228) [FSTDEP016] DeprecationWarning: You are accessing the deprecated "request.routeConfig" property. Use "request.routeOptions.config" instead. Property "req.routeConfig" will be removed in `fastify@5`.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+================================================================================
+📥 INCOMING REQUEST [2026-03-19T06:46:36.556Z]
+   Method: POST    | URL: /api/auth/login
+   IP: 127.0.0.1
+   User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/
+   User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0....
+   Referer: http://panzcon.localhost:5173/login
+
+📊 [RPS MONITOR] 06:46:37 | Rate: 1 req/sec | Total: 1
+{"level":"ERROR","time":1773902858775,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Date ten
+{"level":"ERROR","time":1773902858775,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Database tenant resolution failed for panzcon: Table 'track_myads.tenants' doesn't exist"}
+{"level":"ERROR","time":1773902858775,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Tenant resol
+{"level":"ERROR","time":1773902858775,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"Tenant resolution error:"}
+{"level":"INFO","time":1773902858780,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"[LOGIN] Tenan
+{"level":"INFO","time":1773902858780,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"[LOGIN] Tenant resolution"}
+{"level":"WARN","time":1773902859742,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"[LOGIN] Tenan
+{"level":"WARN","time":1773902859742,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","msg":"[LOGIN] Tenant admin attempted login via admin subdomain - REJECTED"}
+📤 RESPONSE [2026-03-19T06:47:39.743Z]
+   ⚠️ POST    /api/auth/login
+   Status: 401 CLIENT ERROR | Duration: 63187ms
+   └─ See error details above
+================================================================================
+
+{"level":"INFO","time":1773902859744,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","reqId":"req-1","res
+{"level":"INFO","time":1773902859744,"pid":37228,"hostname":"Abhinavs-MacBook-Air.local","reqId":"req-1","res":{"statusCode":401},"responseTime":63190.17441698909,"msg":"request completed"}
+^C
