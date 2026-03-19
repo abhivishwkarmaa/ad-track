@@ -49,6 +49,11 @@ const MinimizeIcon = () => (
         <polyline points="18 15 12 9 6 15" />
     </svg>
 );
+const ApproveIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
 
 const AVAILABLE_DIMENSIONS = [
     { id: 'offer_id', label: 'Offer' },
@@ -300,6 +305,25 @@ function DetailedReports() {
         }
     };
 
+    const handleApproveClick = async (clickUuid) => {
+        if (!window.confirm('Are you sure you want to manually approve this click? This will create/update a conversion and fire technical global postback.')) {
+            return;
+        }
+
+        try {
+            const response = await dashboardAPI.approveClick(clickUuid);
+            if (response.success) {
+                toast.success('Click approved successfully');
+                fetchReports(); // Refresh data
+            } else {
+                toast.error(response.message || 'Failed to approve click');
+            }
+        } catch (err) {
+            console.error('Approve error:', err);
+            toast.error(err.message || 'Failed to approve click');
+        }
+    };
+
     // Initial load
     useEffect(() => {
         fetchReports();
@@ -502,7 +526,8 @@ function DetailedReports() {
                 { id: 'click_created_at', label: 'Time' },
                 { id: 'conversion_status', label: 'Status' },
                 { id: 'conversion_amount', label: 'Revenue' },
-                { id: 'conversion_payout', label: 'Payout' }
+                { id: 'conversion_payout', label: 'Payout' },
+                { id: 'actions', label: 'Actions' }
             ];
         }
     }, [isAggregated, selectedDims, selectedMetrics]);
@@ -772,6 +797,31 @@ function DetailedReports() {
                                         if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
                                         if (col.id === 'click_created_at') return <td key={col.id}>{formatDate(val)}</td>;
                                         if (col.id === 'date_group' || col.id === 'hour_group') return <td key={col.id}>{val}</td>;
+                                        if (col.id === 'actions') {
+                                            const status = (row.conversion_status || '').toLowerCase();
+                                            const canApprove = !status || status === 'pending' || status === 'click_expired' || status === 'rejected' || status === 'rejected_cap';
+                                            return (
+                                                <td key={col.id}>
+                                                    {canApprove && (
+                                                        <button 
+                                                            className="btn btn-primary" 
+                                                            onClick={() => handleApproveClick(row.click_uuid)}
+                                                            title="Manually Approve"
+                                                            style={{ 
+                                                                padding: '4px 8px', 
+                                                                fontSize: '11px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '4px',
+                                                                width: 'fit-content'
+                                                            }}
+                                                        >
+                                                            <ApproveIcon /> Approve
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            );
+                                        }
                                         return <td key={col.id}>{val !== undefined && val !== null ? val : '-'}</td>;
                                     })}
                                 </tr>
@@ -806,7 +856,29 @@ function DetailedReports() {
                                         <div className="reports-mobile-item" key={`${col.id}-mobile-val-${idx}`}>
                                             <span className="reports-mobile-label">{col.label}</span>
                                             <span className="reports-mobile-value">
-                                                {col.id === 'conversion_status' ? getStatusBadge(val) : displayValue}
+                                                {col.id === 'conversion_status' ? getStatusBadge(val) : 
+                                                 col.id === 'actions' ? (
+                                                     (() => {
+                                                         const status = (row.conversion_status || '').toLowerCase();
+                                                         const canApprove = !status || status === 'pending' || status === 'click_expired' || status === 'rejected' || status === 'rejected_cap';
+                                                         return canApprove && (
+                                                            <button 
+                                                                className="btn btn-primary" 
+                                                                onClick={() => handleApproveClick(row.click_uuid)}
+                                                                style={{ 
+                                                                    padding: '4px 10px', 
+                                                                    fontSize: '11px',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '4px',
+                                                                    marginTop: '4px'
+                                                                }}
+                                                            >
+                                                                <ApproveIcon /> Approve
+                                                            </button>
+                                                         );
+                                                     })()
+                                                 ) : displayValue}
                                             </span>
                                         </div>
                                     );

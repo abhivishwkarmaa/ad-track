@@ -1919,6 +1919,174 @@ export class PostbackService {
 
     return false;
   }
+
+  /**
+   * Manually approve a click (pending, expired, or not yet converted)
+   * @param {string} clickUuid - Unique click ID
+   * @param {number} tenantId - Tenant context
+   * @returns {Promise<Object>} Result of approval
+   */
+  async manualApproveClick(clickUuid, tenantId) {
+    try {
+      if (!clickUuid || !tenantId) {
+        throw new Error('click_uuid and tenant_id are required');
+      }
+
+      // 1. Fetch Click Data
+      const [clickRows] = await pool.query(
+        'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
+        [clickUuid, tenantId]
+      );
+      const click = clickRows[0];
+      if (!click) {
+        throw new Error('Click not found');
+      }
+
+      // 2. Fetch Offer and Assignment for Payout
+      const offer = await getOfferByInternalId(click.offer_id, tenantId);
+      if (!offer) throw new Error('Offer not found');
+
+      let assignment = null;
+      if (click.publisher_offer_id) {
+        assignment = await getAssignmentByInternalId(click.publisher_offer_id, tenantId);
+      }
+
+      const publisher = await getPublisherByInternalId(click.publisher_id, tenantId);
+
+      // Payout Calculation
+      let advertiserAmount = parseFloat(offer.advertiser_amount || 0);
+      let payout = parseFloat(offer.affiliate_amount || 0);
+      if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
+
+      // 3. Check for existing conversion
+      const [convRows] = await pool.query(
+        'SELECT * FROM conversions WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
+        [clickUuid, tenantId]
+      );
+      const existingConv = convRows[0];
+
+      let finalConversionId = null;
+      let isNew = !existingConv;
+      let statusChanged = false;
+      let oldStatus = null;
+
+      if (existingConv) {
+        finalConversionId = existingConv.id;
+        oldStatus = existingConv.status;
+        if (existingConv.status === 'approved') {
+          return { success: true, message: 'Conversion already approved', already_approved: true };
+        }
+        statusChanged = true;
+
+        // Update existing conversion to approved
+        await pool.query(
+          `UPDATE conversions SET 
+            status = 'approved', 
+            payout = ?, 
+            amount = ?,
+            updated_at = UTC_TIMESTAMP()
+           WHERE id = ?`,
+          [payout, advertiserAmount, existingConv.id]
+        );
+      } else {
+        // Create new conversion as approved
+        const conversionUuid = generateClickId(tenantId || 0, click.offer_id || 0, click.publisher_id || 0, 96);
+        const [result] = await pool.query(
+          `INSERT INTO conversions (
+            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+          [
+            conversionUuid, clickUuid, click.offer_id, click.publisher_id, click.publisher_offer_id, tenantId,
+            click.rcid || uuidv4(), 'approved', advertiserAmount, payout, click.ip,
+            JSON.stringify({ manual: true, approved_at: new Date().toISOString() }),
+          ]
+        );
+        finalConversionId = result.insertId;
+      }
+
+      // 4. Update Daily Offer Stats
+      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+      
+      if (isNew) {
+        // Increment all metrics for a new approved conversion
+        await pool.query(
+          `INSERT INTO daily_offer_stats (
+            offer_id, tenant_id, day, 
+            conversions, approved_conversions, revenue, payout, profit,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, 1, 1, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE
+            conversions = conversions + 1,
+            approved_conversions = approved_conversions + 1,
+            revenue = revenue + ?,
+            payout = payout + ?,
+            profit = profit + ?,
+            updated_at = UTC_TIMESTAMP()`,
+          [
+            click.offer_id, tenantId, todayIST, 
+            advertiserAmount, payout, (advertiserAmount - payout),
+            advertiserAmount, payout, (advertiserAmount - payout)
+          ]
+        );
+      } else if (statusChanged) {
+        // Correct stats based on transition
+        let pendingDelta = oldStatus === 'pending' ? -1 : 0;
+        let rejectedDelta = (oldStatus === 'rejected' || oldStatus === 'rejected_cap' || oldStatus === CLICK_EXPIRED_STATUS) ? -1 : 0;
+        
+        await pool.query(
+          `INSERT INTO daily_offer_stats (
+            offer_id, tenant_id, day, 
+            approved_conversions, pending_conversions, rejected_conversions,
+            payout, profit,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE
+            approved_conversions = approved_conversions + 1,
+            pending_conversions = pending_conversions + ?,
+            rejected_conversions = rejected_conversions + ?,
+            payout = payout + ?,
+            profit = profit - ?,
+            updated_at = UTC_TIMESTAMP()`,
+          [
+            click.offer_id, tenantId, todayIST,
+            pendingDelta, rejectedDelta, payout, payout,
+            pendingDelta, rejectedDelta, payout, payout
+          ]
+        );
+      }
+
+      // 5. Fire Publisher Postback
+      const [updatedConvRows] = await pool.query('SELECT * FROM conversions WHERE id = ?', [finalConversionId]);
+      const updatedConv = updatedConvRows[0];
+      console.log('updatedConv', updatedConv);
+      const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
+      console.log('assignment', assignment);
+      console.log('publisher', publisher);
+      console.log('callbackUrl', callbackUrl);
+      let postbackResult = { executed: false };
+      if (callbackUrl) {
+        postbackResult = await this.sendPublisherPostback(callbackUrl, updatedConv, click);
+        if (postbackResult.success) {
+          await pool.query(
+            'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ?',
+            [finalConversionId]
+          );
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Click manually approved successfully',
+        conversion_id: finalConversionId,
+        postback: postbackResult
+      };
+
+    } catch (error) {
+      logger.error('PostbackService.manualApproveClick error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new PostbackService();

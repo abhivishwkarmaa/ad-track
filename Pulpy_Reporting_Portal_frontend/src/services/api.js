@@ -367,6 +367,13 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance-comparison?${queryString}`);
     },
+    // Manual Click Approval
+    approveClick: async (clickUuid) => {
+        return apiRequest('/api/admin/reports/approve-click', {
+            method: 'POST',
+            body: JSON.stringify({ click_uuid: clickUuid }),
+        });
+    },
 };
 
 // Subscription API

@@ -126,9 +126,44 @@
     color: #f57c00;
 }
 
-.badge.rejected {
+.badge.rejected,
+.badge.rejected_cap,
+.badge.click_expired {
     background: #ffebee;
     color: #c62828;
+}
+
+.logs-date-input {
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    min-width: 130px;
+}
+
+.btn-approve-sm {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #2e7d32;
+    color: white;
+    white-space: nowrap;
+    transition: background 0.2s;
+}
+
+.btn-approve-sm:hover:not(:disabled) {
+    background: #1b5e20;
+}
+
+.btn-approve-sm:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* Responsive Design */

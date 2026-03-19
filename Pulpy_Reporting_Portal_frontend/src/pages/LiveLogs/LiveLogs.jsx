@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
+import { useToast } from '../../context/ToastContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import { formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
 
-// Icon for Reports navigation
 const ReportsIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -17,20 +17,40 @@ const ReportsIcon = () => (
     </svg>
 );
 
+const ApproveIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}>
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+
+const toYmd = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
 const LiveLogs = () => {
     const navigate = useNavigate();
+    const toast = useToast();
     const { refreshKey } = useRefresh();
     const [activeTab, setActiveTab] = useState('clicks');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [limit, setLimit] = useState(100);
     const [searchParams, setSearchParams] = useSearchParams();
+    const [approvingId, setApprovingId] = useState(null);
 
     // Filter State
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublisher, setSelectedPublisher] = useState('');
+
+    // Date Filter
+    const today = toYmd(new Date());
+    const [dateFrom, setDateFrom] = useState(today);
+    const [dateTo, setDateTo] = useState(today);
 
     // Auto-refresh timer reference
     const [autoRefresh, setAutoRefresh] = useState(false);
@@ -68,7 +88,7 @@ const LiveLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, limit, selectedOffer, selectedPublisher, refreshKey]);
+    }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey]);
 
     useEffect(() => {
         let interval;
@@ -76,26 +96,23 @@ const LiveLogs = () => {
             interval = setInterval(() => fetchLogs(true), 5000);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher]);
+    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo]);
 
     const fetchLogs = async (isBackground = false) => {
         setLoading(true);
         try {
             const params = { limit, page: 1 };
-            if (activeTab === 'clicks') {
-                // For clicks (Detailed Reports API)
-                if (selectedOffer) params.offer_id = selectedOffer;
-                if (selectedPublisher) params.publisher_id = selectedPublisher;
+            if (selectedOffer) params.offer_id = selectedOffer;
+            if (selectedPublisher) params.publisher_id = selectedPublisher;
+            if (dateFrom) params.date_from = dateFrom;
+            if (dateTo) params.date_to = dateTo;
 
+            if (activeTab === 'clicks') {
                 const response = await dashboardAPI.getDetailed(params, { trackActivity: !isBackground });
                 if (response.success && response.data) {
                     setData(response.data);
                 }
             } else {
-                // For conversions
-                if (selectedOffer) params.offer_id = selectedOffer;
-                if (selectedPublisher) params.publisher_id = selectedPublisher;
-
                 const response = await dashboardAPI.getConversions(params, { trackActivity: !isBackground });
                 if (response.success && response.data) {
                     setData(response.data);
@@ -105,6 +122,27 @@ const LiveLogs = () => {
             console.error("Failed to fetch logs", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleApproveClick = async (clickUuid) => {
+        if (!window.confirm('Manually approve this conversion? This will update status to approved, calculate payout, and fire publisher postback.')) {
+            return;
+        }
+        setApprovingId(clickUuid);
+        try {
+            const response = await dashboardAPI.approveClick(clickUuid);
+            if (response.success) {
+                toast.success(response.already_approved ? 'Already approved' : 'Conversion approved & postback fired');
+                fetchLogs();
+            } else {
+                toast.error(response.message || 'Failed to approve');
+            }
+        } catch (err) {
+            console.error('Approve error:', err);
+            toast.error(err.message || 'Failed to approve');
+        } finally {
+            setApprovingId(null);
         }
     };
 
@@ -127,6 +165,25 @@ const LiveLogs = () => {
                     </button>
                 </div>
                 <div className="logs-controls">
+                    <div className="control-group">
+                        <label>From:</label>
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            className="logs-date-input"
+                        />
+                    </div>
+                    <div className="control-group">
+                        <label>To:</label>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            className="logs-date-input"
+                        />
+                    </div>
+
                     <div className="control-group">
                         <select value={selectedOffer} onChange={(e) => setSelectedOffer(e.target.value)}>
                             <option value="">All Offers</option>
@@ -181,7 +238,7 @@ const LiveLogs = () => {
                         </label>
                     </div>
 
-                    <button className="btn btn-primary" onClick={fetchLogs} disabled={loading}>
+                    <button className="btn btn-primary" onClick={() => fetchLogs()} disabled={loading}>
                         {loading ? 'Refreshing...' : 'Refresh Now'}
                     </button>
                 </div>
@@ -189,7 +246,7 @@ const LiveLogs = () => {
 
             <div className="logs-table-container">
                 {loading ? (
-                    <SkeletonTable rows={10} cols={activeTab === 'clicks' ? 9 : 8} />
+                    <SkeletonTable rows={10} cols={activeTab === 'clicks' ? 9 : 10} />
                 ) : (
                 <table className="logs-table">
                     <thead>
@@ -212,16 +269,18 @@ const LiveLogs = () => {
                                 <th>Click UUID</th>
                                 <th>Offer</th>
                                 <th>Publisher</th>
-                                <th>Amount</th>
+                                <th>Revenue</th>
+                                <th>Payout</th>
                                 <th>Status</th>
                                 <th>IP</th>
+                                <th>Actions</th>
                             </tr>
                         )}
                     </thead>
                     <tbody>
                         {data.length === 0 ? (
                             <tr>
-                                <td colSpan={activeTab === 'clicks' ? 9 : 8} style={{ textAlign: 'center', padding: '20px' }}>
+                                <td colSpan={activeTab === 'clicks' ? 9 : 10} style={{ textAlign: 'center', padding: '20px' }}>
                                     No logs found
                                 </td>
                             </tr>
@@ -247,13 +306,29 @@ const LiveLogs = () => {
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_name} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
+                                        <td>${parseFloat(row.payout || 0).toFixed(2)}</td>
                                         <td>
                                             <span className={`badge ${row.status}`}>{row.status}</span>
-                                            {/* Show TEST badge if is_test flag is set OR if amount/payout are 0 */}
-                                           
-                                            
                                         </td>
                                         <td>{row.ip}</td>
+                                        <td>
+                                            {(() => {
+                                                const s = (row.status || '').toLowerCase();
+                                                const canApprove = s === 'pending' || s === 'click_expired' || s === 'rejected' || s === 'rejected_cap';
+                                                if (!canApprove) return null;
+                                                return (
+                                                    <button
+                                                        className="btn btn-approve-sm"
+                                                        onClick={() => handleApproveClick(row.click_uuid)}
+                                                        disabled={approvingId === row.click_uuid}
+                                                        title="Manually approve – fires postback & updates payout"
+                                                    >
+                                                        <ApproveIcon />
+                                                        {approvingId === row.click_uuid ? 'Approving...' : 'Approve'}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </td>
                                     </>
                                 )}
                             </tr>

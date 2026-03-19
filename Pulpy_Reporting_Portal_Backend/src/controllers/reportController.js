@@ -1,4 +1,5 @@
 import reportService from '../services/reportService.js';
+import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
@@ -212,6 +213,38 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getConversions error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async manualApproveClick(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const { click_uuid } = request.body || {};
+      if (!click_uuid) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'click_uuid is required',
+        });
+      }
+
+      const result = await postbackService.manualApproveClick(click_uuid, tenantId);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      logger.error('ReportController.manualApproveClick error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
