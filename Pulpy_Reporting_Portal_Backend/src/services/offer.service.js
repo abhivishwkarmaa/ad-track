@@ -286,6 +286,21 @@ class OfferService {
       const [result] = await pool.query(sql, params);
       const insertId = result.insertId ?? result?.[0]?.insertId;
 
+      // Optional payout event mapping (column may be added via manual DB migration).
+      if (data.payout_event !== undefined) {
+        try {
+          await pool.query(
+            'UPDATE offers SET payout_event = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+            [data.payout_event || 'purchase', insertId]
+          );
+        } catch (payoutEventErr) {
+          if (payoutEventErr.code !== 'ER_BAD_FIELD_ERROR') {
+            throw payoutEventErr;
+          }
+          logger.warn('payout_event column missing; skipping payout_event update on create');
+        }
+      }
+
       // 🔥 NEW: Save offer parameters if provided
       if (data.offer_params && Array.isArray(data.offer_params) && data.offer_params.length > 0) {
         await offerParamsService.setOfferParams(insertId, tenantId, data.offer_params);
@@ -458,6 +473,20 @@ class OfferService {
         return null;
       }
 
+      if (data.payout_event !== undefined) {
+        try {
+          await pool.query(
+            'UPDATE offers SET payout_event = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?' + (tenantId ? ' AND tenant_id = ?' : ''),
+            tenantId ? [data.payout_event || 'purchase', internalId, tenantId] : [data.payout_event || 'purchase', internalId]
+          );
+        } catch (payoutEventErr) {
+          if (payoutEventErr.code !== 'ER_BAD_FIELD_ERROR') {
+            throw payoutEventErr;
+          }
+          logger.warn('payout_event column missing; skipping payout_event update on edit');
+        }
+      }
+
       await cacheService.invalidateOffer(internalId, tenantId);
 
       return this.getOfferById(internalId, tenantId);
@@ -564,6 +593,21 @@ class OfferService {
         return offer;
       };
       const parsedOffer = parseJsonFields({ ...offer });
+
+      // payout_event is optional schema upgrade; fallback safely if column missing.
+      try {
+        const [payoutRows] = await pool.query(
+          'SELECT payout_event FROM offers WHERE id = ? LIMIT 1',
+          [parsedOffer.id]
+        );
+        parsedOffer.payout_event = payoutRows?.[0]?.payout_event || 'purchase';
+      } catch (payoutEventErr) {
+        if (payoutEventErr.code === 'ER_BAD_FIELD_ERROR') {
+          parsedOffer.payout_event = 'purchase';
+        } else {
+          throw payoutEventErr;
+        }
+      }
 
       // Get advertiser details if advertiser_id exists (with tenant isolation)
       let advertiser = null;

@@ -80,6 +80,7 @@ export const createOfferSchema = {
     advertiser_amount: { type: 'number' },
     affiliate_model: { type: 'string', maxLength: 50 },
     affiliate_amount: { type: 'number' },
+    payout_event: { type: ['string', 'null'], maxLength: 100 },
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
@@ -158,6 +159,7 @@ export const updateOfferSchema = {
     advertiser_amount: { type: 'number' },
     affiliate_model: { type: 'string', maxLength: 50 },
     affiliate_amount: { type: 'number' },
+    payout_event: { type: ['string', 'null'], maxLength: 100 },
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },

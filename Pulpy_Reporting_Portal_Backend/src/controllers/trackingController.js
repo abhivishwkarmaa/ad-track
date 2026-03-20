@@ -7,6 +7,7 @@
 
 import trackingService from '../services/trackingService.js';
 import logger from '../utils/logger.js';
+import { eventTrackingSchema } from '../validators/trackingValidator.js';
 
 export class TrackingController {
   async handleClick(request, reply) {
@@ -69,6 +70,37 @@ export class TrackingController {
       // ✅ For impression tracking, return pixel even on error (silent failure)
       // This prevents breaking tracking pixels with error responses
       return reply.code(200).type('image/gif').send(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64'));
+    }
+  }
+
+  async handleEvent(request, reply) {
+    try {
+      const payload = request.method === 'GET' ? request.query : request.body;
+      const { error, value } = eventTrackingSchema.validate(payload || {});
+
+      if (error) {
+        return reply.code(400).send({
+          success: false,
+          message: 'Invalid event payload'
+        });
+      }
+
+      const result = await trackingService.trackEvent(value, request);
+      const statusCode = result?.success ? 200 : 400;
+      return reply.code(statusCode).send(result);
+    } catch (error) {
+      logger.error({
+        error: error.message,
+        stack: error.stack,
+        url: request.url,
+        host: request.headers.host,
+        ip: request.ip
+      }, 'TrackingController.handleEvent error:');
+
+      return reply.code(500).send({
+        success: false,
+        message: 'Unable to process event'
+      });
     }
   }
 }

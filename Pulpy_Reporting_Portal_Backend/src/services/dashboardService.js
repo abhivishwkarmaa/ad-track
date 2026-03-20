@@ -541,6 +541,170 @@ export class DashboardService {
     }
   }
 
+  async getTopEvents(filters = {}, tenantId) {
+    if (!tenantId) throw new Error('Tenant ID required');
+    try {
+      const limit = Math.min(parseInt(filters.limit || 10, 10), 20);
+      const hasDateFilter = !!(filters.date_from || filters.date_to);
+
+      const fetchFromDailyAggregates = async (allTime = false) => {
+        const conditions = ['tenant_id = ?', "event_name <> '__all__'"];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            conditions.push('day >= ?');
+            params.push(filters.date_from);
+          }
+          if (filters.date_to) {
+            conditions.push('day <= ?');
+            params.push(filters.date_to);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             event_name,
+             GREATEST(SUM(events), SUM(clicks), SUM(unique_clicks)) AS total_events,
+             GREATEST(SUM(unique_clicks), SUM(clicks)) AS unique_clicks,
+             SUM(payable_events) AS payout_trigger_events,
+             SUM(conversions) AS clicks_with_conversion
+           FROM daily_offer_publisher_stats
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      const fetchFromEventAnalytics = async (allTime = false) => {
+        const conditions = ['tenant_id = ?'];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            conditions.push('event_day >= ?');
+            params.push(filters.date_from);
+          }
+          if (filters.date_to) {
+            conditions.push('event_day <= ?');
+            params.push(filters.date_to);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT click_uuid) AS unique_clicks,
+             SUM(CASE WHEN is_payable_event = 1 THEN 1 ELSE 0 END) AS payout_trigger_events,
+             SUM(CASE WHEN conversion_status IS NOT NULL AND conversion_status <> '' THEN 1 ELSE 0 END) AS clicks_with_conversion
+           FROM event_analytics
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      const fetchFromEventsRaw = async (allTime = false) => {
+        const conditions = ['e.tenant_id = ?'];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            conditions.push('e.created_at >= ?');
+            params.push(utcStart);
+          }
+          if (filters.date_to) {
+            const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            conditions.push('e.created_at <= ?');
+            params.push(utcEnd);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             e.event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT e.click_uuid) AS unique_clicks,
+             SUM(
+               CASE
+                 WHEN e.event_name COLLATE utf8mb4_general_ci = COALESCE(o.payout_event, 'purchase') COLLATE utf8mb4_general_ci
+                 THEN 1 ELSE 0
+               END
+             ) AS payout_trigger_events,
+             SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS clicks_with_conversion
+           FROM events e
+           LEFT JOIN offers o ON o.id = e.offer_id AND o.tenant_id = e.tenant_id
+           LEFT JOIN conversions c
+             ON BINARY c.click_uuid = BINARY e.click_uuid
+            AND c.tenant_id = e.tenant_id
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY e.event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      let rows = [];
+      // Fastest path: daily pre-aggregated stats table.
+      try {
+        rows = await fetchFromDailyAggregates(false);
+      } catch (aggErr) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR', 'ER_PARSE_ERROR'].includes(aggErr.code)) {
+          throw aggErr;
+        }
+      }
+      if (rows.length > 0) return rows;
+
+      try {
+        rows = await fetchFromEventAnalytics(false);
+      } catch (analyticsErr) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR', 'ER_PARSE_ERROR'].includes(analyticsErr.code)) {
+          throw analyticsErr;
+        }
+      }
+      if (rows.length > 0) return rows;
+
+      // Fallback to raw events if analytics table isn't populated yet.
+      rows = await fetchFromEventsRaw(false);
+      if (rows.length > 0) return rows;
+
+      // Dashboard UX: if selected range is empty, show recent all-time events.
+      if (hasDateFilter) {
+        try {
+          rows = await fetchFromDailyAggregates(true);
+        } catch (_) {
+          rows = [];
+        }
+        if (rows.length > 0) return rows;
+
+        try {
+          rows = await fetchFromEventAnalytics(true);
+        } catch (_) {
+          rows = [];
+        }
+        if (rows.length > 0) return rows;
+
+        rows = await fetchFromEventsRaw(true);
+        if (rows.length > 0) return rows;
+      }
+
+      return rows;
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE' || error.code === 'ER_BAD_FIELD_ERROR') {
+        return [];
+      }
+      logger.error('DashboardService.getTopEvents error:', error);
+      throw error;
+    }
+  }
+
   /**
    * Get dashboard cards data matching the UI requirements
    * Returns: Total Clicks, Conversions, Total Revenue, Approved Payout

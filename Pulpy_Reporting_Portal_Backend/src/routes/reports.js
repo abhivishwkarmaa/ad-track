@@ -21,6 +21,7 @@ async function reportRoutes(fastify, options) {
   fastify.get('/dashboard/publisher-statistics', dashboardController.getPublisherStatistics);
   fastify.get('/dashboard/performance-comparison', dashboardController.getPerformanceComparison);
   fastify.get('/dashboard/performance-summary', dashboardController.getPerformanceSummary);
+  fastify.get('/dashboard/top-events', dashboardController.getTopEvents);
 
   // Reports
   fastify.get('/summary', reportController.getSummary);
@@ -32,6 +33,13 @@ async function reportRoutes(fastify, options) {
 
   // Conversion Logs
   fastify.get('/conversions', reportController.getConversions);
+
+  // Event summary for event-based tracking visibility
+  fastify.get('/events', reportController.getEventSummary);
+  // Event analytics fact table endpoint (no clicks/conversions/events main-table scan)
+  fastify.get('/events/analytics', reportController.getEventAnalytics);
+  // Daily pre-aggregated table endpoint (offer + publisher + event)
+  fastify.get('/daily-offer-publisher', reportController.getDailyOfferPublisherStats);
 
   // Manual Click Approval
   fastify.post('/approve-click', reportController.manualApproveClick)

@@ -76,6 +76,7 @@ const categories = [
 
 // Revenue models - matching HTML
 const revenueModels = ['CPA', 'CPC', 'CPL', 'CPI', 'CPS', 'CPM'];
+const payoutEventOptions = ['purchase', 'signup', 'login', 'add_to_cart', 'conversion', 'click'];
 
 // Browsers - EXACTLY matching HTML
 const browsers = [
@@ -304,6 +305,7 @@ function EditOffer() {
         advertiser_amount: '',
         affiliate_model: 'CPA',
         affiliate_amount: '',
+        payout_event: 'purchase',
         offer_url: '',
         description: '',
         category: '',
@@ -480,6 +482,7 @@ function EditOffer() {
                         advertiser_amount: offer.advertiser_amount || '',
                         affiliate_model: offer.affiliate_model || 'CPA',
                         affiliate_amount: offer.affiliate_amount || '',
+                        payout_event: offer.payout_event || 'purchase',
                         offer_url: offer.offer_url || '',
                         preview_url: offer.preview_url || '',
                         token_type: offer.token_type || '',
@@ -755,6 +758,7 @@ function EditOffer() {
                 advertiser_amount: parseFloat(formData.advertiser_amount),
                 affiliate_model: formData.affiliate_model,
                 affiliate_amount: parseFloat(formData.affiliate_amount),
+                payout_event: formData.payout_event || 'purchase',
                 offer_url: formData.offer_url,
                 description: formData.description,
                 category: finalCategory,
@@ -1088,6 +1092,43 @@ function EditOffer() {
                                     placeholder="00.00"
                                     required
                                 />
+                            </div>
+                        </div>
+                        <div className="offer-form-row two-col">
+                            <div className="form-group">
+                                <label className="form-label">Payout Event</label>
+                                <select
+                                    className="form-control"
+                                    value={payoutEventOptions.includes(formData.payout_event) ? formData.payout_event : '__custom__'}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (value === '__custom__') {
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                payout_event: payoutEventOptions.includes(prev.payout_event) ? '' : prev.payout_event
+                                            }));
+                                            return;
+                                        }
+                                        setFormData(prev => ({ ...prev, payout_event: value }));
+                                    }}
+                                >
+                                    {payoutEventOptions.map((eventName) => (
+                                        <option key={eventName} value={eventName}>{eventName}</option>
+                                    ))}
+                                    <option value="__custom__">Custom event...</option>
+                                </select>
+                                {!payoutEventOptions.includes(formData.payout_event) && (
+                                    <input
+                                        type="text"
+                                        className="form-control"
+                                        name="payout_event"
+                                        value={formData.payout_event}
+                                        onChange={handleChange}
+                                        placeholder="custom_event_name"
+                                        style={{ marginTop: '8px' }}
+                                    />
+                                )}
+                                <small>Only this event creates payout conversion for this offer.</small>
                             </div>
                         </div>
                     </div>

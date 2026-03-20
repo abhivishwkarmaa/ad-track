@@ -288,6 +288,9 @@ function DashboardContent() {
     const [loadingOfferStats, setLoadingOfferStats] = useState(true);
     const [performanceComparison, setPerformanceComparison] = useState([]);
     const [loadingComparison, setLoadingComparison] = useState(true);
+    const [eventSummary, setEventSummary] = useState([]);
+    const [loadingEventSummary, setLoadingEventSummary] = useState(true);
+    const EVENT_SUMMARY_TIMEOUT_MS = 3500;
 
     // Sorting state for statistics tables
     const [offerSort, setOfferSort] = useState({ by: 'clicks', order: 'DESC' });
@@ -354,6 +357,7 @@ function DashboardContent() {
         setLoadingSummary(true);
         setLoadingLiveOffers(true);
         setLoadingComparison(true);
+        setLoadingEventSummary(true);
 
         // Fetch Cards
         dashboardAPI.getDashboardCards(baseParams)
@@ -392,6 +396,27 @@ function DashboardContent() {
             .catch(err => mountCheck() && console.error('Live offers error:', err))
             .finally(() => mountCheck() && setLoadingLiveOffers(false));
 
+        // Fetch Event Summary (fail-fast UI to avoid long skeleton lock)
+        let eventSummaryResolved = false;
+        const eventSummaryTimeout = setTimeout(() => {
+            if (!eventSummaryResolved && mountCheck()) {
+                setLoadingEventSummary(false);
+            }
+        }, EVENT_SUMMARY_TIMEOUT_MS);
+
+        dashboardAPI.getTopEvents(baseParams)
+            .then(res => {
+                if (mountCheck() && res.success) {
+                    setEventSummary(Array.isArray(res.data) ? res.data.slice(0, 6) : []);
+                }
+            })
+            .catch(err => mountCheck() && console.error('Event summary error:', err))
+            .finally(() => {
+                eventSummaryResolved = true;
+                clearTimeout(eventSummaryTimeout);
+                mountCheck() && setLoadingEventSummary(false);
+            });
+
         // Fetch Comparison
         if (previousRange) {
             const prevParams = { previous_from: previousRange.from, previous_to: previousRange.to };
@@ -404,7 +429,10 @@ function DashboardContent() {
             setLoadingComparison(false);
         }
 
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+            clearTimeout(eventSummaryTimeout);
+        };
     }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
 
     // 2. Offer Statistics - Depends on sorting and page
@@ -630,6 +658,37 @@ function DashboardContent() {
                             </ResponsiveContainer>
                         )}
                     </div>
+                </div>
+
+                <div className="dashboard-card top-events-card">
+                    <div className="card-header">
+                        <h3>Top Events</h3>
+                        <span className="period-indicator">{periodLabels.current}</span>
+                    </div>
+                    {loadingEventSummary ? (
+                        <SkeletonTable rows={5} cols={5} />
+                    ) : eventSummary.length > 0 ? (
+                        <div className="activity-table top-events-table">
+                            <div className="table-header">
+                                <div>Event</div>
+                                <div className="align-center">Total</div>
+                                <div className="align-center">Unique Clicks</div>
+                                <div className="align-center">Payout Triggers</div>
+                                <div className="align-center">Converted Clicks</div>
+                            </div>
+                            {eventSummary.map((item, index) => (
+                                <div className="table-row" key={`${item.event_name}-${index}`}>
+                                    <div className="offer-name-cell align-left">{item.event_name}</div>
+                                    <div className="align-center">{formatNumber(item.total_events)}</div>
+                                    <div className="align-center">{formatNumber(item.unique_clicks)}</div>
+                                    <div className="align-center">{formatNumber(item.payout_trigger_events)}</div>
+                                    <div className="align-center">{formatNumber(item.clicks_with_conversion)}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="no-data">No event data available</div>
+                    )}
                 </div>
 
 

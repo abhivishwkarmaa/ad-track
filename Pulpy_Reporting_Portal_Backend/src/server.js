@@ -196,6 +196,28 @@ const start = async () => {
         logger.error('❌ Failed to start Redis click worker:', error);
       }
 
+      // ✅ Start conversion worker for stream:conversions processing
+      try {
+        const runConversionWorker = (await import('./workers/conversionWorker.js')).default;
+        runConversionWorker().catch(err => {
+          logger.error('❌ Conversion worker failed:', err);
+        });
+        logger.info('✅ Conversion worker started');
+      } catch (error) {
+        logger.error('❌ Failed to start conversion worker:', error);
+      }
+
+      // Start event worker (stream:events -> events table + conversion queue)
+      try {
+        const runEventWorker = (await import('./workers/eventWorker.js')).default;
+        runEventWorker().catch(err => {
+          logger.error('❌ Event worker failed:', err);
+        });
+        logger.info('✅ Event worker started');
+      } catch (error) {
+        logger.error('❌ Failed to start event worker:', error);
+      }
+
       // Start Redis hygiene worker (runs every hour)
       if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
         try {

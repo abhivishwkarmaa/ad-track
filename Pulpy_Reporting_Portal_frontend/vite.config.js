@@ -24,6 +24,11 @@ export default defineConfig({
         changeOrigin: false, // ✅ Preserves Host header
         secure: false,
       },
+      '/event': {
+        target: 'http://localhost:5001',
+        changeOrigin: false, // ✅ Preserves Host header
+        secure: false,
+      },
       '/postback': {
         target: 'http://localhost:5001',
         changeOrigin: false, // ✅ Preserves Host header

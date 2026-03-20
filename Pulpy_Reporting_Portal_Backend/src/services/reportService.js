@@ -1368,6 +1368,325 @@ export class ReportService {
       throw error;
     }
   }
+
+  async getEventSummary(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) return [];
+      const limit = Math.min(parseInt(filters.limit || 10, 10), 50);
+      // Fast path: use event_analytics table only (no raw joins, no time functions).
+      const fastConditions = ['tenant_id = ?'];
+      const fastParams = [tenantId];
+
+      if (filters.date_from) {
+        fastConditions.push('event_day >= ?');
+        fastParams.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        fastConditions.push('event_day <= ?');
+        fastParams.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        fastConditions.push('offer_id = ?');
+        fastParams.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        fastConditions.push('publisher_id = ?');
+        fastParams.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        fastConditions.push('event_name = ?');
+        fastParams.push(String(filters.event_name).trim().toLowerCase());
+      }
+
+      try {
+        const [fastRows] = await pool.query(
+          `SELECT
+             event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT click_uuid) AS unique_clicks,
+             SUM(CASE WHEN is_payable_event = 1 THEN 1 ELSE 0 END) AS payout_trigger_events,
+             SUM(
+               CASE
+                 WHEN conversion_status IS NOT NULL AND conversion_status <> '' THEN 1
+                 ELSE 0
+               END
+             ) AS clicks_with_conversion
+           FROM event_analytics
+           WHERE ${fastConditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...fastParams, limit]
+        );
+        if (Array.isArray(fastRows) && fastRows.length > 0) return fastRows;
+      } catch (fastErr) {
+        // Graceful fallback when table/schema is not yet migrated on this environment.
+        const fallbackEligibleErrors = new Set([
+          'ER_NO_SUCH_TABLE',
+          'ER_BAD_FIELD_ERROR',
+          'ER_PARSE_ERROR',
+          'ER_WRONG_FIELD_WITH_GROUP',
+        ]);
+        if (!fallbackEligibleErrors.has(fastErr.code)) throw fastErr;
+      }
+
+      // Backward-compatible fallback for environments where event_analytics is not present yet.
+      const conditions = ['e.tenant_id = ?'];
+      const params = [tenantId];
+
+      if (filters.date_from) {
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        conditions.push('e.created_at >= ?');
+        params.push(utcStart);
+      }
+      if (filters.date_to) {
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        conditions.push('e.created_at <= ?');
+        params.push(utcEnd);
+      }
+      if (filters.offer_id) {
+        conditions.push('e.offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('e.publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('e.event_name = ?');
+        params.push(String(filters.event_name).trim().toLowerCase());
+      }
+
+      const [rows] = await pool.query(
+        `SELECT
+           e.event_name,
+           COUNT(*) AS total_events,
+           COUNT(DISTINCT e.click_uuid) AS unique_clicks,
+           SUM(CASE WHEN e.event_name COLLATE utf8mb4_general_ci = COALESCE(o.payout_event, 'purchase') COLLATE utf8mb4_general_ci THEN 1 ELSE 0 END) AS payout_trigger_events,
+           SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS clicks_with_conversion
+         FROM events e
+         LEFT JOIN offers o ON o.id = e.offer_id AND o.tenant_id = e.tenant_id
+         LEFT JOIN conversions c
+           ON BINARY c.click_uuid = BINARY e.click_uuid
+          AND c.tenant_id = e.tenant_id
+         WHERE ${conditions.join(' AND ')}
+         GROUP BY e.event_name
+         ORDER BY total_events DESC
+         LIMIT ?`,
+        [...params, limit]
+      );
+
+      return Array.isArray(rows) ? rows : [];
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return [];
+      }
+      logger.error('ReportService.getEventSummary error:', error);
+      throw error;
+    }
+  }
+
+  async getEventAnalytics(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) return { data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } };
+
+      const page = parseInt(filters.page || 1, 10);
+      const limit = Math.min(parseInt(filters.limit || 50, 10), 500);
+      const offset = (page - 1) * limit;
+
+      const conditions = ['tenant_id = ?'];
+      const params = [tenantId];
+
+      if (filters.date_from) {
+        conditions.push('event_day >= ?');
+        params.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        conditions.push('event_day <= ?');
+        params.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        conditions.push('offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('BINARY LOWER(event_name) = BINARY LOWER(?)');
+        params.push(String(filters.event_name));
+      }
+      if (filters.click_uuid) {
+        conditions.push('click_uuid = ?');
+        params.push(String(filters.click_uuid));
+      }
+      if (filters.is_payable_event !== undefined) {
+        conditions.push('is_payable_event = ?');
+        params.push(String(filters.is_payable_event) === 'true' || String(filters.is_payable_event) === '1' ? 1 : 0);
+      }
+      if (filters.conversion_status) {
+        conditions.push('conversion_status = ?');
+        params.push(String(filters.conversion_status));
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const countQuery = `SELECT COUNT(*) as total FROM event_analytics WHERE ${whereClause}`;
+      const dataQuery = `
+        SELECT
+          id, tenant_id, event_at, event_day, event_hour, click_uuid, offer_id, publisher_id, publisher_offer_id,
+          event_name, event_id, event_value, is_known_event, is_payable_event, payout_event,
+          conversion_status, conversion_amount, conversion_payout, conversion_already_exists,
+          approval_percentage, payout_override, metadata, created_at
+        FROM event_analytics
+        WHERE ${whereClause}
+        ORDER BY event_at DESC, id DESC
+        LIMIT ? OFFSET ?`;
+
+      const [countResult, dataResult] = await Promise.all([
+        pool.query(countQuery, params),
+        pool.query(dataQuery, [...params, limit, offset]),
+      ]);
+      const countRows = countResult[0];
+      const rows = dataResult[0];
+      const total = countRows?.[0]?.total || 0;
+      return {
+        data: Array.isArray(rows) ? rows : [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return {
+          data: [],
+          pagination: {
+            page: parseInt(filters.page || 1, 10),
+            limit: parseInt(filters.limit || 50, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'event_analytics table not available',
+        };
+      }
+      logger.error('ReportService.getEventAnalytics error:', error);
+      throw error;
+    }
+  }
+
+  async getDailyOfferPublisherStats(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) {
+        return { data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } };
+      }
+
+      const page = parseInt(filters.page || 1, 10);
+      const limit = Math.min(parseInt(filters.limit || 50, 10), 500);
+      const offset = (page - 1) * limit;
+      const groupBy = String(filters.group_by || 'day,offer_id,publisher_id,event_name');
+
+      const conditions = ['tenant_id = ?'];
+      const params = [tenantId];
+      if (filters.date_from) {
+        conditions.push('day >= ?');
+        params.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        conditions.push('day <= ?');
+        params.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        conditions.push('offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('BINARY LOWER(event_name) = BINARY LOWER(?)');
+        params.push(String(filters.event_name));
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const allowedGroupByMap = {
+        day: 'day',
+        offer_id: 'offer_id',
+        publisher_id: 'publisher_id',
+        event_name: 'event_name',
+      };
+      const groupCols = groupBy
+        .split(',')
+        .map((g) => g.trim())
+        .filter((g) => allowedGroupByMap[g])
+        .map((g) => allowedGroupByMap[g]);
+      const safeGroupCols = groupCols.length > 0 ? groupCols : ['day', 'offer_id', 'publisher_id', 'event_name'];
+      const groupSql = safeGroupCols.join(', ');
+
+      const countQuery = `
+        SELECT COUNT(*) as total_groups
+        FROM (
+          SELECT ${groupSql}
+          FROM daily_offer_publisher_stats
+          WHERE ${whereClause}
+          GROUP BY ${groupSql}
+        ) grouped`;
+      const dataQuery = `
+        SELECT
+          ${groupSql},
+          SUM(clicks) as clicks,
+          SUM(unique_clicks) as unique_clicks,
+          SUM(conversions) as conversions,
+          SUM(approved_conversions) as approved_conversions,
+          SUM(pending_conversions) as pending_conversions,
+          SUM(rejected_conversions) as rejected_conversions,
+          SUM(revenue) as revenue,
+          SUM(payout) as payout,
+          SUM(profit) as profit,
+          SUM(events) as events,
+          SUM(payable_events) as payable_events,
+          SUM(non_payable_events) as non_payable_events
+        FROM daily_offer_publisher_stats
+        WHERE ${whereClause}
+        GROUP BY ${groupSql}
+        ORDER BY day DESC
+        LIMIT ? OFFSET ?`;
+
+      const [countResult, dataResult] = await Promise.all([
+        pool.query(countQuery, params),
+        pool.query(dataQuery, [...params, limit, offset]),
+      ]);
+
+      const total = countResult?.[0]?.[0]?.total_groups || 0;
+      return {
+        data: dataResult?.[0] || [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return {
+          data: [],
+          pagination: {
+            page: parseInt(filters.page || 1, 10),
+            limit: parseInt(filters.limit || 50, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'daily_offer_publisher_stats table not available',
+        };
+      }
+      logger.error('ReportService.getDailyOfferPublisherStats error:', error);
+      throw error;
+    }
+  }
 }
 
 export default new ReportService();

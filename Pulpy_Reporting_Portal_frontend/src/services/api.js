@@ -352,6 +352,14 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/conversions?${queryString}`, {}, meta);
     },
+    getEventSummary: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/events?${queryString}`);
+    },
+    getTopEvents: async (params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/dashboard/top-events?${queryString}`);
+    },
     // Offer Statistics
     getOfferStatistics: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();

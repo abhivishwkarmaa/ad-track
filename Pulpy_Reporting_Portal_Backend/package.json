@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "worker:click": "node click-worker.js",
+    "worker:event": "node event-worker.js",
+    "worker:conversion": "node conversion-worker.js",
     "migrate": "node src/db/migrate.js",
     "migrate:tenant": "node src/db/run-tenant-migration.js",
     "validate": "node src/db/validate-constraints.js",

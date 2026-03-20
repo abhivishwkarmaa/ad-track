@@ -234,6 +234,34 @@ export class DashboardController {
     }
   }
 
+  async getTopEvents(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+        limit: request.query.limit,
+      };
+
+      const data = await dashboardService.getTopEvents(filters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getTopEvents error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
   async getPerformanceSummary(request, reply) {
     try {
       const tenantId = getTenantIdFromRequest(request);

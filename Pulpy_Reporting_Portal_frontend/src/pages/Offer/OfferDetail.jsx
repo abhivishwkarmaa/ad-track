@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
+import { offersAPI, publishersAPI, assignmentsAPI, dashboardAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
@@ -166,12 +166,16 @@ function OfferDetail() {
     const [editingAssignmentIndex, setEditingAssignmentIndex] = useState(null);
     const [savingAssignments, setSavingAssignments] = useState(false);
     const [loadingTrackingUrls, setLoadingTrackingUrls] = useState({});
+    const reportOfferId = offer?.public_offer_id || offer?.display_id || offer?.id;
 
     // New states for granular data
     const [stats, setStats] = useState(null);
     const [loadingStats, setLoadingStats] = useState(false);
     const [publisherStats, setPublisherStats] = useState([]);
     const [loadingPublisherStats, setLoadingPublisherStats] = useState(false);
+    const [eventSummary, setEventSummary] = useState([]);
+    const [loadingEventSummary, setLoadingEventSummary] = useState(false);
+    const [eventSummaryScope, setEventSummaryScope] = useState('timeline');
     const [selectedRange, setSelectedRange] = useState('today');
     const [customRange, setCustomRange] = useState({ from: '', to: '' });
     const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
@@ -292,6 +296,52 @@ function OfferDetail() {
 
         return () => clearTimeout(timer);
     }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+
+    useEffect(() => {
+        if (!reportOfferId) return;
+        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
+            setEventSummary([]);
+            setEventSummaryScope('timeline');
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            try {
+                setLoadingEventSummary(true);
+                setEventSummaryScope('timeline');
+                const timelineResponse = await dashboardAPI.getEventSummary({
+                    offer_id: reportOfferId,
+                    date_from: selectedTimelineRange.from,
+                    date_to: selectedTimelineRange.to
+                });
+                if (timelineResponse.success) {
+                    const timelineRows = Array.isArray(timelineResponse.data) ? timelineResponse.data : [];
+                    if (timelineRows.length > 0) {
+                        setEventSummary(timelineRows);
+                        setEventSummaryScope('timeline');
+                    } else {
+                        const allTimeResponse = await dashboardAPI.getEventSummary({ offer_id: reportOfferId });
+                        const allTimeRows = allTimeResponse.success && Array.isArray(allTimeResponse.data)
+                            ? allTimeResponse.data
+                            : [];
+                        setEventSummary(allTimeRows);
+                        setEventSummaryScope(allTimeRows.length > 0 ? 'all_time' : 'timeline');
+                    }
+                } else {
+                    setEventSummary([]);
+                    setEventSummaryScope('timeline');
+                }
+            } catch (eventError) {
+                console.error('Error fetching offer event summary:', eventError);
+                setEventSummary([]);
+                setEventSummaryScope('timeline');
+            } finally {
+                setLoadingEventSummary(false);
+            }
+        }, 250);
+
+        return () => clearTimeout(timer);
+    }, [reportOfferId, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -676,6 +726,10 @@ function OfferDetail() {
                             <span className="detail-value" style={{ fontWeight: '600', color: '#4CAF50' }}>{offer.offer_currency} {offer.affiliate_amount}</span>
                         </div>
                         <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Payout Event:</span>
+                            <span className="detail-value">{offer.payout_event || 'purchase'}</span>
+                        </div>
+                        <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Offer URL:</span>
                             <span className="detail-value">
                                 <a href={offer.offer_url} target="_blank" rel="noopener noreferrer" style={{ color: '#2196F3' }}>
@@ -695,6 +749,49 @@ function OfferDetail() {
                         </div> */}
                     </div>
                 </div>
+            </div>
+
+            <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '12px' }}>
+                    <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600' }}>Event Breakdown</h2>
+                    {eventSummaryScope === 'all_time' && (
+                        <span style={{ fontSize: '12px', color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '999px', padding: '4px 10px' }}>
+                            No events in selected timeline, showing all-time
+                        </span>
+                    )}
+                </div>
+                {loadingEventSummary ? (
+                    <div className="loading-spinner-small" style={{ display: 'block', margin: '20px auto' }}></div>
+                ) : eventSummary.length > 0 ? (
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Event</th>
+                                    <th>Total Events</th>
+                                    <th>Unique Clicks</th>
+                                    <th>Payout Trigger Events</th>
+                                    <th>Clicks with Conversion</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {eventSummary.map((item) => (
+                                    <tr key={item.event_name}>
+                                        <td>{item.event_name}</td>
+                                        <td>{formatNumber(item.total_events)}</td>
+                                        <td>{formatNumber(item.unique_clicks)}</td>
+                                        <td>{formatNumber(item.payout_trigger_events)}</td>
+                                        <td>{formatNumber(item.clicks_with_conversion)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#64748b', border: '1px dashed #d1d5db', borderRadius: '8px' }}>
+                        No event data available for this timeline.
+                    </div>
+                )}
             </div>
 
             {/* Advertiser Information */}
