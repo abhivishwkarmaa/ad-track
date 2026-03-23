@@ -773,7 +773,6 @@ export class ReportService {
         // --- AGGREGATED REPORT MODE ---
         let selects = [];
         let groups = [];
-        let orderBy = [];
 
         groupBy.forEach(dim => {
           if (dimMap[dim]) {
@@ -816,6 +815,11 @@ export class ReportService {
         if (wantsMetric('pending_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
         if (wantsMetric('approved_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
 
+        // Per-click time when grouping includes click_uuid (one row per click — not an hour bucket).
+        if (groupBy.includes('click_uuid')) {
+          selects.push('MAX(c.created_at) as click_created_at');
+        }
+
         if (selects.length === 0) {
           selects.push('COUNT(*) as clicks');
         }
@@ -832,6 +836,23 @@ export class ReportService {
 
         if (groups.length > 0) {
           query += ` GROUP BY ${groups.join(', ')}`;
+        }
+
+        // Deterministic order: click-level groups by latest click time; else date/hour buckets.
+        const aggregatedOrderParts = [];
+        if (groupBy.includes('click_uuid')) {
+          aggregatedOrderParts.push('MAX(c.created_at) DESC');
+        }
+        if (groupBy.includes('date')) {
+          aggregatedOrderParts.push('DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) DESC');
+        }
+        if (groupBy.includes('hour')) {
+          aggregatedOrderParts.push('HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) DESC');
+        }
+        if (aggregatedOrderParts.length > 0) {
+          query += ` ORDER BY ${aggregatedOrderParts.join(', ')}`;
+        } else if (groups.length > 0) {
+          query += ' ORDER BY MAX(c.created_at) DESC';
         }
 
         // --- EXPORT LOGIC ---

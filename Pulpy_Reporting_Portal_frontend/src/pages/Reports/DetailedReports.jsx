@@ -1,9 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
-import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
+import {
+    formatDateIST,
+    formatDateTimeIST,
+    formatExactHourBucketIST,
+    formatHourSlotIST,
+    formatISTDateTimeNumeric,
+} from '../../utils/dateTime';
 import './Reports.css';
 
 // Icons
@@ -198,6 +204,12 @@ function DetailedReports() {
     const [exportMode, setExportMode] = useState('frontend'); // frontend | backend
     const [showExportMenu, setShowExportMenu] = useState(false);
 
+    /** Bumps only on Apply so filters refetch without double-invoking fetchReports + useEffect. */
+    const [applyFetchKey, setApplyFetchKey] = useState(0);
+
+    /** Dedupe back-to-back identical fetches (React Strict Mode dev double-invoke + redundant effect runs). */
+    const lastFetchDedupRef = useRef({ key: '', at: 0 });
+
     // Fetch filter options
     useEffect(() => {
         const fetchData = async () => {
@@ -222,14 +234,17 @@ function DetailedReports() {
         setDateTo(range.to);
     }, [datePreset]);
 
-    const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics) => {
+    const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics, opts = {}) => {
         try {
             setLoading(true);
             setError(null);
 
+            const page = opts.page != null ? Number(opts.page) : pagination.page;
+            const limit = opts.limit != null ? Number(opts.limit) : pagination.limit;
+
             const params = {
-                page: pagination.page,
-                limit: pagination.limit
+                page,
+                limit
             };
 
             const resolvedRange = datePreset === 'custom'
@@ -285,14 +300,30 @@ function DetailedReports() {
             if (trafficType === 'all') { urlParams.delete('noReferrer'); urlParams.delete('hasReferrer'); }
             if (activeDims.length > 0) urlParams.set('groupBy', activeDims.join(','));
             if (activeMetrics.length > 0) urlParams.set('metrics', activeMetrics.join(','));
-            setSearchParams(urlParams);
+            const nextSearch = urlParams.toString();
+            if (nextSearch !== searchParams.toString()) {
+                setSearchParams(urlParams, { replace: true });
+            }
 
             const response = await dashboardAPI.getDetailed(params);
             if (response.success) {
                 setReports(response.data || []);
                 setIsAggregated(response.isAggregated || false);
                 if (response.pagination) {
-                    setPagination(response.pagination);
+                    const p = response.pagination;
+                    setPagination((prev) => {
+                        const total = Number(p.total) || 0;
+                        const totalPages = Math.max(1, Number(p.totalPages) || 1);
+                        let nextPage = prev.page;
+                        if (nextPage > totalPages) nextPage = totalPages;
+                        return {
+                            ...prev,
+                            page: nextPage,
+                            limit: prev.limit,
+                            total,
+                            totalPages,
+                        };
+                    });
                 }
             } else {
                 setError('Failed to load reports');
@@ -324,17 +355,24 @@ function DetailedReports() {
         }
     };
 
-    // Initial load
+    // Load / pagination / global refresh / Apply — filters refetch via applyFetchKey (not a second fetchReports in handleApply).
     useEffect(() => {
+        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}`;
+        const now = Date.now();
+        if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
+            return;
+        }
+        lastFetchDedupRef.current = { key, at: now };
         fetchReports();
-    }, [pagination.page, pagination.limit, refreshKey]);
+        // Intentionally only re-fetch when page, limit, global refreshKey, or applyFetchKey changes; dim/metric state is read inside fetchReports.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey]);
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
-        // Apply pending changes
         setSelectedDims(pendingDims);
         setSelectedMetrics(pendingMetrics);
-        fetchReports(pendingDims, pendingMetrics);
+        setApplyFetchKey((k) => k + 1);
     };
 
     const handleDimChange = (id) => {
@@ -356,13 +394,55 @@ function DetailedReports() {
         return `$${parseFloat(amount).toFixed(2)}`;
     };
 
+    /** Backend sends both: click_created_at (DB row time) and click_timestamp (tracker). Prefer created_at. */
+    const getClickTimeRaw = (row) =>
+        row?.click_created_at ?? row?.click_timestamp ?? null;
+
     const formatDate = (dateString, dim) => {
+        // Hour can be 0 (midnight); don't treat as falsy.
+        if (dim === 'hour') {
+            if (dateString === undefined || dateString === null || dateString === '') return '-';
+            return formatHourSlotIST(dateString) || String(dateString);
+        }
         if (!dateString) return '-';
-        if (dim === 'hour') return `${dateString}:00`;
-        if (dim === 'date') return formatDateIST(dateString) || dateString;
+        // Aggregated by calendar day (IST): backend sends DATE only — show date, not fake midnight time
+        if (dim === 'date') return formatDateIST(dateString) || String(dateString);
+        // Click / conversion: exact IST as YYYY-MM-DD HH:mm:ss
+        if (dim === 'datetime') return formatISTDateTimeNumeric(dateString) || String(dateString);
         try {
-            return formatDateTimeIST(dateString) || dateString;
-        } catch (e) { return dateString; }
+            return formatDateTimeIST(dateString) || String(dateString);
+        } catch (e) {
+            return String(dateString);
+        }
+    };
+
+    /** Aggregated: with click_uuid, backend sends click_created_at (exact). Else date_group + hour_group bucket. */
+    const formatAggregatedTimestampCell = (row) => {
+        const exactClick = getClickTimeRaw(row);
+        if (exactClick) {
+            return formatISTDateTimeNumeric(exactClick) || '-';
+        }
+        const d = row?.date_group;
+        const h = row?.hour_group;
+        const hasD = d !== undefined && d !== null && d !== '';
+        const hasH = h !== undefined && h !== null && h !== '';
+        if (hasD && hasH) {
+            const exact = formatExactHourBucketIST(d, h);
+            if (exact) return exact;
+            return `${formatDate(d, 'date')} · ${formatDate(h, 'hour')}`;
+        }
+        if (hasD) return formatDate(d, 'date');
+        if (hasH) return formatDate(h, 'hour');
+        return '-';
+    };
+
+    const getDetailTimestampCsv = (row) => {
+        const clickT = formatDate(getClickTimeRaw(row), 'datetime') || '';
+        const convT = row?.conversion_timestamp ? formatDate(row.conversion_timestamp, 'datetime') : '';
+        if (clickT && convT) return `Click: ${clickT} | Conversion: ${convT}`;
+        if (clickT) return clickT;
+        if (convT) return `Conversion: ${convT}`;
+        return '';
     };
 
     const getStatusBadge = (status) => {
@@ -423,7 +503,10 @@ function DetailedReports() {
                     if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(colId)) {
                         return val === null || val === undefined ? '' : Number(val).toFixed(2);
                     }
-                    if (colId === 'click_created_at') return formatDate(val) || '';
+                    if (colId === 'timestamp_bucket') return formatAggregatedTimestampCell(row) || '';
+                    if (colId === 'timestamp') return getDetailTimestampCsv(row);
+                    if (colId === 'date_group') return formatDate(val, 'date') || '';
+                    if (colId === 'hour_group') return formatDate(val, 'hour') || '';
                     if (colId === 'referrer' || colId === 'referer') return val ? String(val).trim() : 'Direct';
                     return val ?? '';
                 };
@@ -497,39 +580,49 @@ function DetailedReports() {
     const tableColumns = useMemo(() => {
         if (isAggregated) {
             const cols = [];
-            // Dimensions first - order matters based on selection
-            // We want to sort dimensions based on AVAILABLE_DIMENSIONS order for consistency
-            AVAILABLE_DIMENSIONS.forEach(dim => {
-                if (selectedDims.includes(dim.id)) {
-                    cols.push({ id: dim.id === 'date' ? 'date_group' : (dim.id === 'hour' ? 'hour_group' : dim.id), label: dim.label });
+            let mergedDateHour = false;
+            AVAILABLE_DIMENSIONS.forEach((dim) => {
+                if (!selectedDims.includes(dim.id)) return;
+                if (dim.id === 'date' && selectedDims.includes('hour')) {
+                    cols.push({ id: 'timestamp_bucket', label: 'Date' });
+                    mergedDateHour = true;
+                    return;
                 }
+                if (dim.id === 'hour' && mergedDateHour) return;
+                if (dim.id === 'date') {
+                    cols.push({ id: 'date_group', label: 'Date' });
+                    return;
+                }
+                if (dim.id === 'hour') {
+                    cols.push({ id: 'hour_group', label: 'Date' });
+                    return;
+                }
+                cols.push({ id: dim.id, label: dim.label });
             });
 
-            // Metrics
-            AVAILABLE_METRICS.forEach(metric => {
+            AVAILABLE_METRICS.forEach((metric) => {
                 if (selectedMetrics.includes(metric.id)) {
                     cols.push({ id: metric.id, label: metric.label });
                 }
             });
             return cols;
-        } else {
-            // Detailed View Columns
-            return [
-                { id: 'click_uuid', label: 'Click UUID' },
-                { id: 'offer_id', label: 'Offer' },
-                { id: 'publisher_company', label: 'Publisher' },
-                { id: 'ip', label: 'IP' },
-                { id: 'referer', label: 'Referer' },
-                { id: 'x_forwarded_for', label: 'X-Forwarded-For' },
-                { id: 'country', label: 'Country' },
-                { id: 'device_type', label: 'Device' },
-                { id: 'click_created_at', label: 'Time' },
-                { id: 'conversion_status', label: 'Status' },
-                { id: 'conversion_amount', label: 'Revenue' },
-                { id: 'conversion_payout', label: 'Payout' },
-                { id: 'actions', label: 'Actions' }
-            ];
         }
+        // Detailed: one Date column — full datetime (click + conversion) from backend
+        return [
+            { id: 'click_uuid', label: 'Click UUID' },
+            { id: 'offer_id', label: 'Offer' },
+            { id: 'publisher_company', label: 'Publisher' },
+            { id: 'ip', label: 'IP' },
+            { id: 'referer', label: 'Referer' },
+            { id: 'x_forwarded_for', label: 'X-Forwarded-For' },
+            { id: 'country', label: 'Country' },
+            { id: 'device_type', label: 'Device' },
+            { id: 'timestamp', label: 'Date' },
+            { id: 'conversion_status', label: 'Status' },
+            { id: 'conversion_amount', label: 'Revenue' },
+            { id: 'conversion_payout', label: 'Payout' },
+            { id: 'actions', label: 'Actions' },
+        ];
     }, [isAggregated, selectedDims, selectedMetrics]);
 
     const isInitialLoading = loading && reports.length === 0;
@@ -795,8 +888,33 @@ function DetailedReports() {
                                         if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
                                         if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
                                         if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
-                                        if (col.id === 'click_created_at') return <td key={col.id}>{formatDate(val)}</td>;
-                                        if (col.id === 'date_group' || col.id === 'hour_group') return <td key={col.id}>{val}</td>;
+                                        if (col.id === 'timestamp') {
+                                            const clickT = formatDate(getClickTimeRaw(row), 'datetime');
+                                            const convT = row.conversion_timestamp
+                                                ? formatDate(row.conversion_timestamp, 'datetime')
+                                                : null;
+                                            return (
+                                                <td key={col.id}>
+                                                    <div>{clickT || '-'}</div>
+                                                    {convT && (
+                                                        <div
+                                                            style={{
+                                                                fontSize: '12px',
+                                                                opacity: 0.9,
+                                                                marginTop: '4px',
+                                                            }}
+                                                        >
+                                                            Conversion: {convT}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            );
+                                        }
+                                        if (col.id === 'timestamp_bucket') {
+                                            return <td key={col.id}>{formatAggregatedTimestampCell(row)}</td>;
+                                        }
+                                        if (col.id === 'date_group') return <td key={col.id}>{formatDate(val, 'date')}</td>;
+                                        if (col.id === 'hour_group') return <td key={col.id}>{formatDate(val, 'hour')}</td>;
                                         if (col.id === 'actions') {
                                             const status = (row.conversion_status || '').toLowerCase();
                                             const canApprove = !status || status === 'pending' || status === 'click_expired' || status === 'rejected' || status === 'rejected_cap';
@@ -846,8 +964,14 @@ function DetailedReports() {
                                         displayValue = row.publisher_name || row.publisher_company
                                             ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
                                             : row.publisher_id;
-                                    } else if (col.id === 'click_created_at') {
-                                        displayValue = formatDate(val);
+                                    } else if (col.id === 'timestamp') {
+                                        displayValue = getDetailTimestampCsv(row) || '-';
+                                    } else if (col.id === 'timestamp_bucket') {
+                                        displayValue = formatAggregatedTimestampCell(row);
+                                    } else if (col.id === 'date_group') {
+                                        displayValue = formatDate(val, 'date');
+                                    } else if (col.id === 'hour_group') {
+                                        displayValue = formatDate(val, 'hour');
                                     } else if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) {
                                         displayValue = formatCurrency(val);
                                     }
