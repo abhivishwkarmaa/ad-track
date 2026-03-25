@@ -5,9 +5,11 @@ import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
 import { formatDateIST } from '../../utils/dateTime';
 import { getTimelineRange } from '../../utils/timelineRange';
+import { getUserTimezone } from '../../utils/userTimezone';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import './Dashboard.css';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { DateTime } from 'luxon';
 
 // --- ICONS ---
 const OfferIcon = () => (
@@ -304,19 +306,19 @@ function DashboardContent() {
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
         const current = getTimelineRange(dateFilter, customRange);
-        const fromDate = current.from ? new Date(current.from) : null;
-        const toDate = current.to ? new Date(current.to) : null;
+        const activeTimezone = getUserTimezone();
+        const fromDate = current.from ? DateTime.fromISO(current.from, { zone: activeTimezone }) : null;
+        const toDate = current.to ? DateTime.fromISO(current.to, { zone: activeTimezone }) : null;
 
         let previous = null;
-        if (fromDate && toDate) {
-            const dayMs = 24 * 60 * 60 * 1000;
-            const days = Math.max(1, Math.floor((toDate - fromDate) / dayMs) + 1);
-            const prevTo = new Date(fromDate);
-            prevTo.setDate(prevTo.getDate() - 1);
-            const prevFrom = new Date(prevTo);
-            prevFrom.setDate(prevFrom.getDate() - (days - 1));
-            const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            previous = { from: toYmd(prevFrom), to: toYmd(prevTo) };
+        if (fromDate?.isValid && toDate?.isValid && toDate >= fromDate) {
+            const days = Math.max(1, Math.floor(toDate.diff(fromDate, 'days').days) + 1);
+            const prevTo = fromDate.minus({ days: 1 });
+            const prevFrom = prevTo.minus({ days: days - 1 });
+            previous = {
+                from: prevFrom.toFormat('yyyy-LL-dd'),
+                to: prevTo.toFormat('yyyy-LL-dd'),
+            };
         }
 
         const labels = {
@@ -336,7 +338,7 @@ function DashboardContent() {
             previousRange: previous,
             periodLabels: labelsForPeriod
         };
-    }, [dateFilter, customRange]);
+    }, [dateFilter, customRange, user?.timezone]);
 
     const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
     const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
@@ -405,7 +407,7 @@ function DashboardContent() {
         }
 
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
+    }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey, user?.timezone]);
 
     // 2. Offer Statistics - Depends on sorting and page
     useEffect(() => {
@@ -422,7 +424,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Offer stats error:', err))
             .finally(() => !cancelled && setLoadingOfferStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey]);
+    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey, user?.timezone]);
 
     // 3. Publisher Statistics - Depends on sorting and page
     useEffect(() => {
@@ -439,7 +441,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Publisher stats error:', err))
             .finally(() => !cancelled && setLoadingPublisherStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey]);
+    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey, user?.timezone]);
 
     const handleOfferSort = (field) => {
         setOfferPage(1); // Reset to page 1 on sort change

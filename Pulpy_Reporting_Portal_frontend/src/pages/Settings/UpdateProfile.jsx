@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { authAPI } from '../../services/api';
+import { SUPPORTED_TIMEZONES, getUserTimezone } from '../../utils/userTimezone';
 import './Settings.css';
 
 function UpdateProfile() {
@@ -13,7 +14,8 @@ function UpdateProfile() {
         fullName: user?.fullName || '',
         email: user?.email || '',
         companyName: user?.companyName || '',
-        phone: user?.phone || ''
+        phone: user?.phone || '',
+        timezone: user?.timezone || getUserTimezone(),
     });
 
     // Password Change State
@@ -152,6 +154,21 @@ function UpdateProfile() {
                                     value={formData.phone}
                                     onChange={handleChange}
                                 />
+                            </div>
+                        </div>
+                        <div className="settings-form-row two-col">
+                            <div className="form-group">
+                                <label className="form-label">Report Timezone</label>
+                                <select
+                                    className="form-control"
+                                    name="timezone"
+                                    value={formData.timezone}
+                                    onChange={handleChange}
+                                >
+                                    {SUPPORTED_TIMEZONES.map((tz) => (
+                                        <option key={tz} value={tz}>{tz}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                         <button type="submit" className="btn btn-primary" disabled={loading}>

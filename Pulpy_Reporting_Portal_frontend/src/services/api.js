@@ -1,4 +1,5 @@
 import { getLastActivity, markActivity, broadcastLogout } from '../utils/activityTracker';
+import { convertDateParamsToIST } from '../utils/userTimezone';
 
 // 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
 // ✅ CORRECT: Use relative paths for API calls
@@ -75,6 +76,33 @@ const refreshAccessToken = async () => {
     }
 };
 
+const normalizeGetEndpointForTimezone = (endpoint, method = 'GET') => {
+    const effectiveMethod = (method || 'GET').toUpperCase();
+    if (effectiveMethod !== 'GET' || !endpoint.includes('?')) {
+        return endpoint;
+    }
+
+    const [path, rawQuery = ''] = endpoint.split('?');
+    if (!rawQuery) return endpoint;
+
+    const queryParams = Object.fromEntries(new URLSearchParams(rawQuery).entries());
+    const hasDateRangeParam = Boolean(
+        queryParams.date_from ||
+        queryParams.date_to ||
+        queryParams.previous_from ||
+        queryParams.previous_to ||
+        queryParams.datetime_from ||
+        queryParams.datetime_to ||
+        queryParams.previous_datetime_from ||
+        queryParams.previous_datetime_to
+    );
+    if (!hasDateRangeParam) return endpoint;
+
+    const converted = convertDateParamsToIST(queryParams);
+    const nextQuery = new URLSearchParams(converted).toString();
+    return nextQuery ? `${path}?${nextQuery}` : path;
+};
+
 // API request helper
 const apiRequest = async (endpoint, options = {}, meta = {}) => {
     const {
@@ -85,7 +113,8 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
         isRetry = false,
     } = meta;
 
-    const url = `${BASE_URL}${endpoint}`;
+    const normalizedEndpoint = normalizeGetEndpointForTimezone(endpoint, options.method);
+    const url = `${BASE_URL}${normalizedEndpoint}`;
     const storedUser = getStoredUser();
 
     if (!skipIdleCheck && storedUser && isIdle()) {
@@ -141,10 +170,10 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
         }
 
         if (response.status === 401 && !allowUnauthorized) {
-            if (!skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
+            if (!skipAuth && !isRetry && normalizedEndpoint !== '/api/auth/refresh') {
                 const refreshed = await refreshAccessToken();
                 if (refreshed) {
-                    return apiRequest(endpoint, options, { ...meta, isRetry: true });
+                    return apiRequest(normalizedEndpoint, options, { ...meta, isRetry: true });
                 }
             }
 
@@ -273,50 +302,50 @@ export const authAPI = {
 export const dashboardAPI = {
     // Aggregated dashboard - single call for all used data (cards, performance, summary, live offers, offer/pub stats, comparison)
     getDashboard: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard?${queryString}`);
     },
     // Dashboard cards - main metrics for UI cards display
     getDashboardCards: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/cards?${queryString}`);
     },
     // Top offers with conversions
     getTopOffers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/top-offers?${queryString}`);
     },
     // Performance chart data
     getPerformance: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance?${queryString}`);
     },
     // Performance summary (matching dashboard cards logic)
     getPerformanceSummary: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance-summary?${queryString}`);
     },
     // Top countries
     getTopCountries: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/top-countries?${queryString}`);
     },
     // Live offers
     getLiveOffers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/live-offers?${queryString}`);
     },
     // Legacy endpoints (keeping for backward compatibility)
     getSummary: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/summary?${queryString}`);
     },
     getDetailed: async (params = {}, meta) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/detailed?${queryString}`, {}, meta);
     },
     exportDetailedCSV: async (params = {}) => {
-        const queryString = new URLSearchParams({ ...params, export: 'csv' }).toString();
+        const queryString = new URLSearchParams({ ...convertDateParamsToIST(params), export: 'csv' }).toString();
         const endpoint = `/api/admin/reports/detailed?${queryString}`;
 
         const requestCsv = async (token) => {
@@ -344,27 +373,27 @@ export const dashboardAPI = {
         return response.blob();
     },
     getPublisherConversions: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`);
     },
     // New Conversion Logs
     getConversions: async (params = {}, meta) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/conversions?${queryString}`, {}, meta);
     },
     // Offer Statistics
     getOfferStatistics: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/offer-statistics?${queryString}`);
     },
     // Publisher Statistics
     getPublisherStatistics: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/publisher-statistics?${queryString}`);
     },
     // Performance Comparison (current vs previous period)
     getPerformanceComparison: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/reports/dashboard/performance-comparison?${queryString}`);
     },
     // Manual Click Approval
@@ -398,22 +427,22 @@ export const adminSubscriptionAPI = {
 // Offers API
 export const offersAPI = {
     getOffers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers?${queryString}`);
     },
     searchOffers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers/search?${queryString}`);
     },
     getOffer: async (id) => {
         return apiRequest(`/api/admin/offers/${id}`);
     },
     getOfferStats: async (id, params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers/${id}/stats${queryString ? `?${queryString}` : ''}`);
     },
     getOfferDailyStats: async (id, params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers/${id}/daily-stats?${queryString}`);
     },
     getOfferAssignments: async (id) => {
@@ -426,7 +455,7 @@ export const offersAPI = {
         return apiRequest(`/api/admin/offers/${id}/recent-conversions`);
     },
     getOfferPublisherStats: async (id, params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers/${id}/publisher-stats${queryString ? `?${queryString}` : ''}`);
     },
     getOfferForEdit: async (id) => {
@@ -460,7 +489,7 @@ export const offersAPI = {
 // Publishers API
 export const publishersAPI = {
     getPublishers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/publishers?${queryString}`);
     },
     getPublisher: async (id) => {
@@ -510,7 +539,7 @@ export const publishersAPI = {
 // Advertisers API
 export const advertisersAPI = {
     getAdvertisers: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/advertisers?${queryString}`);
     },
     getAdvertiser: async (id) => {
@@ -538,7 +567,7 @@ export const advertisersAPI = {
 // Assignments API
 export const assignmentsAPI = {
     getAssignments: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/assignments?${queryString}`);
     },
     getAssignment: async (id) => {
@@ -557,7 +586,7 @@ export const assignmentsAPI = {
         });
     },
     getTrackingUrl: async (id, params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/assignments/${id}/tracking-url${queryString ? `?${queryString}` : ''}`);
     },
     deleteAssignment: async (id) => {
@@ -571,7 +600,7 @@ export const assignmentsAPI = {
 export const tenantsAPI = {
     // Get all tenants
     getTenants: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/tenants?${queryString}`);
     },
     // Get single tenant
@@ -606,7 +635,7 @@ export const tenantsAPI = {
     },
     // Get tenant metrics
     getTenantMetrics: async (id, params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/tenants/${id}/metrics?${queryString}`);
     },
     // Delete tenant
@@ -622,7 +651,7 @@ export const tenantsAPI = {
 export const contactSubmissionsAPI = {
     // Get all contact submissions with pagination and filters
     getContactSubmissions: async (params = {}) => {
-        const queryString = new URLSearchParams(params).toString();
+        const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/contact-submissions?${queryString}`);
     },
     // Get single contact submission

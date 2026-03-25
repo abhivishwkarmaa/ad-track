@@ -20,6 +20,8 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.country) filters.country = request.query.country;
@@ -69,6 +71,8 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.country) filters.country = request.query.country;
@@ -170,6 +174,8 @@ export class ReportController {
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
 
       const result = await reportService.getPublisherConversionStats(filters, tenantId);
 
@@ -199,6 +205,8 @@ export class ReportController {
       if (request.query.limit) filters.limit = request.query.limit;
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.status) filters.status = request.query.status;

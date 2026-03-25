@@ -321,18 +321,18 @@ export class PublisherService {
       let dateCondition = '';
       const statsParams = [];
       if (filters.date_from && filters.date_to) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const rangeStart = filters.datetime_from || `${filters.date_from} 00:00:00`;
+        const rangeEnd = filters.datetime_to || `${filters.date_to} 23:59:59`;
         dateCondition = ' AND conv.created_at BETWEEN ? AND ?';
-        statsParams.push(utcStart, utcEnd);
+        statsParams.push(rangeStart, rangeEnd);
       } else if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const rangeStart = filters.datetime_from || `${filters.date_from} 00:00:00`;
         dateCondition = ' AND conv.created_at >= ?';
-        statsParams.push(utcStart);
+        statsParams.push(rangeStart);
       } else if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const rangeEnd = filters.datetime_to || `${filters.date_to} 23:59:59`;
         dateCondition = ' AND conv.created_at <= ?';
-        statsParams.push(utcEnd);
+        statsParams.push(rangeEnd);
       }
 
       const query = `
