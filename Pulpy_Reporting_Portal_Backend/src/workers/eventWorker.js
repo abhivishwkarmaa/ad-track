@@ -128,7 +128,7 @@ async function processEventEntry(msgId, fields) {
   const publisherId = Number(parsed.publisher_id || 0);
   const publisherOfferId = parsed.publisher_offer_id ? Number(parsed.publisher_offer_id) : null;
   const eventName = String(parsed.event_name || '').trim().toLowerCase();
-  const eventId = parsed.event_id ? String(parsed.event_id).trim() : null;
+  const eventIdRaw = parsed.event_id ? String(parsed.event_id).trim() : null;
   const eventValue = Number(parsed.event_value || 0);
   const payoutEvent = String(parsed.payout_event || 'purchase').trim().toLowerCase();
   const isPayable = parsed.is_payable === '1' || eventName === payoutEvent;
@@ -144,6 +144,10 @@ async function processEventEntry(msgId, fields) {
     await redis.xack(STREAM_KEY, GROUP_NAME, msgId);
     return;
   }
+
+  // Industry-safe idempotency: the payable (payout_event) should be stored only once per click,
+  // even if clients retry with different event_id values.
+  const eventId = eventName === payoutEvent ? null : eventIdRaw;
 
   let metadataObj = null;
   if (parsed.metadata) {

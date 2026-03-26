@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { offersAPI, publishersAPI, assignmentsAPI, dashboardAPI } from '../../services/api';
+import { DateTime } from 'luxon';
+import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
+import { useAuth } from '../../context/AuthContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import { getTimelineRange } from '../../utils/timelineRange';
+import { getUserTimezone } from '../../utils/userTimezone';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -141,15 +144,22 @@ function OfferDetail() {
         { id: 'custom', label: 'Custom Range' },
     ];
 
-    const toIstYmd = (value) => {
+    const toUserYmd = (value, timezone) => {
         if (!value) return '';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return '';
-        const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-        return istDate.toISOString().split('T')[0];
+        const zone = timezone || getUserTimezone();
+        const normalized = String(value).replace(' ', 'T');
+        let dt = DateTime.fromISO(normalized, { zone: 'Asia/Kolkata' });
+        if (!dt.isValid) {
+            dt = DateTime.fromSQL(String(value), { zone: 'Asia/Kolkata' });
+        }
+        if (!dt.isValid) {
+            return '';
+        }
+        return dt.setZone(zone).toISODate();
     };
 
     const { id } = useParams();
+    const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const toast = useToast();
@@ -188,16 +198,16 @@ function OfferDetail() {
     const statsRequestRef = useRef(0);
     const publisherStatsRequestRef = useRef(0);
     const selectedTimelineRange = useMemo(() => {
+        const activeTimezone = user?.timezone || getUserTimezone();
         if (selectedRange === 'since_created') {
-            const now = new Date();
-            const istToday = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
+            const todayInUserTz = DateTime.now().setZone(activeTimezone).startOf('day').toISODate();
             return {
-                from: toIstYmd(offer?.created_at) || istToday,
-                to: istToday,
+                from: toUserYmd(offer?.created_at, activeTimezone) || todayInUserTz,
+                to: todayInUserTz,
             };
         }
         return getTimelineRange(selectedRange, customRange);
-    }, [selectedRange, customRange, offer?.created_at]);
+    }, [selectedRange, customRange, offer?.created_at, user?.timezone]);
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -259,7 +269,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to, user?.timezone]);
 
     useEffect(() => {
         if (!id) return;
@@ -295,53 +305,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
-
-    useEffect(() => {
-        if (!reportOfferId) return;
-        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
-            setEventSummary([]);
-            setEventSummaryScope('timeline');
-            return;
-        }
-
-        const timer = setTimeout(async () => {
-            try {
-                setLoadingEventSummary(true);
-                setEventSummaryScope('timeline');
-                const timelineResponse = await dashboardAPI.getEventSummary({
-                    offer_id: reportOfferId,
-                    date_from: selectedTimelineRange.from,
-                    date_to: selectedTimelineRange.to
-                });
-                if (timelineResponse.success) {
-                    const timelineRows = Array.isArray(timelineResponse.data) ? timelineResponse.data : [];
-                    if (timelineRows.length > 0) {
-                        setEventSummary(timelineRows);
-                        setEventSummaryScope('timeline');
-                    } else {
-                        const allTimeResponse = await dashboardAPI.getEventSummary({ offer_id: reportOfferId });
-                        const allTimeRows = allTimeResponse.success && Array.isArray(allTimeResponse.data)
-                            ? allTimeResponse.data
-                            : [];
-                        setEventSummary(allTimeRows);
-                        setEventSummaryScope(allTimeRows.length > 0 ? 'all_time' : 'timeline');
-                    }
-                } else {
-                    setEventSummary([]);
-                    setEventSummaryScope('timeline');
-                }
-            } catch (eventError) {
-                console.error('Error fetching offer event summary:', eventError);
-                setEventSummary([]);
-                setEventSummaryScope('timeline');
-            } finally {
-                setLoadingEventSummary(false);
-            }
-        }, 250);
-
-        return () => clearTimeout(timer);
-    }, [reportOfferId, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to, user?.timezone]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {

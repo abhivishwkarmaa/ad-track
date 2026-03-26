@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { authAPI, setAccessToken, clearAccessToken } from '../services/api';
 import { startActivityTracking, onLogoutEvent, getLastActivity, broadcastLogout } from '../utils/activityTracker';
+import { getUserTimezone, setUserTimezone } from '../utils/userTimezone';
 
 const AuthContext = createContext(null);
 
@@ -28,6 +29,11 @@ export function AuthProvider({ children }) {
                 }
                 if (parsedUser.mustChangePassword === undefined) {
                     parsedUser.mustChangePassword = false;
+                }
+                if (!parsedUser.timezone) {
+                    parsedUser.timezone = getUserTimezone();
+                } else {
+                    parsedUser.timezone = setUserTimezone(parsedUser.timezone);
                 }
                 setUser(parsedUser);
                 setIsAuthenticated(true);
@@ -113,7 +119,8 @@ export function AuthProvider({ children }) {
                     tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
                     mustChangePassword: Boolean(response.data.must_change_password),
                     companyName: response.data.company_name || null,
-                    phone: response.data.phone || null
+                    phone: response.data.phone || null,
+                    timezone: setUserTimezone(response.data.timezone || getUserTimezone())
                 };
 
                 setUser(userData);
@@ -140,16 +147,23 @@ export function AuthProvider({ children }) {
             // But here we check if any main profile fields are being updated.
             const profileFields = ['fullName', 'name', 'companyName', 'phone'];
             const hasProfileFields = Object.keys(updates).some(key => profileFields.includes(key));
+            const hasTimezoneUpdate = Object.prototype.hasOwnProperty.call(updates, 'timezone');
+            const resolvedTimezone = hasTimezoneUpdate ? setUserTimezone(updates.timezone) : (user?.timezone || getUserTimezone());
 
             if (hasProfileFields) {
-                const response = await authAPI.updateProfile(updates);
+                const apiPayload = {
+                    ...updates,
+                };
+                delete apiPayload.timezone;
+                const response = await authAPI.updateProfile(apiPayload);
                 if (response.success && response.data) {
                     const updatedUser = {
                         ...user,
                         ...updates,
                         fullName: response.data.name || updates.fullName || user.fullName,
                         companyName: response.data.company_name || updates.companyName || user.companyName,
-                        phone: response.data.phone || updates.phone || user.phone
+                        phone: response.data.phone || updates.phone || user.phone,
+                        timezone: resolvedTimezone,
                     };
                     setUser(updatedUser);
                     localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
@@ -157,7 +171,7 @@ export function AuthProvider({ children }) {
                 }
             } else {
                 // Local only update (e.g. for mustChangePassword flag)
-                const updatedUser = { ...user, ...updates };
+                const updatedUser = { ...user, ...updates, timezone: resolvedTimezone };
                 setUser(updatedUser);
                 localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
                 return { success: true };

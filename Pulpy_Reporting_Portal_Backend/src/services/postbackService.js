@@ -671,7 +671,8 @@ export class PostbackService {
           const eventInsert = await insertBehaviorEvent({
             clickUuid: click_id,
             eventName: normalizedEvent,
-            eventId: normalizedEventId,
+            // For payout_event, store only once per click (ignore variable event_id on retries).
+            eventId: normalizedEvent === payoutEvent ? null : normalizedEventId,
             offerId: clickData.offer_id,
             publisherId: clickData.publisher_id,
             tenantId,
@@ -1076,7 +1077,8 @@ export class PostbackService {
         const eventInsert = await insertBehaviorEvent({
           clickUuid: click.click_uuid,
           eventName: normalizedEvent,
-          eventId: normalizedEventId,
+          // For payout_event, store only once per click (ignore variable event_id on retries).
+          eventId: normalizedEvent === payoutEvent ? null : normalizedEventId,
           offerId,
           publisherId,
           tenantId,

@@ -894,7 +894,7 @@ export class TrackingService {
       });
     }
 
-    const eventId = payload.event_id ? String(payload.event_id).trim() : null;
+    const eventIdRaw = payload.event_id ? String(payload.event_id).trim() : null;
     const metadata = parseMetadata(payload.metadata);
     const amountFromPayload = Number(payload.amount);
     const eventAt = new Date();
@@ -971,6 +971,8 @@ export class TrackingService {
     }
     const payoutEvent = normalizeEventName(offer.payout_event || 'purchase') || 'purchase';
     const isPayableEvent = eventName === payoutEvent;
+    // For the payable event, enforce "only once per click" regardless of retries with different event_id values.
+    const eventId = isPayableEvent ? null : eventIdRaw;
     const fallbackOfferAmount = Number(offer.advertiser_amount || 0);
     const eventValue = Number.isFinite(amountFromPayload) && amountFromPayload > 0
       ? amountFromPayload

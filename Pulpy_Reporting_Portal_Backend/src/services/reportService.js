@@ -2,6 +2,22 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 
 export class ReportService {
+  getTodayIstDate() {
+    return new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+  }
+
+  getDateTimeRange(filters = {}) {
+    const todayIST = this.getTodayIstDate();
+    const fromDate = filters.date_from || todayIST;
+    const toDate = filters.date_to || todayIST;
+    return {
+      fromDate,
+      toDate,
+      rangeStart: filters.datetime_from || `${fromDate} 00:00:00`,
+      rangeEnd: filters.datetime_to || `${toDate} 23:59:59`,
+    };
+  }
+
   async getSummary(filters = {}, tenantId = null) {
     // FINANCIAL SEPARATION RULES:
     // 1. Revenue = SUM(amount)  — ALL conversions regardless of status
@@ -23,14 +39,10 @@ export class ReportService {
       }
 
       // Default: today only (IST) — prevents open-ended scan
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-      const fromDate = filters.date_from || todayIST;
-      const toDate = filters.date_to || todayIST;
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
-      clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(utcStart, utcEnd);
-      convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(utcStart, utcEnd);
+      clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(rangeStart, rangeEnd);
+      convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(rangeStart, rangeEnd);
 
       // NOTE: No referrer guard — getSummary counts ALL clicks
 
@@ -143,24 +155,20 @@ export class ReportService {
         const hasComplexFilters = Object.keys(filters).some((k) => !simpleKeys.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
         if (groupBy.length === 1 && groupBy[0] === 'publisher_id' && !hasComplexFilters) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -354,24 +362,20 @@ export class ReportService {
         // Uses paged click aggregation + conversion aggregation for page offer IDs only.
         if (groupBy.length === 1 && groupBy[0] === 'offer_id' && !hasComplexFilters) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -545,24 +549,20 @@ export class ReportService {
           !hasComplexFilters
         ) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -773,7 +773,6 @@ export class ReportService {
         // --- AGGREGATED REPORT MODE ---
         let selects = [];
         let groups = [];
-        let orderBy = [];
 
         groupBy.forEach(dim => {
           if (dimMap[dim]) {
@@ -816,6 +815,11 @@ export class ReportService {
         if (wantsMetric('pending_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'pending\' THEN conv.payout ELSE 0 END), 0) as pending_payout');
         if (wantsMetric('approved_payout')) selects.push('COALESCE(SUM(CASE WHEN conv.status = \'approved\' THEN conv.payout ELSE 0 END), 0) as approved_payout');
 
+        // Per-click time when grouping includes click_uuid (one row per click — not an hour bucket).
+        if (groupBy.includes('click_uuid')) {
+          selects.push('MAX(c.created_at) as click_created_at');
+        }
+
         if (selects.length === 0) {
           selects.push('COUNT(*) as clicks');
         }
@@ -832,6 +836,23 @@ export class ReportService {
 
         if (groups.length > 0) {
           query += ` GROUP BY ${groups.join(', ')}`;
+        }
+
+        // Deterministic order: click-level groups by latest click time; else date/hour buckets.
+        const aggregatedOrderParts = [];
+        if (groupBy.includes('click_uuid')) {
+          aggregatedOrderParts.push('MAX(c.created_at) DESC');
+        }
+        if (groupBy.includes('date')) {
+          aggregatedOrderParts.push('DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) DESC');
+        }
+        if (groupBy.includes('hour')) {
+          aggregatedOrderParts.push('HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) DESC');
+        }
+        if (aggregatedOrderParts.length > 0) {
+          query += ` ORDER BY ${aggregatedOrderParts.join(', ')}`;
+        } else if (groups.length > 0) {
+          query += ' ORDER BY MAX(c.created_at) DESC';
         }
 
         // --- EXPORT LOGIC ---
@@ -983,15 +1004,11 @@ export class ReportService {
     // ✅ Date range — index-safe BETWEEN on raw UTC created_at (no DATE() wrapping)
     // Default is today unless all_dates=true (then no date restriction)
     const allDates = filters.all_dates === true || filters.all_dates === 'true';
-    const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-    const fromDate = filters.date_from || todayIST;
-    const toDate = filters.date_to || todayIST;
+    const { fromDate, toDate, rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
     if (!allDates) {
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcStart, utcEnd);
+      params.push(rangeStart, rangeEnd);
     }
 
     // ✅ HOUR filter — index-safe: compute UTC boundaries in JS, use BETWEEN on raw column
@@ -999,10 +1016,17 @@ export class ReportService {
     // New: c.created_at BETWEEN <utc_hour_start> AND <utc_hour_end>  ← index-safe
     if (!allDates && filters.hour !== undefined && filters.date_from) {
       const h = parseInt(filters.hour, 10);
-      const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcHourStart, utcHourEnd);
+      const explicitHourStart = filters.datetime_from;
+      const explicitHourEnd = filters.datetime_to;
+      if (explicitHourStart && explicitHourEnd) {
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(explicitHourStart, explicitHourEnd);
+      } else {
+        const hourStart = `${fromDate} ${String(h).padStart(2, '0')}:00:00`;
+        const hourEnd = `${fromDate} ${String(h).padStart(2, '0')}:59:59`;
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(hourStart, hourEnd);
+      }
     }
 
     // NOTE: No referrer guard here — reports show ALL clicks, including direct traffic.
@@ -1104,11 +1128,7 @@ export class ReportService {
 
       // ✅ Date range — parameterized BETWEEN on raw UTC created_at (index-safe, no string injection)
       // Default: today only (IST) — prevents open-ended full table scan
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-      const fromDate = filters.date_from || todayIST;
-      const toDate = filters.date_to || todayIST;
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
       // ── 1. Pairs subquery — distinct (publisher, offer) combinations seen in date range ──
       // params: tenantId, utcStart, utcEnd  (×2 for UNION)
@@ -1119,7 +1139,7 @@ export class ReportService {
         SELECT DISTINCT publisher_id, offer_id FROM conversions
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
       `;
-      const pairsParams = [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd];
+      const pairsParams = [tenantId, rangeStart, rangeEnd, tenantId, rangeStart, rangeEnd];
 
       // ── 2. Main query — subqueries use the same parameterized window ──
       const query = `
@@ -1180,8 +1200,8 @@ export class ReportService {
       // Params order: pairs(×6) + click_stats(tenantId, utcStart, utcEnd) + conv_stats(tenantId, utcStart, utcEnd)
       const finalParams = [
         ...pairsParams,
-        tenantId, utcStart, utcEnd,  // click_stats subquery
-        tenantId, utcStart, utcEnd,  // conv_stats subquery
+        tenantId, rangeStart, rangeEnd,  // click_stats subquery
+        tenantId, rangeStart, rangeEnd,  // conv_stats subquery
       ];
 
       const [rows] = await pool.query(query, finalParams);
@@ -1314,15 +1334,20 @@ export class ReportService {
         params.push(tenantId);
       }
 
-      if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at >= ?';
-        params.push(utcStart);
-      }
-      if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at <= ?';
-        params.push(utcEnd);
+      if (filters.datetime_from || filters.datetime_to) {
+        const from = filters.datetime_from || `${filters.date_from || this.getTodayIstDate()} 00:00:00`;
+        const to = filters.datetime_to || `${filters.date_to || this.getTodayIstDate()} 23:59:59`;
+        query += ' AND conv.created_at BETWEEN ? AND ?';
+        params.push(from, to);
+      } else {
+        if (filters.date_from) {
+          query += ' AND conv.created_at >= ?';
+          params.push(`${filters.date_from} 00:00:00`);
+        }
+        if (filters.date_to) {
+          query += ' AND conv.created_at <= ?';
+          params.push(`${filters.date_to} 23:59:59`);
+        }
       }
       if (filters.offer_id) {
         query += ' AND conv.offer_id = ?';

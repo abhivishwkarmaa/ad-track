@@ -738,10 +738,8 @@ class OfferService {
 
       const dateFrom = filters?.date_from || null;
       const dateTo = filters?.date_to || null;
-      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
-      const rangeEndExclusive = dateTo ? toUtcIstEnd(dateTo) : null;
+      const rangeStart = filters?.datetime_from || (dateFrom ? `${dateFrom} 00:00:00` : null);
+      const rangeEndExclusive = filters?.datetime_to || (dateTo ? `${dateTo} 23:59:59` : null);
 
       const buildTimeFilteredWhere = (tableAlias = '') => {
         const prefix = tableAlias ? `${tableAlias}.` : '';
@@ -821,10 +819,10 @@ class OfferService {
       const monthStartDate = new Date(year, month - 1, 1);
       const monthEndDate = new Date(year, month, 0);
       const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const monthStart = toUtcIstStart(toYmd(monthStartDate));
-      const monthEnd = toUtcIstEnd(toYmd(monthEndDate));
-      const dayStart = toUtcIstStart(refDate);
-      const dayEnd = toUtcIstEnd(refDate);
+      const monthStart = `${toYmd(monthStartDate)} 00:00:00`;
+      const monthEnd = `${toYmd(monthEndDate)} 23:59:59`;
+      const dayStart = `${refDate} 00:00:00`;
+      const dayEnd = `${refDate} 23:59:59`;
 
       const usageTenantClause = tenantId ? ' AND tenant_id = ?' : '';
       const usageTenantParams = tenantId ? [tenantId] : [];
@@ -951,10 +949,8 @@ class OfferService {
 
       const dateFrom = filters?.date_from || null;
       const dateTo = filters?.date_to || null;
-      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
-      const rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
+      const rangeStart = filters?.datetime_from || (dateFrom ? `${dateFrom} 00:00:00` : null);
+      const rangeEnd = filters?.datetime_to || (dateTo ? `${dateTo} 23:59:59` : null);
 
       // Assigned publishers for this offer + offer-scoped performance metrics (dashboard-style)
       let query = `SELECT 

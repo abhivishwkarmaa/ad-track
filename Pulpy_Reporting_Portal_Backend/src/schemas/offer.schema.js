@@ -48,6 +48,12 @@ export const offerStatsQuerySchema = {
   properties: {
     date_from: { type: 'string', format: 'date' },
     date_to: { type: 'string', format: 'date' },
+    previous_from: { type: 'string', format: 'date' },
+    previous_to: { type: 'string', format: 'date' },
+    datetime_from: { type: 'string' },
+    datetime_to: { type: 'string' },
+    previous_datetime_from: { type: 'string' },
+    previous_datetime_to: { type: 'string' },
   },
 };
 

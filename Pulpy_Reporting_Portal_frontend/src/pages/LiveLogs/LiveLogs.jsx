@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import { formatDateTimeIST } from '../../utils/dateTime';
+import { getUserTimezone } from '../../utils/userTimezone';
+import { DateTime } from 'luxon';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
 
@@ -23,14 +26,10 @@ const ApproveIcon = () => (
     </svg>
 );
 
-const toYmd = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
+const toYmd = (dt) => dt.toISODate();
 
 const LiveLogs = () => {
+    const { user } = useAuth();
     const navigate = useNavigate();
     const toast = useToast();
     const { refreshKey } = useRefresh();
@@ -48,7 +47,7 @@ const LiveLogs = () => {
     const [selectedPublisher, setSelectedPublisher] = useState('');
 
     // Date Filter
-    const today = toYmd(new Date());
+    const today = toYmd(DateTime.now().setZone(getUserTimezone()).startOf('day'));
     const [dateFrom, setDateFrom] = useState(today);
     const [dateTo, setDateTo] = useState(today);
 
@@ -88,7 +87,7 @@ const LiveLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey]);
+    }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey, user?.timezone]);
 
     useEffect(() => {
         let interval;
@@ -96,7 +95,7 @@ const LiveLogs = () => {
             interval = setInterval(() => fetchLogs(true), 5000);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo]);
+    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, user?.timezone]);
 
     const fetchLogs = async (isBackground = false) => {
         setLoading(true);
