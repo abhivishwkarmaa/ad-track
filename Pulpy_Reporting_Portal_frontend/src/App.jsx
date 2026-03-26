@@ -24,6 +24,7 @@ import DetailedReports from './pages/Reports/DetailedReports';
 import UpdateProfile from './pages/Settings/UpdateProfile';
 import LiveLogs from './pages/LiveLogs/LiveLogs';
 import ImportData from './pages/Import/ImportData';
+import TrackingApis from './pages/TrackingApis/TrackingApis';
 import ManageTenant from './pages/Tenant/ManageTenant';
 import NewTenant from './pages/Tenant/NewTenant';
 import EditTenant from './pages/Tenant/EditTenant';
@@ -147,6 +148,7 @@ function AppRoutes() {
               <Route path="detailed" element={<DetailedReports />} />
             </Route>
             <Route path="live-logs" element={<LiveLogs />} />
+            <Route path="tracking-apis" element={<TrackingApis />} />
             {/* <Route path="import" element={<ImportData />} /> */}
           </Route>
 
