@@ -30,6 +30,7 @@ export class TrackingService {
     // if (isOverloaded()) ... (Redis handles this better, skip for now or keep)
 
     try {
+      const startMs = Date.now();
       // ============================================
       // STEP 1: PARSE — UI se public ids aate hain (offer_id, pub_id)
       // ============================================
@@ -66,6 +67,7 @@ export class TrackingService {
       const userAgent = request.headers['user-agent'] || '';
       const ip = extractIP(request);
       const redirectCacheKey = `redirect:${tenantId}:${ip}:${publicOfferId}:${userAgent.substring(0, 50)}`;
+      const fastRedirectEnabled = String(process.env.TRACKING_FAST_REDIRECT || 'true').toLowerCase() === 'true';
 
       // ============================================
       // 2. STRICT MULTI-TENANT: TENANT RESOLUTION
@@ -86,6 +88,57 @@ export class TrackingService {
           redirect: cachedRedirect,
           clickId: 'duplicate'
         };
+      }
+
+      // ============================================
+      // 2A. FAST REDIRECT (REDIS-ONLY ON CACHE HIT)
+      // ============================================
+      // For ultra-fast redirection, use a global (all-users) route cache that avoids DB resolution.
+      // NOTE: This intentionally skips targeting/capping/DB validations when enabled.
+      if (fastRedirectEnabled) {
+        const routeCacheKey = `route:v1:${tenantId}:${publicOfferId}:${publicPublisherId}`;
+        try {
+          const cachedRouteRaw = await redis.get(routeCacheKey);
+          if (cachedRouteRaw) {
+            const cachedRoute = JSON.parse(cachedRouteRaw);
+            const offerId = Number(cachedRoute.offer_id);
+            const publisherId = Number(cachedRoute.publisher_id);
+            const publisherOfferId = cachedRoute.publisher_offer_id ? Number(cachedRoute.publisher_offer_id) : null;
+            const destinationUrl = String(cachedRoute.destination_url || '');
+
+            if (offerId > 0 && publisherId > 0 && destinationUrl) {
+              const clickUuid = generateClickId(tenantId, offerId, publisherId, 96);
+
+              const redirectUrl = this._buildRedirectUrlFromDestination(destinationUrl, query, clickUuid);
+
+              await this._persistClickToRedisFast({
+                tenantId,
+                offerId,
+                publicOfferId,
+                publisherId,
+                publicPublisherId,
+                publisherOfferId,
+                clickUuid,
+                redirectUrl,
+                redirectCacheKey,
+                request,
+                query,
+              });
+
+              logger.info('[CLICK] fast redirect cache hit', {
+                tenant_id: tenantId,
+                public_offer_id: publicOfferId,
+                public_publisher_id: publicPublisherId,
+                offer_id: offerId,
+                publisher_id: publisherId,
+                ms: Date.now() - startMs
+              });
+              return { redirect: redirectUrl, clickId: clickUuid, processing_mode: 'fast_redirect_cache_hit' };
+            }
+          }
+        } catch (e) {
+          logger.debug('[CLICK] route cache read failed', { error: e.message, tenantId, publicOfferId, publicPublisherId });
+        }
       }
       // ✅ NOTE: Tenant already resolved above
       // Tenant identity MUST come from subdomain (Host header)
@@ -274,6 +327,67 @@ export class TrackingService {
           tenant_id: tenantId
         });
         throw new Error(`Assignment not found for publisher ${publicPublisherId} (internal ${internalPublisherId}) and offer ${publicOfferId} (internal ${offer.id}) in tenant ${tenantId}. Create the assignment on the offer detail page.`);
+      }
+
+      // ============================================
+      // 2B. ROUTE CACHE POPULATE (GLOBAL)
+      // ============================================
+      // Cache the resolved routing context for subsequent Redis-only fast redirects.
+      // Keep TTL short; correctness is restored automatically and can be further improved with explicit invalidation on updates.
+      try {
+        const routeCacheKey = `route:v1:${tenantId}:${publicOfferId}:${publicPublisherId}`;
+        const routeIndexKey = `route:index:v1:${tenantId}:${publicOfferId}`;
+        const destinationUrl = assignment?.destination_url || offer?.offer_url || '';
+        const routePayload = {
+          offer_id: offer?.id || null,
+          publisher_id: publisher?.id || null,
+          publisher_offer_id: assignment?.id || null,
+          destination_url: destinationUrl || '',
+          offer_status: offer?.status || null,
+          fallback_url: offer?.fallback_url || null,
+          updated_at: new Date().toISOString(),
+        };
+        // Store route ctx and index it for explicit invalidation on offer updates.
+        const pipeline = redis.pipeline();
+        pipeline.setex(routeCacheKey, 300, JSON.stringify(routePayload));
+        pipeline.sadd(routeIndexKey, routeCacheKey);
+        pipeline.expire(routeIndexKey, 60 * 60 * 24); // keep index 24h (safe cleanup window)
+        await pipeline.exec();
+      } catch (e) {
+        logger.debug('[CLICK] route cache write failed', { error: e.message, tenantId, publicOfferId, publicPublisherId });
+      }
+
+      // In fast redirect mode, skip slow request-path validations/capping.
+      // Resolve once from DB on miss, enqueue click in Redis, and redirect immediately.
+      if (fastRedirectEnabled) {
+        const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
+        const destinationUrl = assignment?.destination_url || offer?.offer_url || '';
+        const redirectUrl = this._buildRedirectUrlFromDestination(destinationUrl, query, clickUuid);
+
+        await this._persistClickToRedisFast({
+          tenantId,
+          offerId: offer.id,
+          publicOfferId,
+          publisherId: publisher.id,
+          publicPublisherId,
+          publisherOfferId: assignment?.id || null,
+          clickUuid,
+          redirectUrl,
+          redirectCacheKey,
+          request,
+          query,
+        });
+
+        logger.info('[CLICK] fast redirect db-miss path', {
+          tenant_id: tenantId,
+          public_offer_id: publicOfferId,
+          public_publisher_id: publicPublisherId,
+          offer_id: offer.id,
+          publisher_id: publisher.id,
+          ms: Date.now() - startMs
+        });
+
+        return { redirect: redirectUrl, clickId: clickUuid, processing_mode: 'fast_redirect_db_miss' };
       }
 
       // ✅ CRITICAL: HARD VALIDATION - Assignment must belong to resolved tenant
@@ -548,13 +662,7 @@ export class TrackingService {
         )) ? 'true' : 'false'
       };
 
-      // DEBUG: Dump clickData to file to verify content
-      const fsDebug = await import('fs');
-      fsDebug.appendFileSync('debug_click_data.log', JSON.stringify({
-        time: new Date().toISOString(),
-        uuid: clickUuid,
-        clickData: clickData
-      }, null, 2) + '\n---\n');
+      // NOTE: Avoid synchronous file I/O on hot tracking path.
 
       try {
         // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -696,13 +804,7 @@ export class TrackingService {
         throw err;
       }
 
-      // DEBUG LOG TO FILE
-      const fs = await import('fs');
-      fs.appendFileSync('debug_clicks.log', JSON.stringify({
-        time: new Date().toISOString(),
-        uuid: clickUuid,
-        tenant: finalTenantId
-      }, null, 2) + '\n---\n');
+      // NOTE: Avoid synchronous file I/O on hot tracking path.
 
       // ✅ CRITICAL: Log that click was stored in Redis (already logged above, but keeping for compatibility)
 
@@ -732,6 +834,82 @@ export class TrackingService {
       tid: query.tid || null,
       rcid: query.rcid || null
     });
+  }
+
+  _buildRedirectUrlFromDestination(destinationUrl, query, clickUuid) {
+    let url = destinationUrl;
+    url = replaceMacros(url, {
+      click_id: clickUuid,
+      rcid: query.rcid || '',
+      tid: query.tid || '',
+    });
+    return appendClickParams(url, {
+      click_id: clickUuid,
+      tid: query.tid || null,
+      rcid: query.rcid || null,
+    });
+  }
+
+  async _persistClickToRedisFast({
+    tenantId,
+    offerId,
+    publicOfferId,
+    publisherId,
+    publicPublisherId,
+    publisherOfferId,
+    clickUuid,
+    redirectUrl,
+    redirectCacheKey,
+    request,
+    query,
+  }) {
+    const userAgent = request.headers['user-agent'] || '';
+    const ip = extractIP(request);
+    const referrer = request.headers.referer || '';
+    const finalTenantId = tenantId;
+    const redisKey = `click:${finalTenantId}:${offerId}:${publisherId}:${clickUuid}`;
+
+    const clickData = {
+      click_uuid: String(clickUuid),
+      offer_id: String(offerId),
+      public_offer_id: String(publicOfferId),
+      publisher_id: String(publisherId),
+      public_publisher_id: String(publicPublisherId),
+      publisher_offer_id: publisherOfferId ? String(publisherOfferId) : '',
+      tenant_id: String(finalTenantId),
+      ip: ip || '',
+      user_agent: userAgent || '',
+      referrer: referrer || '',
+      country: '',
+      region: '',
+      city: '',
+      location: '',
+      isp: '',
+      domain: '',
+      device_type: '',
+      browser: '',
+      os: '',
+      os_version: '',
+      device_brand: '',
+      device_model: '',
+      tid: query.tid || query.click_id || '',
+      rcid: query.rcid || '',
+      timestamp: new Date().toISOString(),
+      flushed: 'false',
+      force_reject: 'false',
+    };
+
+    const pipeline = redis.pipeline();
+    pipeline.hset(redisKey, clickData);
+    pipeline.expire(redisKey, 3600);
+    pipeline.xadd('stream:clicks', '*',
+      'tenant_id', String(finalTenantId),
+      'offer_id', String(offerId),
+      'publisher_id', String(publisherId),
+      'click_id', String(clickUuid)
+    );
+    pipeline.setex(redirectCacheKey, 5, redirectUrl);
+    await pipeline.exec();
   }
 
   async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {

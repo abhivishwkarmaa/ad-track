@@ -4,6 +4,7 @@ import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js'
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
 import cacheService from './cacheService.js';
+import redis from '../config/redis.js';
 
 const jsonFields = [
   'macros_json',
@@ -21,6 +22,21 @@ const toJsonOrNull = (val) =>
   val === undefined || val === null ? null : JSON.stringify(val);
 
 class OfferService {
+  async _invalidateRouteCacheByPublicOfferId(tenantId, publicOfferId) {
+    if (!tenantId || publicOfferId == null) return;
+    const indexKey = `route:index:v1:${tenantId}:${publicOfferId}`;
+    try {
+      const keys = await redis.smembers(indexKey);
+      if (Array.isArray(keys) && keys.length > 0) {
+        // Delete all cached routes for this offer across publishers.
+        await redis.del(...keys);
+      }
+      await redis.del(indexKey);
+    } catch (e) {
+      // non-fatal
+    }
+  }
+
   /**
    * Check if offer is valid for operations (clicks, conversions, etc.)
    * @param {Object} offer - Offer object from database
@@ -460,6 +476,17 @@ class OfferService {
 
       await cacheService.invalidateOffer(internalId, tenantId);
 
+      // Invalidate fast redirect route cache if URL/routing fields changed.
+      // This ensures updated offer_url reflects immediately on tracking redirects.
+      if (
+        data.offer_url !== undefined ||
+        data.fallback_url !== undefined ||
+        data.status !== undefined ||
+        data.macros_json !== undefined
+      ) {
+        await this._invalidateRouteCacheByPublicOfferId(tenantId, existingOffer.public_offer_id);
+      }
+
       return this.getOfferById(internalId, tenantId);
     } catch (error) {
       logger.error('OfferService.updateOffer error:', error);
@@ -474,6 +501,17 @@ class OfferService {
   async getInternalOfferIdByPublicId(publicOfferId, tenantId) {
     if (publicOfferId == null || !tenantId) return null;
 
+    const cacheKey = `map:offer:${tenantId}:${publicOfferId}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const parsed = parseInt(cached, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+      }
+    } catch (e) {
+      // non-fatal; fall through to DB
+    }
+
     // 1. Try Public ID or Display ID
     const [publicRows] = await pool.query(
       `SELECT id FROM (
@@ -484,14 +522,25 @@ class OfferService {
       [tenantId, publicOfferId, publicOfferId]
     );
 
-    if (publicRows?.[0]?.id) return publicRows[0].id;
+    if (publicRows?.[0]?.id) {
+      try {
+        await redis.setex(cacheKey, 60 * 60 * 12, String(publicRows[0].id));
+      } catch (e) { /* ignore */ }
+      return publicRows[0].id;
+    }
 
     // 2. Fallback to Internal ID
     const [internalRows] = await pool.query(
       'SELECT id FROM offers WHERE tenant_id = ? AND id = ? LIMIT 1',
       [tenantId, publicOfferId]
     );
-    return internalRows?.[0]?.id ?? null;
+    const resolved = internalRows?.[0]?.id ?? null;
+    if (resolved) {
+      try {
+        await redis.setex(cacheKey, 60 * 60 * 12, String(resolved));
+      } catch (e) { /* ignore */ }
+    }
+    return resolved;
     
   }
 

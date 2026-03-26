@@ -8,6 +8,7 @@
  */
 
 import pool from '../db/connection.js';
+import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
 
 class OfferPublicIdService {
@@ -208,19 +209,69 @@ class OfferPublicIdService {
      */
     async getPublisherByPublicId(publicPublisherId, tenantId) {
         try {
+            const cacheKey = `map:publisher:${tenantId}:${publicPublisherId}`;
+            try {
+                const cached = await redis.get(cacheKey);
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed && parsed.id && String(parsed.tenant_id) === String(tenantId)) {
+                        return parsed;
+                    }
+                }
+            } catch (e) {
+                // non-fatal; fall through to DB
+            }
+
             // 1. Try by Public ID first
             const [rows] = await pool.query(
                 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
                 [tenantId, publicPublisherId]
             );
-            if (rows[0]) return rows[0];
+            if (rows[0]) {
+                try {
+                    const payload = {
+                        id: rows[0].id,
+                        public_publisher_id: rows[0].public_publisher_id,
+                        email: rows[0].email,
+                        first_name: rows[0].first_name,
+                        company_name: rows[0].company_name,
+                        country: rows[0].country,
+                        global_postback_url: rows[0].global_postback_url,
+                        status: rows[0].status,
+                        tenant_id: rows[0].tenant_id,
+                        created_at: rows[0].created_at,
+                        updated_at: rows[0].updated_at,
+                    };
+                    await redis.setex(cacheKey, 60 * 60 * 12, JSON.stringify(payload));
+                } catch (e) { /* ignore */ }
+                return rows[0];
+            }
 
             // 2. Fallback to Internal ID lookup (if integer provided)
             const [internalRows] = await pool.query(
                 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
                 [tenantId, publicPublisherId] // Using publicPublisherId as likely internal ID here
             );
-            return internalRows[0] || null;
+            const resolved = internalRows[0] || null;
+            if (resolved?.id) {
+                try {
+                    const payload = {
+                        id: resolved.id,
+                        public_publisher_id: resolved.public_publisher_id,
+                        email: resolved.email,
+                        first_name: resolved.first_name,
+                        company_name: resolved.company_name,
+                        country: resolved.country,
+                        global_postback_url: resolved.global_postback_url,
+                        status: resolved.status,
+                        tenant_id: resolved.tenant_id,
+                        created_at: resolved.created_at,
+                        updated_at: resolved.updated_at,
+                    };
+                    await redis.setex(cacheKey, 60 * 60 * 12, JSON.stringify(payload));
+                } catch (e) { /* ignore */ }
+            }
+            return resolved;
 
         } catch (error) {
             // BACKWARD COMPAT: If column missing (unlikely now), try ID
@@ -229,7 +280,26 @@ class OfferPublicIdService {
                     'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
                     [tenantId, publicPublisherId]
                 );
-                return internalRows[0] || null;
+                const resolved = internalRows[0] || null;
+                if (resolved?.id) {
+                    try {
+                        const payload = {
+                            id: resolved.id,
+                            public_publisher_id: resolved.public_publisher_id,
+                            email: resolved.email,
+                            first_name: resolved.first_name,
+                            company_name: resolved.company_name,
+                            country: resolved.country,
+                            global_postback_url: resolved.global_postback_url,
+                            status: resolved.status,
+                            tenant_id: resolved.tenant_id,
+                            created_at: resolved.created_at,
+                            updated_at: resolved.updated_at,
+                        };
+                        await redis.setex(`map:publisher:${tenantId}:${publicPublisherId}`, 60 * 60 * 12, JSON.stringify(payload));
+                    } catch (e) { /* ignore */ }
+                }
+                return resolved;
             }
             return null;
         }
