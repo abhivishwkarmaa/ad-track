@@ -62,6 +62,31 @@ export class DashboardService {
     return computed;
   }
 
+  getDateTimeRanges(filters = {}) {
+    const dates = this.getDateRanges(filters);
+    return {
+      currentRange: {
+        start: filters.datetime_from || `${dates.currentFrom} 00:00:00`,
+        end: filters.datetime_to || `${dates.currentTo} 23:59:59`,
+      },
+      previousRange: {
+        start: filters.previous_datetime_from || `${dates.previousFrom} 00:00:00`,
+        end: filters.previous_datetime_to || `${dates.previousTo} 23:59:59`,
+      }
+    };
+  }
+
+  resolveDateTimeWindow(filters = {}, fallbackFrom, fallbackTo) {
+    const dateFrom = filters.date_from || fallbackFrom;
+    const dateTo = filters.date_to || fallbackTo || dateFrom;
+    return {
+      dateFrom,
+      dateTo,
+      start: filters.datetime_from || `${dateFrom} 00:00:00`,
+      end: filters.datetime_to || `${dateTo} 23:59:59`,
+    };
+  }
+
   async getDashboardStats(filters = {}, tenantId) {
     // Handle overload: getDashboardStats(tenantId)
     if (typeof filters === 'string' || typeof filters === 'number') {
@@ -72,21 +97,15 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dates = this.getDateRanges(filters);
+      const ranges = this.getDateTimeRanges(filters);
 
       // Get conversions (current and previous)
       // FINANCIAL SEPARATION RULES:
       // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
       // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
       // 3. Profit = Revenue - Payout.
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
-
-      const previousRange = {
-        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const currentRange = ranges.currentRange;
+      const previousRange = ranges.previousRange;
 
       const [conversionsCurrent] = await pool.query(
         `SELECT 
@@ -261,10 +280,10 @@ export class DashboardService {
       const params = [];
 
       if (dateFrom && dateTo) {
-        const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
+        const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
         dateCondition = 'AND conv.created_at BETWEEN ? AND ?';
-        params.push(utcStart, utcEnd);
+        params.push(rangeStart, rangeEnd);
       }
 
       const [rows] = await pool.query(
@@ -328,8 +347,8 @@ export class DashboardService {
 
       logger.info(`[PerformanceChart] Fetching for Tenant: ${tenantId}, Range: ${dateFrom} to ${dateTo}, GroupBy: ${groupBy}`);
 
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
+      const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
 
       // Get clicks by date
       const [clicksRows] = await pool.query(
@@ -342,7 +361,7 @@ export class DashboardService {
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
         `,
-        [utcStart, utcEnd, tenantId]
+        [rangeStart, rangeEnd, tenantId]
       );
 
       // Get conversions by date
@@ -356,7 +375,7 @@ export class DashboardService {
         GROUP BY ${dateGroup}
         ORDER BY date_group ASC
         `,
-        [utcStart, utcEnd, tenantId]
+        [rangeStart, rangeEnd, tenantId]
       );
 
       logger.info(`[PerformanceChart] Found ${clicksRows.length} click rows and ${conversionsRows.length} conversion rows.`);
@@ -384,11 +403,8 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const limit = parseInt(filters.limit || 5);
-      const dateFrom = filters.date_from || this.getDateBoundaries().monthStart;
-      const dateTo = filters.date_to || this.getDateBoundaries().todayStart;
-
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const dateBoundaries = this.getDateBoundaries();
+      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
 
       // Get top affiliates
       const [rows] = await pool.query(
@@ -406,7 +422,7 @@ export class DashboardService {
         ORDER BY conversions DESC
         LIMIT ?
         `,
-        [utcStart, utcEnd, tenantId, limit]
+        [range.start, range.end, tenantId, limit]
       );
 
       // Get total conversions for all affiliates
@@ -416,7 +432,7 @@ export class DashboardService {
         WHERE conv.created_at BETWEEN ? AND ?
           AND conv.tenant_id = ?
         `,
-        [utcStart, utcEnd, tenantId]
+        [range.start, range.end, tenantId]
       );
 
       return {
@@ -483,9 +499,8 @@ export class DashboardService {
       const dateFrom = filters.date_from || dateBoundaries.monthStart;
       const dateTo = filters.date_to || dateBoundaries.todayStart;
       const metric = filters.metric || 'conversions';
-
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
+      const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
 
       // Get country stats from clicks and conversions
       const [rows] = await pool.query(
@@ -506,7 +521,7 @@ export class DashboardService {
         ORDER BY ${metric} DESC
         LIMIT ?
         `,
-        [utcStart, utcEnd, utcStart, utcEnd, tenantId, limit]
+        [rangeStart, rangeEnd, rangeStart, rangeEnd, tenantId, limit]
       );
 
       // Map country codes to names (simplified - should use a proper country lookup)
@@ -541,6 +556,170 @@ export class DashboardService {
     }
   }
 
+  async getTopEvents(filters = {}, tenantId) {
+    if (!tenantId) throw new Error('Tenant ID required');
+    try {
+      const limit = Math.min(parseInt(filters.limit || 10, 10), 20);
+      const hasDateFilter = !!(filters.date_from || filters.date_to);
+
+      const fetchFromDailyAggregates = async (allTime = false) => {
+        const conditions = ['tenant_id = ?', "event_name <> '__all__'"];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            conditions.push('day >= ?');
+            params.push(filters.date_from);
+          }
+          if (filters.date_to) {
+            conditions.push('day <= ?');
+            params.push(filters.date_to);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             event_name,
+             GREATEST(SUM(events), SUM(clicks), SUM(unique_clicks)) AS total_events,
+             GREATEST(SUM(unique_clicks), SUM(clicks)) AS unique_clicks,
+             SUM(payable_events) AS payout_trigger_events,
+             SUM(conversions) AS clicks_with_conversion
+           FROM daily_offer_publisher_stats
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      const fetchFromEventAnalytics = async (allTime = false) => {
+        const conditions = ['tenant_id = ?'];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            conditions.push('event_day >= ?');
+            params.push(filters.date_from);
+          }
+          if (filters.date_to) {
+            conditions.push('event_day <= ?');
+            params.push(filters.date_to);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT click_uuid) AS unique_clicks,
+             SUM(CASE WHEN is_payable_event = 1 THEN 1 ELSE 0 END) AS payout_trigger_events,
+             SUM(CASE WHEN conversion_status IS NOT NULL AND conversion_status <> '' THEN 1 ELSE 0 END) AS clicks_with_conversion
+           FROM event_analytics
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      const fetchFromEventsRaw = async (allTime = false) => {
+        const conditions = ['e.tenant_id = ?'];
+        const params = [tenantId];
+        if (!allTime) {
+          if (filters.date_from) {
+            const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            conditions.push('e.created_at >= ?');
+            params.push(utcStart);
+          }
+          if (filters.date_to) {
+            const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            conditions.push('e.created_at <= ?');
+            params.push(utcEnd);
+          }
+        }
+
+        const [rows] = await pool.query(
+          `SELECT
+             e.event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT e.click_uuid) AS unique_clicks,
+             SUM(
+               CASE
+                 WHEN e.event_name COLLATE utf8mb4_general_ci = COALESCE(o.payout_event, 'purchase') COLLATE utf8mb4_general_ci
+                 THEN 1 ELSE 0
+               END
+             ) AS payout_trigger_events,
+             SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS clicks_with_conversion
+           FROM events e
+           LEFT JOIN offers o ON o.id = e.offer_id AND o.tenant_id = e.tenant_id
+           LEFT JOIN conversions c
+             ON BINARY c.click_uuid = BINARY e.click_uuid
+            AND c.tenant_id = e.tenant_id
+           WHERE ${conditions.join(' AND ')}
+           GROUP BY e.event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...params, limit]
+        );
+        return Array.isArray(rows) ? rows : [];
+      };
+
+      let rows = [];
+      // Fastest path: daily pre-aggregated stats table.
+      try {
+        rows = await fetchFromDailyAggregates(false);
+      } catch (aggErr) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR', 'ER_PARSE_ERROR'].includes(aggErr.code)) {
+          throw aggErr;
+        }
+      }
+      if (rows.length > 0) return rows;
+
+      try {
+        rows = await fetchFromEventAnalytics(false);
+      } catch (analyticsErr) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR', 'ER_PARSE_ERROR'].includes(analyticsErr.code)) {
+          throw analyticsErr;
+        }
+      }
+      if (rows.length > 0) return rows;
+
+      // Fallback to raw events if analytics table isn't populated yet.
+      rows = await fetchFromEventsRaw(false);
+      if (rows.length > 0) return rows;
+
+      // Dashboard UX: if selected range is empty, show recent all-time events.
+      if (hasDateFilter) {
+        try {
+          rows = await fetchFromDailyAggregates(true);
+        } catch (_) {
+          rows = [];
+        }
+        if (rows.length > 0) return rows;
+
+        try {
+          rows = await fetchFromEventAnalytics(true);
+        } catch (_) {
+          rows = [];
+        }
+        if (rows.length > 0) return rows;
+
+        rows = await fetchFromEventsRaw(true);
+        if (rows.length > 0) return rows;
+      }
+
+      return rows;
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE' || error.code === 'ER_BAD_FIELD_ERROR') {
+        return [];
+      }
+      logger.error('DashboardService.getTopEvents error:', error);
+      throw error;
+    }
+  }
+
   /**
    * Get dashboard cards data matching the UI requirements
    * Returns: Total Clicks, Conversions, Total Revenue, Approved Payout
@@ -554,16 +733,7 @@ export class DashboardService {
 
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const dates = this.getDateRanges(filters);
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
-
-      const previousRange = {
-        start: new Date(`${dates.previousFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.previousTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const { currentRange, previousRange } = this.getDateTimeRanges(filters);
 
       const currentAggregatedSql = `
         SELECT
@@ -755,11 +925,7 @@ export class DashboardService {
 
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const dates = this.getDateRanges(filters);
-      const currentRange = {
-        start: new Date(`${dates.currentFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
-        end: new Date(`${dates.currentTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ')
-      };
+      const { currentRange } = this.getDateTimeRanges(filters);
 
       const [clicksResult, conversionsResult] = await Promise.all([
         pool.query(
@@ -880,11 +1046,7 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dateBoundaries = this.getDateBoundaries();
-      const dateFrom = filters.date_from || dateBoundaries.monthStart;
-      const dateTo = filters.date_to || dateBoundaries.todayStart;
-
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
 
       const sortBy = filters.sort_by || 'clicks';
       const orderBy = filters.order_by || 'DESC';
@@ -934,7 +1096,7 @@ export class DashboardService {
         ORDER BY ${finalSortBy} ${finalOrderBy}, clicks DESC, conversions DESC
         LIMIT ? OFFSET ?
         `,
-        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit, offset]
+        [tenantId, range.start, range.end, tenantId, range.start, range.end, tenantId, limit, offset]
       );
 
       const [totalRows] = await pool.query(
@@ -1063,11 +1225,7 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dateBoundaries = this.getDateBoundaries();
-      const dateFrom = filters.date_from || dateBoundaries.monthStart;
-      const dateTo = filters.date_to || dateBoundaries.todayStart;
-
-      const utcStart = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
 
       const sortBy = filters.sort_by || 'conversions';
       const orderBy = filters.order_by || 'DESC';
@@ -1113,7 +1271,7 @@ export class DashboardService {
         ORDER BY ${finalSortBy} ${finalOrderBy}, conversions DESC, clicks DESC
         LIMIT ? OFFSET ?
         `,
-        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit, offset]
+        [tenantId, range.start, range.end, tenantId, range.start, range.end, tenantId, limit, offset]
       );
 
       const [totalRows] = await pool.query(
@@ -1151,8 +1309,12 @@ export class DashboardService {
       const {
         date_from,
         date_to,
+        datetime_from,
+        datetime_to,
         previous_from,
         previous_to,
+        previous_datetime_from,
+        previous_datetime_to,
         limit = 10,
         group_by = 'hour',
         offer_sort_by,
@@ -1161,13 +1323,22 @@ export class DashboardService {
         pub_order_by
       } = filters;
 
-      const summaryPromise = reportService.getSummary({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
+      const summaryPromise = reportService.getSummary({ date_from, date_to, datetime_from, datetime_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
       const summaryPreviousPromise = (previous_from && previous_to)
-        ? reportService.getSummary({ date_from: previous_from, date_to: previous_to }, tenantId).catch(err => { logger.error('Error fetching summary_previous:', err); return null; })
+        ? reportService.getSummary({
+          date_from: previous_from,
+          date_to: previous_to,
+          datetime_from: previous_datetime_from,
+          datetime_to: previous_datetime_to
+        }, tenantId).catch(err => { logger.error('Error fetching summary_previous:', err); return null; })
         : Promise.resolve(null);
 
       const performanceComparisonPromise = (previous_from && previous_to)
-        ? this.getPerformanceComparison({ date_from, date_to, group_by }, { date_from: previous_from, date_to: previous_to, group_by }, tenantId)
+        ? this.getPerformanceComparison(
+          { date_from, date_to, datetime_from, datetime_to, group_by },
+          { date_from: previous_from, date_to: previous_to, datetime_from: previous_datetime_from, datetime_to: previous_datetime_to, group_by },
+          tenantId
+        )
         : Promise.resolve([]);
 
       // Execute only the sub-queries used by the Dashboard UI (no topOffers, topAffiliates)
@@ -1181,13 +1352,13 @@ export class DashboardService {
         offerStatistics,
         performanceComparison
       ] = await Promise.all([
-        this.getDashboardCards({ date_from, date_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
-        this.getPerformanceChart({ date_from, date_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
+        this.getDashboardCards({ date_from, date_to, datetime_from, datetime_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
+        this.getPerformanceChart({ date_from, date_to, datetime_from, datetime_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
         summaryPromise,
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
-        this.getPublisherStatistics({ date_from, date_to, limit, sort_by: pub_sort_by, order_by: pub_order_by }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
-        this.getOfferStatistics({ date_from, date_to, limit, sort_by: offer_sort_by, order_by: offer_order_by }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
+        this.getPublisherStatistics({ date_from, date_to, datetime_from, datetime_to, limit, sort_by: pub_sort_by, order_by: pub_order_by }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
+        this.getOfferStatistics({ date_from, date_to, datetime_from, datetime_to, limit, sort_by: offer_sort_by, order_by: offer_order_by }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
         performanceComparisonPromise
       ]);
 

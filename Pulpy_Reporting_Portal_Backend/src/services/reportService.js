@@ -2,6 +2,22 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 
 export class ReportService {
+  getTodayIstDate() {
+    return new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+  }
+
+  getDateTimeRange(filters = {}) {
+    const todayIST = this.getTodayIstDate();
+    const fromDate = filters.date_from || todayIST;
+    const toDate = filters.date_to || todayIST;
+    return {
+      fromDate,
+      toDate,
+      rangeStart: filters.datetime_from || `${fromDate} 00:00:00`,
+      rangeEnd: filters.datetime_to || `${toDate} 23:59:59`,
+    };
+  }
+
   async getSummary(filters = {}, tenantId = null) {
     // FINANCIAL SEPARATION RULES:
     // 1. Revenue = SUM(amount)  — ALL conversions regardless of status
@@ -23,14 +39,10 @@ export class ReportService {
       }
 
       // Default: today only (IST) — prevents open-ended scan
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-      const fromDate = filters.date_from || todayIST;
-      const toDate = filters.date_to || todayIST;
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
-      clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(utcStart, utcEnd);
-      convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(utcStart, utcEnd);
+      clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(rangeStart, rangeEnd);
+      convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(rangeStart, rangeEnd);
 
       // NOTE: No referrer guard — getSummary counts ALL clicks
 
@@ -143,24 +155,20 @@ export class ReportService {
         const hasComplexFilters = Object.keys(filters).some((k) => !simpleKeys.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
         if (groupBy.length === 1 && groupBy[0] === 'publisher_id' && !hasComplexFilters) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -354,24 +362,20 @@ export class ReportService {
         // Uses paged click aggregation + conversion aggregation for page offer IDs only.
         if (groupBy.length === 1 && groupBy[0] === 'offer_id' && !hasComplexFilters) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -545,24 +549,20 @@ export class ReportService {
           !hasComplexFilters
         ) {
           const allDates = filters.all_dates === true || filters.all_dates === 'true';
-          const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-          const fromDate = filters.date_from || todayIST;
-          const toDate = filters.date_to || todayIST;
-          const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-          const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+          const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
           const clickWhere = [`c.tenant_id = ?`];
           const clickParams = [tenantId];
           if (!allDates) {
             clickWhere.push('c.created_at BETWEEN ? AND ?');
-            clickParams.push(utcStart, utcEnd);
+            clickParams.push(rangeStart, rangeEnd);
           }
 
           const convWhere = [`conv.tenant_id = ?`];
           const convParams = [tenantId];
           if (!allDates) {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
-            convParams.push(utcStart, utcEnd);
+            convParams.push(rangeStart, rangeEnd);
           }
 
           const needsConversionMetrics =
@@ -1004,15 +1004,11 @@ export class ReportService {
     // ✅ Date range — index-safe BETWEEN on raw UTC created_at (no DATE() wrapping)
     // Default is today unless all_dates=true (then no date restriction)
     const allDates = filters.all_dates === true || filters.all_dates === 'true';
-    const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-    const fromDate = filters.date_from || todayIST;
-    const toDate = filters.date_to || todayIST;
+    const { fromDate, toDate, rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
     if (!allDates) {
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcStart, utcEnd);
+      params.push(rangeStart, rangeEnd);
     }
 
     // ✅ HOUR filter — index-safe: compute UTC boundaries in JS, use BETWEEN on raw column
@@ -1020,10 +1016,17 @@ export class ReportService {
     // New: c.created_at BETWEEN <utc_hour_start> AND <utc_hour_end>  ← index-safe
     if (!allDates && filters.hour !== undefined && filters.date_from) {
       const h = parseInt(filters.hour, 10);
-      const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcHourStart, utcHourEnd);
+      const explicitHourStart = filters.datetime_from;
+      const explicitHourEnd = filters.datetime_to;
+      if (explicitHourStart && explicitHourEnd) {
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(explicitHourStart, explicitHourEnd);
+      } else {
+        const hourStart = `${fromDate} ${String(h).padStart(2, '0')}:00:00`;
+        const hourEnd = `${fromDate} ${String(h).padStart(2, '0')}:59:59`;
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(hourStart, hourEnd);
+      }
     }
 
     // NOTE: No referrer guard here — reports show ALL clicks, including direct traffic.
@@ -1125,11 +1128,7 @@ export class ReportService {
 
       // ✅ Date range — parameterized BETWEEN on raw UTC created_at (index-safe, no string injection)
       // Default: today only (IST) — prevents open-ended full table scan
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-      const fromDate = filters.date_from || todayIST;
-      const toDate = filters.date_to || todayIST;
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const { rangeStart, rangeEnd } = this.getDateTimeRange(filters);
 
       // ── 1. Pairs subquery — distinct (publisher, offer) combinations seen in date range ──
       // params: tenantId, utcStart, utcEnd  (×2 for UNION)
@@ -1140,7 +1139,7 @@ export class ReportService {
         SELECT DISTINCT publisher_id, offer_id FROM conversions
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
       `;
-      const pairsParams = [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd];
+      const pairsParams = [tenantId, rangeStart, rangeEnd, tenantId, rangeStart, rangeEnd];
 
       // ── 2. Main query — subqueries use the same parameterized window ──
       const query = `
@@ -1201,8 +1200,8 @@ export class ReportService {
       // Params order: pairs(×6) + click_stats(tenantId, utcStart, utcEnd) + conv_stats(tenantId, utcStart, utcEnd)
       const finalParams = [
         ...pairsParams,
-        tenantId, utcStart, utcEnd,  // click_stats subquery
-        tenantId, utcStart, utcEnd,  // conv_stats subquery
+        tenantId, rangeStart, rangeEnd,  // click_stats subquery
+        tenantId, rangeStart, rangeEnd,  // conv_stats subquery
       ];
 
       const [rows] = await pool.query(query, finalParams);
@@ -1335,15 +1334,20 @@ export class ReportService {
         params.push(tenantId);
       }
 
-      if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at >= ?';
-        params.push(utcStart);
-      }
-      if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        query += ' AND conv.created_at <= ?';
-        params.push(utcEnd);
+      if (filters.datetime_from || filters.datetime_to) {
+        const from = filters.datetime_from || `${filters.date_from || this.getTodayIstDate()} 00:00:00`;
+        const to = filters.datetime_to || `${filters.date_to || this.getTodayIstDate()} 23:59:59`;
+        query += ' AND conv.created_at BETWEEN ? AND ?';
+        params.push(from, to);
+      } else {
+        if (filters.date_from) {
+          query += ' AND conv.created_at >= ?';
+          params.push(`${filters.date_from} 00:00:00`);
+        }
+        if (filters.date_to) {
+          query += ' AND conv.created_at <= ?';
+          params.push(`${filters.date_to} 23:59:59`);
+        }
       }
       if (filters.offer_id) {
         query += ' AND conv.offer_id = ?';
@@ -1386,6 +1390,325 @@ export class ReportService {
 
     } catch (error) {
       logger.error('ReportService.getConversions error:', error);
+      throw error;
+    }
+  }
+
+  async getEventSummary(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) return [];
+      const limit = Math.min(parseInt(filters.limit || 10, 10), 50);
+      // Fast path: use event_analytics table only (no raw joins, no time functions).
+      const fastConditions = ['tenant_id = ?'];
+      const fastParams = [tenantId];
+
+      if (filters.date_from) {
+        fastConditions.push('event_day >= ?');
+        fastParams.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        fastConditions.push('event_day <= ?');
+        fastParams.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        fastConditions.push('offer_id = ?');
+        fastParams.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        fastConditions.push('publisher_id = ?');
+        fastParams.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        fastConditions.push('event_name = ?');
+        fastParams.push(String(filters.event_name).trim().toLowerCase());
+      }
+
+      try {
+        const [fastRows] = await pool.query(
+          `SELECT
+             event_name,
+             COUNT(*) AS total_events,
+             COUNT(DISTINCT click_uuid) AS unique_clicks,
+             SUM(CASE WHEN is_payable_event = 1 THEN 1 ELSE 0 END) AS payout_trigger_events,
+             SUM(
+               CASE
+                 WHEN conversion_status IS NOT NULL AND conversion_status <> '' THEN 1
+                 ELSE 0
+               END
+             ) AS clicks_with_conversion
+           FROM event_analytics
+           WHERE ${fastConditions.join(' AND ')}
+           GROUP BY event_name
+           ORDER BY total_events DESC
+           LIMIT ?`,
+          [...fastParams, limit]
+        );
+        if (Array.isArray(fastRows) && fastRows.length > 0) return fastRows;
+      } catch (fastErr) {
+        // Graceful fallback when table/schema is not yet migrated on this environment.
+        const fallbackEligibleErrors = new Set([
+          'ER_NO_SUCH_TABLE',
+          'ER_BAD_FIELD_ERROR',
+          'ER_PARSE_ERROR',
+          'ER_WRONG_FIELD_WITH_GROUP',
+        ]);
+        if (!fallbackEligibleErrors.has(fastErr.code)) throw fastErr;
+      }
+
+      // Backward-compatible fallback for environments where event_analytics is not present yet.
+      const conditions = ['e.tenant_id = ?'];
+      const params = [tenantId];
+
+      if (filters.date_from) {
+        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        conditions.push('e.created_at >= ?');
+        params.push(utcStart);
+      }
+      if (filters.date_to) {
+        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        conditions.push('e.created_at <= ?');
+        params.push(utcEnd);
+      }
+      if (filters.offer_id) {
+        conditions.push('e.offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('e.publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('e.event_name = ?');
+        params.push(String(filters.event_name).trim().toLowerCase());
+      }
+
+      const [rows] = await pool.query(
+        `SELECT
+           e.event_name,
+           COUNT(*) AS total_events,
+           COUNT(DISTINCT e.click_uuid) AS unique_clicks,
+           SUM(CASE WHEN e.event_name COLLATE utf8mb4_general_ci = COALESCE(o.payout_event, 'purchase') COLLATE utf8mb4_general_ci THEN 1 ELSE 0 END) AS payout_trigger_events,
+           SUM(CASE WHEN c.id IS NOT NULL THEN 1 ELSE 0 END) AS clicks_with_conversion
+         FROM events e
+         LEFT JOIN offers o ON o.id = e.offer_id AND o.tenant_id = e.tenant_id
+         LEFT JOIN conversions c
+           ON BINARY c.click_uuid = BINARY e.click_uuid
+          AND c.tenant_id = e.tenant_id
+         WHERE ${conditions.join(' AND ')}
+         GROUP BY e.event_name
+         ORDER BY total_events DESC
+         LIMIT ?`,
+        [...params, limit]
+      );
+
+      return Array.isArray(rows) ? rows : [];
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return [];
+      }
+      logger.error('ReportService.getEventSummary error:', error);
+      throw error;
+    }
+  }
+
+  async getEventAnalytics(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) return { data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } };
+
+      const page = parseInt(filters.page || 1, 10);
+      const limit = Math.min(parseInt(filters.limit || 50, 10), 500);
+      const offset = (page - 1) * limit;
+
+      const conditions = ['tenant_id = ?'];
+      const params = [tenantId];
+
+      if (filters.date_from) {
+        conditions.push('event_day >= ?');
+        params.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        conditions.push('event_day <= ?');
+        params.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        conditions.push('offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('BINARY LOWER(event_name) = BINARY LOWER(?)');
+        params.push(String(filters.event_name));
+      }
+      if (filters.click_uuid) {
+        conditions.push('click_uuid = ?');
+        params.push(String(filters.click_uuid));
+      }
+      if (filters.is_payable_event !== undefined) {
+        conditions.push('is_payable_event = ?');
+        params.push(String(filters.is_payable_event) === 'true' || String(filters.is_payable_event) === '1' ? 1 : 0);
+      }
+      if (filters.conversion_status) {
+        conditions.push('conversion_status = ?');
+        params.push(String(filters.conversion_status));
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const countQuery = `SELECT COUNT(*) as total FROM event_analytics WHERE ${whereClause}`;
+      const dataQuery = `
+        SELECT
+          id, tenant_id, event_at, event_day, event_hour, click_uuid, offer_id, publisher_id, publisher_offer_id,
+          event_name, event_id, event_value, is_known_event, is_payable_event, payout_event,
+          conversion_status, conversion_amount, conversion_payout, conversion_already_exists,
+          approval_percentage, payout_override, metadata, created_at
+        FROM event_analytics
+        WHERE ${whereClause}
+        ORDER BY event_at DESC, id DESC
+        LIMIT ? OFFSET ?`;
+
+      const [countResult, dataResult] = await Promise.all([
+        pool.query(countQuery, params),
+        pool.query(dataQuery, [...params, limit, offset]),
+      ]);
+      const countRows = countResult[0];
+      const rows = dataResult[0];
+      const total = countRows?.[0]?.total || 0;
+      return {
+        data: Array.isArray(rows) ? rows : [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return {
+          data: [],
+          pagination: {
+            page: parseInt(filters.page || 1, 10),
+            limit: parseInt(filters.limit || 50, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'event_analytics table not available',
+        };
+      }
+      logger.error('ReportService.getEventAnalytics error:', error);
+      throw error;
+    }
+  }
+
+  async getDailyOfferPublisherStats(filters = {}, tenantId = null) {
+    try {
+      if (!tenantId) {
+        return { data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } };
+      }
+
+      const page = parseInt(filters.page || 1, 10);
+      const limit = Math.min(parseInt(filters.limit || 50, 10), 500);
+      const offset = (page - 1) * limit;
+      const groupBy = String(filters.group_by || 'day,offer_id,publisher_id,event_name');
+
+      const conditions = ['tenant_id = ?'];
+      const params = [tenantId];
+      if (filters.date_from) {
+        conditions.push('day >= ?');
+        params.push(filters.date_from);
+      }
+      if (filters.date_to) {
+        conditions.push('day <= ?');
+        params.push(filters.date_to);
+      }
+      if (filters.offer_id) {
+        conditions.push('offer_id = ?');
+        params.push(parseInt(filters.offer_id, 10));
+      }
+      if (filters.publisher_id) {
+        conditions.push('publisher_id = ?');
+        params.push(parseInt(filters.publisher_id, 10));
+      }
+      if (filters.event_name) {
+        conditions.push('BINARY LOWER(event_name) = BINARY LOWER(?)');
+        params.push(String(filters.event_name));
+      }
+
+      const whereClause = conditions.join(' AND ');
+      const allowedGroupByMap = {
+        day: 'day',
+        offer_id: 'offer_id',
+        publisher_id: 'publisher_id',
+        event_name: 'event_name',
+      };
+      const groupCols = groupBy
+        .split(',')
+        .map((g) => g.trim())
+        .filter((g) => allowedGroupByMap[g])
+        .map((g) => allowedGroupByMap[g]);
+      const safeGroupCols = groupCols.length > 0 ? groupCols : ['day', 'offer_id', 'publisher_id', 'event_name'];
+      const groupSql = safeGroupCols.join(', ');
+
+      const countQuery = `
+        SELECT COUNT(*) as total_groups
+        FROM (
+          SELECT ${groupSql}
+          FROM daily_offer_publisher_stats
+          WHERE ${whereClause}
+          GROUP BY ${groupSql}
+        ) grouped`;
+      const dataQuery = `
+        SELECT
+          ${groupSql},
+          SUM(clicks) as clicks,
+          SUM(unique_clicks) as unique_clicks,
+          SUM(conversions) as conversions,
+          SUM(approved_conversions) as approved_conversions,
+          SUM(pending_conversions) as pending_conversions,
+          SUM(rejected_conversions) as rejected_conversions,
+          SUM(revenue) as revenue,
+          SUM(payout) as payout,
+          SUM(profit) as profit,
+          SUM(events) as events,
+          SUM(payable_events) as payable_events,
+          SUM(non_payable_events) as non_payable_events
+        FROM daily_offer_publisher_stats
+        WHERE ${whereClause}
+        GROUP BY ${groupSql}
+        ORDER BY day DESC
+        LIMIT ? OFFSET ?`;
+
+      const [countResult, dataResult] = await Promise.all([
+        pool.query(countQuery, params),
+        pool.query(dataQuery, [...params, limit, offset]),
+      ]);
+
+      const total = countResult?.[0]?.[0]?.total_groups || 0;
+      return {
+        data: dataResult?.[0] || [],
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return {
+          data: [],
+          pagination: {
+            page: parseInt(filters.page || 1, 10),
+            limit: parseInt(filters.limit || 50, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'daily_offer_publisher_stats table not available',
+        };
+      }
+      logger.error('ReportService.getDailyOfferPublisherStats error:', error);
       throw error;
     }
   }

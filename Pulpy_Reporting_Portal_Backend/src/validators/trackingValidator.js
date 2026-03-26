@@ -23,6 +23,17 @@ export const postbackQuerySchema = Joi.object({
   status: Joi.string().valid('approved', 'rejected', 'pending', 'click_expired', 'expired').default('approved'),
 });
 
+export const eventTrackingSchema = Joi.object({
+  click_id: Joi.string().trim().required(),
+  event: Joi.string().trim().min(1).max(100).default('purchase'),
+  event_id: Joi.string().trim().max(255).allow('', null).optional(),
+  amount: Joi.number().min(0).optional(),
+  metadata: Joi.alternatives().try(
+    Joi.object().unknown(true),
+    Joi.string().allow('', null)
+  ).optional()
+});
+
 export const testConversionSchema = Joi.object({
   affiliate_url: Joi.string().required(),
   click_id: Joi.string().allow('', null).optional(),

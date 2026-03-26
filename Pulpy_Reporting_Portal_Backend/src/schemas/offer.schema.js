@@ -48,6 +48,12 @@ export const offerStatsQuerySchema = {
   properties: {
     date_from: { type: 'string', format: 'date' },
     date_to: { type: 'string', format: 'date' },
+    previous_from: { type: 'string', format: 'date' },
+    previous_to: { type: 'string', format: 'date' },
+    datetime_from: { type: 'string' },
+    datetime_to: { type: 'string' },
+    previous_datetime_from: { type: 'string' },
+    previous_datetime_to: { type: 'string' },
   },
 };
 
@@ -80,6 +86,7 @@ export const createOfferSchema = {
     advertiser_amount: { type: 'number' },
     affiliate_model: { type: 'string', maxLength: 50 },
     affiliate_amount: { type: 'number' },
+    payout_event: { type: ['string', 'null'], maxLength: 100 },
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
@@ -158,6 +165,7 @@ export const updateOfferSchema = {
     advertiser_amount: { type: 'number' },
     affiliate_model: { type: 'string', maxLength: 50 },
     affiliate_amount: { type: 'number' },
+    payout_event: { type: ['string', 'null'], maxLength: 100 },
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },

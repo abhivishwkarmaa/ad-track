@@ -1,0 +1,37 @@
+-- Event analytics fact table for fast filtering/reporting without scanning clicks/conversions/events.
+-- Run manually in production.
+
+CREATE TABLE IF NOT EXISTS event_analytics (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  tenant_id INT NOT NULL,
+  event_at DATETIME NOT NULL,
+  event_day DATE NOT NULL,
+  event_hour TINYINT NOT NULL,
+  click_uuid VARCHAR(255) NOT NULL,
+  offer_id INT NOT NULL,
+  publisher_id INT NOT NULL,
+  publisher_offer_id INT NULL,
+  event_name VARCHAR(100) NOT NULL,
+  event_id VARCHAR(255) NULL,
+  event_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  is_known_event TINYINT NOT NULL DEFAULT 1,
+  is_payable_event TINYINT NOT NULL DEFAULT 0,
+  payout_event VARCHAR(100) NOT NULL,
+  conversion_status VARCHAR(32) NULL,
+  conversion_amount DECIMAL(12,2) NULL,
+  conversion_payout DECIMAL(12,2) NULL,
+  conversion_already_exists TINYINT NOT NULL DEFAULT 0,
+  approval_percentage DECIMAL(5,2) NULL,
+  payout_override DECIMAL(12,2) NULL,
+  metadata JSON NULL,
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_event_analytics_tenant_day (tenant_id, event_day),
+  KEY idx_event_analytics_tenant_offer_day (tenant_id, offer_id, event_day),
+  KEY idx_event_analytics_tenant_publisher_day (tenant_id, publisher_id, event_day),
+  KEY idx_event_analytics_tenant_event_day (tenant_id, event_name, event_day),
+  KEY idx_event_analytics_tenant_click (tenant_id, click_uuid),
+  KEY idx_event_analytics_tenant_payable_day (tenant_id, is_payable_event, event_day),
+  KEY idx_event_analytics_tenant_conversion_day (tenant_id, conversion_status, event_day),
+  CONSTRAINT fk_event_analytics_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

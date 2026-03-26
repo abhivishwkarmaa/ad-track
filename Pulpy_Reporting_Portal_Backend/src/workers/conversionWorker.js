@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateClickId } from '../utils/urlGenerator.js';
 import cacheService from '../services/cacheService.js';
+import dailyAggregateService from '../services/dailyAggregateService.js';
 
 const STREAM_KEY = 'stream:conversions';
 const GROUP_NAME = 'conversion_group';
@@ -458,19 +459,21 @@ async function updateDailyStats(items) {
     if (items.length === 0) return;
 
     const today = getIstDateString(); // YYYY-MM-DD in IST
-    const groups = {}; // Key: offer_id:tenant_id
+    const groups = {}; // Key: offer_id:tenant_id:publisher_id
 
     // Aggregate delta for this batch
     for (const item of items) {
         const c = item.data;
         const offerId = c.offer_id;
         const tenantId = c.tenant_id || 0;
-        const key = `${offerId}:${tenantId}`;
+        const publisherId = c.publisher_id;
+        const key = `${offerId}:${tenantId}:${publisherId}`;
 
         if (!groups[key]) {
             groups[key] = {
                 offerId,
                 tenantId,
+                publisherId,
                 conversions: 0,
                 approved: 0,
                 pending: 0,
@@ -526,6 +529,19 @@ async function updateDailyStats(items) {
             g.conversions, g.approved, g.pending, g.rejected,
             g.revenue, g.payout, profit
         ]);
+        await dailyAggregateService.upsertWithRollup({
+            tenantId: g.tenantId,
+            day: today,
+            offerId: g.offerId,
+            publisherId: g.publisherId,
+            eventName: 'conversion',
+            conversions: g.conversions,
+            approvedConversions: g.approved,
+            pendingConversions: g.pending,
+            rejectedConversions: g.rejected,
+            revenue: g.revenue,
+            payout: g.payout,
+        });
     });
 
     await Promise.all(promises);

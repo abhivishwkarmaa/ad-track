@@ -20,6 +20,8 @@ export class DashboardController {
         tenantId,
         dateFrom: request.query.date_from,
         dateTo: request.query.date_to,
+        dateTimeFrom: request.query.datetime_from,
+        dateTimeTo: request.query.datetime_to,
       });
 
       return reply.send({
@@ -52,8 +54,12 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
         previous_from: request.query.previous_from,
         previous_to: request.query.previous_to,
+        previous_datetime_from: request.query.previous_datetime_from,
+        previous_datetime_to: request.query.previous_datetime_to,
         limit: request.query.limit,
         group_by: request.query.group_by,
         metric: request.query.metric,
@@ -87,6 +93,8 @@ export class DashboardController {
         limit: request.query.limit,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
       };
 
       const data = await dashboardService.getTopOffers(filters, tenantId);
@@ -114,6 +122,8 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
         group_by: request.query.group_by,
       };
 
@@ -143,6 +153,8 @@ export class DashboardController {
         limit: request.query.limit,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
       };
 
       const result = await dashboardService.getTopAffiliates(filters, tenantId);
@@ -193,6 +205,8 @@ export class DashboardController {
         limit: request.query.limit,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
         metric: request.query.metric,
       };
 
@@ -221,6 +235,8 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
       };
 
       const data = await dashboardService.getDashboardCards(filters, tenantId);
@@ -230,6 +246,34 @@ export class DashboardController {
       });
     } catch (error) {
       logger.error('DashboardController.getDashboardCards error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getTopEvents(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {
+        date_from: request.query.date_from,
+        date_to: request.query.date_to,
+        limit: request.query.limit,
+      };
+
+      const data = await dashboardService.getTopEvents(filters, tenantId);
+      return reply.send({
+        success: true,
+        data,
+      });
+    } catch (error) {
+      logger.error('DashboardController.getTopEvents error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
@@ -248,6 +292,8 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
       };
 
       const data = await dashboardService.getPerformanceSummary(filters, tenantId);
@@ -323,6 +369,8 @@ export class DashboardController {
         page: request.query.page,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
         sort_by: request.query.sort_by,
         order_by: request.query.order_by,
       };
@@ -354,6 +402,8 @@ export class DashboardController {
         page: request.query.page,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
+        datetime_from: request.query.datetime_from,
+        datetime_to: request.query.datetime_to,
         sort_by: request.query.sort_by,
         order_by: request.query.order_by,
       };
@@ -383,8 +433,12 @@ export class DashboardController {
       const {
         date_from,
         date_to,
+        datetime_from,
+        datetime_to,
         previous_from,
         previous_to,
+        previous_datetime_from,
+        previous_datetime_to,
         group_by = 'day',
       } = request.query;
 
@@ -395,8 +449,14 @@ export class DashboardController {
         });
       }
 
-      const currentFilters = { date_from, date_to, group_by };
-      const previousFilters = { date_from: previous_from, date_to: previous_to, group_by };
+      const currentFilters = { date_from, date_to, datetime_from, datetime_to, group_by };
+      const previousFilters = {
+        date_from: previous_from,
+        date_to: previous_to,
+        datetime_from: previous_datetime_from,
+        datetime_to: previous_datetime_to,
+        group_by
+      };
 
       const data = await dashboardService.getPerformanceComparison(currentFilters, previousFilters, tenantId);
       return reply.send({

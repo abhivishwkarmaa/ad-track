@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { DateTime } from 'luxon';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
+import { useAuth } from '../../context/AuthContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import {
     formatDateIST,
@@ -10,6 +12,7 @@ import {
     formatHourSlotIST,
     formatISTDateTimeNumeric,
 } from '../../utils/dateTime';
+import { getUserTimezone } from '../../utils/userTimezone';
 import './Reports.css';
 
 // Icons
@@ -110,35 +113,28 @@ const DATE_PRESET_OPTIONS = [
     { id: 'custom', label: 'Custom Range' },
 ];
 
-const toYmd = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
+const toYmd = (dt) => dt.toISODate();
 
 const getPresetDateRange = (preset) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const zone = getUserTimezone();
+    const today = DateTime.now().setZone(zone).startOf('day');
 
     if (preset === 'today') return { from: toYmd(today), to: toYmd(today), allDates: false };
     if (preset === 'yesterday') {
-        const y = new Date(today);
-        y.setDate(y.getDate() - 1);
+        const y = today.minus({ days: 1 });
         return { from: toYmd(y), to: toYmd(y), allDates: false };
     }
     if (preset === 'this_week') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
+        const start = today.startOf('week');
         return { from: toYmd(start), to: toYmd(today), allDates: false };
     }
     if (preset === 'this_month') {
-        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        const start = today.startOf('month');
         return { from: toYmd(start), to: toYmd(today), allDates: false };
     }
     if (preset === 'last_month') {
-        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const end = new Date(today.getFullYear(), today.getMonth(), 0);
+        const start = today.minus({ months: 1 }).startOf('month');
+        const end = today.minus({ months: 1 }).endOf('month');
         return { from: toYmd(start), to: toYmd(end), allDates: false };
     }
     if (preset === 'all') return { from: '', to: '', allDates: true };
@@ -147,6 +143,7 @@ const getPresetDateRange = (preset) => {
 };
 
 function DetailedReports() {
+    const { user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const { refreshKey } = useRefresh();
@@ -203,6 +200,8 @@ function DetailedReports() {
     const [showFilters, setShowFilters] = useState(true);
     const [exportMode, setExportMode] = useState('frontend'); // frontend | backend
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [eventSummary, setEventSummary] = useState([]);
+    const [loadingEventSummary, setLoadingEventSummary] = useState(false);
 
     /** Bumps only on Apply so filters refetch without double-invoking fetchReports + useEffect. */
     const [applyFetchKey, setApplyFetchKey] = useState(0);
@@ -232,7 +231,7 @@ function DetailedReports() {
         const range = getPresetDateRange(datePreset);
         setDateFrom(range.from);
         setDateTo(range.to);
-    }, [datePreset]);
+    }, [datePreset, user?.timezone]);
 
     const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics, opts = {}) => {
         try {
@@ -357,7 +356,7 @@ function DetailedReports() {
 
     // Load / pagination / global refresh / Apply — filters refetch via applyFetchKey (not a second fetchReports in handleApply).
     useEffect(() => {
-        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}`;
+        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${user?.timezone || ''}`;
         const now = Date.now();
         if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
             return;
@@ -366,7 +365,40 @@ function DetailedReports() {
         fetchReports();
         // Intentionally only re-fetch when page, limit, global refreshKey, or applyFetchKey changes; dim/metric state is read inside fetchReports.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey]);
+    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey, user?.timezone]);
+
+    useEffect(() => {
+        const fetchEventSummary = async () => {
+            try {
+                setLoadingEventSummary(true);
+                const resolvedRange = datePreset === 'custom'
+                    ? { from: dateFrom, to: dateTo, allDates: false }
+                    : getPresetDateRange(datePreset);
+
+                const params = {};
+                if (!resolvedRange.allDates) {
+                    if (resolvedRange.from) params.date_from = resolvedRange.from;
+                    if (resolvedRange.to) params.date_to = resolvedRange.to;
+                }
+                if (offerFilter !== 'all') params.offer_id = offerFilter;
+                if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
+
+                const response = await dashboardAPI.getEventSummary(params);
+                if (response.success) {
+                    setEventSummary(Array.isArray(response.data) ? response.data : []);
+                } else {
+                    setEventSummary([]);
+                }
+            } catch (eventErr) {
+                console.error('Event summary fetch error:', eventErr);
+                setEventSummary([]);
+            } finally {
+                setLoadingEventSummary(false);
+            }
+        };
+
+        fetchEventSummary();
+    }, [datePreset, dateFrom, dateTo, offerFilter, publisherFilter, refreshKey]);
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
@@ -856,6 +888,40 @@ function DetailedReports() {
                     Updating report data...
                 </div>
             )}
+
+            <div className="reports-table-container" style={{ marginBottom: '16px' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-light)' }}>
+                    <strong>Event Breakdown</strong>
+                </div>
+                {loadingEventSummary ? (
+                    <div style={{ padding: '14px' }}>Loading event summary...</div>
+                ) : eventSummary.length === 0 ? (
+                    <div style={{ padding: '14px' }}>No event data found for selected filters.</div>
+                ) : (
+                    <table className="reports-table">
+                        <thead>
+                            <tr>
+                                <th>Event</th>
+                                <th>Total Events</th>
+                                <th>Unique Clicks</th>
+                                <th>Payout Trigger Events</th>
+                                <th>Clicks With Conversion</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {eventSummary.map((row, idx) => (
+                                <tr key={`${row.event_name}-${idx}`}>
+                                    <td>{row.event_name}</td>
+                                    <td>{row.total_events}</td>
+                                    <td>{row.unique_clicks}</td>
+                                    <td>{row.payout_trigger_events}</td>
+                                    <td>{row.clicks_with_conversion}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
 
             <div className="reports-table-container">
                 <div className={`reports-progress-bar ${loading ? 'active' : ''}`} aria-hidden="true" />

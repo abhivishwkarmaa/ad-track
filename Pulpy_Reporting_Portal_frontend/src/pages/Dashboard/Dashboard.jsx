@@ -5,9 +5,11 @@ import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
 import { formatDateIST } from '../../utils/dateTime';
 import { getTimelineRange } from '../../utils/timelineRange';
+import { getUserTimezone } from '../../utils/userTimezone';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import './Dashboard.css';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { DateTime } from 'luxon';
 
 // --- ICONS ---
 const OfferIcon = () => (
@@ -288,6 +290,9 @@ function DashboardContent() {
     const [loadingOfferStats, setLoadingOfferStats] = useState(true);
     const [performanceComparison, setPerformanceComparison] = useState([]);
     const [loadingComparison, setLoadingComparison] = useState(true);
+    const [eventSummary, setEventSummary] = useState([]);
+    const [loadingEventSummary, setLoadingEventSummary] = useState(true);
+    const EVENT_SUMMARY_TIMEOUT_MS = 3500;
 
     // Sorting state for statistics tables
     const [offerSort, setOfferSort] = useState({ by: 'clicks', order: 'DESC' });
@@ -304,19 +309,19 @@ function DashboardContent() {
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
         const current = getTimelineRange(dateFilter, customRange);
-        const fromDate = current.from ? new Date(current.from) : null;
-        const toDate = current.to ? new Date(current.to) : null;
+        const activeTimezone = getUserTimezone();
+        const fromDate = current.from ? DateTime.fromISO(current.from, { zone: activeTimezone }) : null;
+        const toDate = current.to ? DateTime.fromISO(current.to, { zone: activeTimezone }) : null;
 
         let previous = null;
-        if (fromDate && toDate) {
-            const dayMs = 24 * 60 * 60 * 1000;
-            const days = Math.max(1, Math.floor((toDate - fromDate) / dayMs) + 1);
-            const prevTo = new Date(fromDate);
-            prevTo.setDate(prevTo.getDate() - 1);
-            const prevFrom = new Date(prevTo);
-            prevFrom.setDate(prevFrom.getDate() - (days - 1));
-            const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            previous = { from: toYmd(prevFrom), to: toYmd(prevTo) };
+        if (fromDate?.isValid && toDate?.isValid && toDate >= fromDate) {
+            const days = Math.max(1, Math.floor(toDate.diff(fromDate, 'days').days) + 1);
+            const prevTo = fromDate.minus({ days: 1 });
+            const prevFrom = prevTo.minus({ days: days - 1 });
+            previous = {
+                from: prevFrom.toFormat('yyyy-LL-dd'),
+                to: prevTo.toFormat('yyyy-LL-dd'),
+            };
         }
 
         const labels = {
@@ -336,7 +341,7 @@ function DashboardContent() {
             previousRange: previous,
             periodLabels: labelsForPeriod
         };
-    }, [dateFilter, customRange]);
+    }, [dateFilter, customRange, user?.timezone]);
 
     const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
     const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
@@ -354,6 +359,7 @@ function DashboardContent() {
         setLoadingSummary(true);
         setLoadingLiveOffers(true);
         setLoadingComparison(true);
+        setLoadingEventSummary(true);
 
         // Fetch Cards
         dashboardAPI.getDashboardCards(baseParams)
@@ -392,6 +398,27 @@ function DashboardContent() {
             .catch(err => mountCheck() && console.error('Live offers error:', err))
             .finally(() => mountCheck() && setLoadingLiveOffers(false));
 
+        // Fetch Event Summary (fail-fast UI to avoid long skeleton lock)
+        let eventSummaryResolved = false;
+        const eventSummaryTimeout = setTimeout(() => {
+            if (!eventSummaryResolved && mountCheck()) {
+                setLoadingEventSummary(false);
+            }
+        }, EVENT_SUMMARY_TIMEOUT_MS);
+
+        dashboardAPI.getTopEvents(baseParams)
+            .then(res => {
+                if (mountCheck() && res.success) {
+                    setEventSummary(Array.isArray(res.data) ? res.data.slice(0, 6) : []);
+                }
+            })
+            .catch(err => mountCheck() && console.error('Event summary error:', err))
+            .finally(() => {
+                eventSummaryResolved = true;
+                clearTimeout(eventSummaryTimeout);
+                mountCheck() && setLoadingEventSummary(false);
+            });
+
         // Fetch Comparison
         if (previousRange) {
             const prevParams = { previous_from: previousRange.from, previous_to: previousRange.to };
@@ -404,7 +431,10 @@ function DashboardContent() {
             setLoadingComparison(false);
         }
 
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+            clearTimeout(eventSummaryTimeout);
+        };
     }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
 
     // 2. Offer Statistics - Depends on sorting and page
@@ -422,7 +452,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Offer stats error:', err))
             .finally(() => !cancelled && setLoadingOfferStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey]);
+    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey, user?.timezone]);
 
     // 3. Publisher Statistics - Depends on sorting and page
     useEffect(() => {
@@ -439,7 +469,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Publisher stats error:', err))
             .finally(() => !cancelled && setLoadingPublisherStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey]);
+    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey, user?.timezone]);
 
     const handleOfferSort = (field) => {
         setOfferPage(1); // Reset to page 1 on sort change
@@ -630,6 +660,37 @@ function DashboardContent() {
                             </ResponsiveContainer>
                         )}
                     </div>
+                </div>
+
+                <div className="dashboard-card top-events-card">
+                    <div className="card-header">
+                        <h3>Top Events</h3>
+                        <span className="period-indicator">{periodLabels.current}</span>
+                    </div>
+                    {loadingEventSummary ? (
+                        <SkeletonTable rows={5} cols={5} />
+                    ) : eventSummary.length > 0 ? (
+                        <div className="activity-table top-events-table">
+                            <div className="table-header">
+                                <div>Event</div>
+                                <div className="align-center">Total</div>
+                                <div className="align-center">Unique Clicks</div>
+                                <div className="align-center">Payout Triggers</div>
+                                <div className="align-center">Converted Clicks</div>
+                            </div>
+                            {eventSummary.map((item, index) => (
+                                <div className="table-row" key={`${item.event_name}-${index}`}>
+                                    <div className="offer-name-cell align-left">{item.event_name}</div>
+                                    <div className="align-center">{formatNumber(item.total_events)}</div>
+                                    <div className="align-center">{formatNumber(item.unique_clicks)}</div>
+                                    <div className="align-center">{formatNumber(item.payout_trigger_events)}</div>
+                                    <div className="align-center">{formatNumber(item.clicks_with_conversion)}</div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="no-data">No event data available</div>
+                    )}
                 </div>
 
 

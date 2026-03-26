@@ -17,6 +17,10 @@ async function trackingRoutes(fastify, options) {
   // Impression tracking
   fastify.get('/imp', trackingController.handleImpression);
 
+  // Generic event tracking (supports GET for backward compatibility)
+  fastify.get('/event', { config: { rateLimit: false } }, trackingController.handleEvent);
+  fastify.post('/event', { config: { rateLimit: false } }, trackingController.handleEvent);
+
   // Diagnostic endpoint to check click processing
   fastify.get('/debug/clicks', async (request, reply) => {
     try {

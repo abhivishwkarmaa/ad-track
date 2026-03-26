@@ -1,3 +1,5 @@
+import { getUserTimezone } from './userTimezone';
+
 export const IST_TIMEZONE = 'Asia/Kolkata';
 const IST_OFFSET_MINUTES = 330;
 
@@ -5,7 +7,7 @@ const DEFAULT_LOCALE = 'en-IN';
 
 /**
  * Parse API / DB timestamps reliably.
- * Backend mysql pool uses UTC (+00:00); DATETIME strings like "2026-03-22 14:35:24" are UTC wall time.
+ * DB stores IST wall time; DATETIME strings like "2026-03-22 14:35:24" are interpreted as Asia/Kolkata.
  * Browsers often parse space-separated datetimes incorrectly — normalize to UTC ISO.
  */
 function parseDate(value) {
@@ -15,19 +17,25 @@ function parseDate(value) {
     }
     if (typeof value === 'string') {
         const trimmed = value.trim();
+        // Date-only bucket (YYYY-MM-DD): parse explicitly as UTC to avoid browser-dependent parsing.
+        const ymd = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (ymd) {
+            const d = new Date(`${ymd[1]}-${ymd[2]}-${ymd[3]}T00:00:00Z`);
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
         // MySQL DATETIME as string (space between date and time)
         const mysql = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d{1,3})?$/);
         if (mysql) {
             const frac = mysql[7] || '';
             const d = new Date(
-                `${mysql[1]}-${mysql[2]}-${mysql[3]}T${mysql[4]}:${mysql[5]}:${mysql[6]}${frac}Z`
+                `${mysql[1]}-${mysql[2]}-${mysql[3]}T${mysql[4]}:${mysql[5]}:${mysql[6]}${frac}+05:30`
             );
             return Number.isNaN(d.getTime()) ? null : d;
         }
-        // ISO "2026-03-22T14:35:24" without Z — treat as UTC (matches server JSON from UTC Date)
+        // ISO "2026-03-22T14:35:24" without Z — treat as IST wall time (matches DB storage policy here)
         const isoNoTz = trimmed.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d{1,3})?$/);
         if (isoNoTz && !/[zZ]|[+-]\d{2}:\d{2}$/.test(trimmed)) {
-            const d = new Date(`${isoNoTz[1]}${isoNoTz[2] || ''}Z`);
+            const d = new Date(`${isoNoTz[1]}${isoNoTz[2] || ''}+05:30`);
             return Number.isNaN(d.getTime()) ? null : d;
         }
     }
@@ -38,9 +46,10 @@ function parseDate(value) {
 export function formatDateIST(value, options = {}, locale = DEFAULT_LOCALE) {
     const date = parseDate(value);
     if (!date) return null;
+    const activeTimezone = options.timeZone || getUserTimezone();
 
     return date.toLocaleDateString(locale, {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -51,9 +60,10 @@ export function formatDateIST(value, options = {}, locale = DEFAULT_LOCALE) {
 export function formatDateTimeIST(value, options = {}, locale = DEFAULT_LOCALE) {
     const date = parseDate(value);
     if (!date) return null;
+    const activeTimezone = options.timeZone || getUserTimezone();
 
     return date.toLocaleString(locale, {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -67,9 +77,10 @@ export function formatDateTimeIST(value, options = {}, locale = DEFAULT_LOCALE) 
 export function formatTimeIST(value, options = {}, locale = DEFAULT_LOCALE) {
     const date = parseDate(value);
     if (!date) return null;
+    const activeTimezone = options.timeZone || getUserTimezone();
 
     return date.toLocaleTimeString(locale, {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -81,9 +92,10 @@ export function formatTimeIST(value, options = {}, locale = DEFAULT_LOCALE) {
 export function formatDateTimeInputIST(value) {
     const date = parseDate(value);
     if (!date) return '';
+    const activeTimezone = getUserTimezone();
 
     const formatter = new Intl.DateTimeFormat('en-GB', {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -121,8 +133,9 @@ export function extractYmdFromValue(value) {
     if (value === null || value === undefined || value === '') return null;
     const date = value instanceof Date ? value : parseDate(value);
     if (!date || Number.isNaN(date.getTime())) return null;
+    const activeTimezone = getUserTimezone();
     const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -156,9 +169,10 @@ export function formatDateTimeAtISTDayStart(value) {
 export function formatDateTimeISTWithSeconds(value, options = {}, locale = DEFAULT_LOCALE) {
     const date = parseDate(value);
     if (!date) return null;
+    const activeTimezone = options.timeZone || getUserTimezone();
 
     return date.toLocaleString(locale, {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -176,8 +190,9 @@ export function formatDateTimeISTWithSeconds(value, options = {}, locale = DEFAU
 export function formatISTDateTimeNumeric(value) {
     const date = parseDate(value);
     if (!date) return null;
+    const activeTimezone = getUserTimezone();
     const formatter = new Intl.DateTimeFormat('en-GB', {
-        timeZone: IST_TIMEZONE,
+        timeZone: activeTimezone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -205,7 +220,7 @@ export function formatHourSlotIST(hour) {
         const s = formatISTDateTimeNumeric(dt);
         return s ? s.split(' ')[1] : '';
     };
-    return `${timePart(start)} – ${timePart(end)} IST`;
+    return `${timePart(start)} – ${timePart(end)}`;
 }
 
 /**
@@ -223,5 +238,5 @@ export function formatExactHourBucketIST(dateGroupValue, hour) {
     const a = formatISTDateTimeNumeric(start);
     const b = formatISTDateTimeNumeric(end);
     if (!a || !b) return null;
-    return `${a} → ${b} IST`;
+    return `${a} → ${b}`;
 }

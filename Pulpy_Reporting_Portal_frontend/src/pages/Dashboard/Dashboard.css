@@ -469,12 +469,14 @@
 }
 
 .chart-card { grid-area: chart; }
+.top-events-card { grid-area: events; }
 .recent-offers-card { grid-area: live; }
 .summary-reports-card { grid-area: summary; }
 .offer-stats-card { grid-area: offer; }
 .publisher-stats-card { grid-area: publisher; }
 
 .chart-card,
+.top-events-card,
 .recent-offers-card {
     min-height: 340px;
 }
@@ -1150,6 +1152,52 @@
     --stats-columns: minmax(280px, 2fr) repeat(7, minmax(110px, 1fr));
 }
 
+.top-events-table .table-header,
+.top-events-table .table-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(140px, 1fr));
+    gap: 0;
+    align-items: center;
+    padding: 0 12px;
+    min-width: 760px;
+}
+
+.top-events-table .table-header {
+    background: #f9fafb;
+    border-bottom: 2px solid #f1f5f9;
+    min-height: 46px;
+}
+
+.top-events-table .table-row {
+    min-height: 44px;
+    border-bottom: 1px solid #f8fafc;
+    background: #fff;
+}
+
+.top-events-table .table-row:nth-child(even) {
+    background: #fbfcfe;
+}
+
+.top-events-table .table-header > *,
+.top-events-table .table-row > * {
+    padding: 0 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    font-size: 13px;
+}
+
+.top-events-table .table-header > * {
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
 .table-row-link {
     text-decoration: none;
     color: inherit;
@@ -1670,10 +1718,22 @@
     grid-template-columns: 1fr;
     grid-template-areas:
         "chart"
+        "events"
         "live"
         "summary"
         "publisher"
         "offer";
+}
+
+@media (min-width: 1024px) {
+    .dashboard-content {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas:
+            "chart live"
+            "events summary"
+            "publisher publisher"
+            "offer offer";
+    }
 }
 
 @media (min-width: 1280px) {
@@ -1681,7 +1741,83 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         grid-template-areas:
             "chart live"
-            "summary publisher"
+            "events summary"
+            "publisher publisher"
             "offer offer";
+    }
+}
+
+/* Hard layout overrides for consistent section alignment */
+.dashboard-card {
+    align-self: stretch;
+}
+
+.chart-card {
+    min-height: 360px !important;
+}
+
+.summary-reports-card {
+    min-height: 420px !important;
+}
+
+.top-events-card,
+.recent-offers-card,
+.publisher-stats-card {
+    min-height: 340px !important;
+}
+
+.offer-stats-card {
+    min-height: 460px !important;
+}
+
+.top-events-card .activity-table {
+    max-height: 280px;
+    overflow-x: auto;
+    overflow-y: auto;
+}
+
+.top-events-card {
+    min-height: 260px !important;
+    align-self: start;
+}
+
+.top-events-card .no-data {
+    min-height: 170px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+    .dashboard-content {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-template-areas:
+            "chart live"
+            "events summary"
+            "publisher publisher"
+            "offer offer" !important;
+    }
+}
+
+@media (max-width: 1023px) {
+    .dashboard-content {
+        grid-template-columns: 1fr !important;
+        grid-template-areas:
+            "chart"
+            "events"
+            "live"
+            "summary"
+            "publisher"
+            "offer" !important;
+    }
+
+    .chart-card,
+    .summary-reports-card,
+    .top-events-card,
+    .recent-offers-card,
+    .publisher-stats-card,
+    .offer-stats-card {
+        min-height: auto !important;
     }
 }

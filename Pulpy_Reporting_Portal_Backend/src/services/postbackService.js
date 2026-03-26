@@ -254,6 +254,61 @@ const normalizeConversionStatus = (rawStatus) => {
   return 'approved';
 };
 
+const normalizeEventName = (rawEvent) => {
+  const cleaned = String(rawEvent || 'purchase')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+  return cleaned || 'purchase';
+};
+
+const normalizeOptionalEventId = (value) => {
+  if (value === undefined || value === null) return null;
+  const cleaned = String(value).trim().replace(/^['"]+|['"]+$/g, '');
+  return cleaned || null;
+};
+
+const insertBehaviorEvent = async ({
+  clickUuid,
+  eventName,
+  eventId,
+  offerId,
+  publisherId,
+  tenantId,
+  eventValue,
+  metadata,
+}) => {
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO events (
+         click_uuid, event_name, event_id, offer_id, publisher_id, tenant_id, event_value, metadata, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+       ON DUPLICATE KEY UPDATE id = id`,
+      [
+        clickUuid,
+        eventName,
+        eventId,
+        offerId,
+        publisherId,
+        tenantId,
+        eventValue,
+        metadata ? JSON.stringify(metadata) : null,
+      ]
+    );
+    return {
+      inserted: result.affectedRows === 1,
+      duplicate: result.affectedRows !== 1,
+    };
+  } catch (error) {
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      logger.warn('events table missing - skipping behavioral event storage');
+      return { inserted: false, duplicate: false, skipped: true };
+    }
+    throw error;
+  }
+};
+
 const buildDeterministicApprovalSeed = ({ tenantId, offerId, publisherId, assignmentId, decisionKey }) => {
   const normalizedDecisionKey = String(decisionKey || '').trim();
   if (!normalizedDecisionKey) {
@@ -422,8 +477,10 @@ export class PostbackService {
 
   async processPostback(query, request) {
     try {
-      const { click_id, rcid, amount, status = 'approved' } = query;
+      const { click_id, rcid, amount, status = 'approved', event, event_type, event_id, txid } = query;
       const normalizedIncomingStatus = normalizeConversionStatus(status);
+      const normalizedEvent = normalizeEventName(event || event_type || 'purchase');
+      const normalizedEventId = normalizeOptionalEventId(event_id || txid);
 
       if (!click_id && !rcid) {
         throw new Error('Either click_id or rcid is required');
@@ -604,6 +661,37 @@ export class PostbackService {
           const offerValidation = checkOfferValidity(offer);
           if (!offerValidation.valid) {
             return { success: false, message: offerValidation.message, duplicate: false };
+          }
+
+          const payoutEvent = normalizeEventName(offer.payout_event || 'purchase');
+          const parsedAmount = Number(amount);
+          const eventValue = Number.isFinite(parsedAmount) && parsedAmount > 0
+            ? parsedAmount
+            : Number(offer.advertiser_amount || 0);
+          const eventInsert = await insertBehaviorEvent({
+            clickUuid: click_id,
+            eventName: normalizedEvent,
+            // For payout_event, store only once per click (ignore variable event_id on retries).
+            eventId: normalizedEvent === payoutEvent ? null : normalizedEventId,
+            offerId: clickData.offer_id,
+            publisherId: clickData.publisher_id,
+            tenantId,
+            eventValue,
+            metadata: {
+              source: 'postback',
+              query_event: event || event_type || null,
+              status: normalizedIncomingStatus,
+            },
+          });
+
+          if (normalizedEvent !== payoutEvent) {
+            return {
+              success: true,
+              message: `Event tracked (${normalizedEvent}), conversion skipped (payout_event=${payoutEvent})`,
+              duplicate: eventInsert.duplicate || false,
+              event_name: normalizedEvent,
+              payout_event: payoutEvent,
+            };
           }
 
           // 3. Get Assignment & Payout (in-file lookup by internal id)
@@ -978,6 +1066,40 @@ export class PostbackService {
 
       const publisherId = click ? click.publisher_id : null;
       const publisherOfferId = click ? click.publisher_offer_id : null;
+
+      const payoutEvent = normalizeEventName(offer.payout_event || 'purchase');
+      const parsedAmount = Number(amount);
+      const eventValue = Number.isFinite(parsedAmount) && parsedAmount > 0
+        ? parsedAmount
+        : Number(offer.advertiser_amount || 0);
+
+      if (click) {
+        const eventInsert = await insertBehaviorEvent({
+          clickUuid: click.click_uuid,
+          eventName: normalizedEvent,
+          // For payout_event, store only once per click (ignore variable event_id on retries).
+          eventId: normalizedEvent === payoutEvent ? null : normalizedEventId,
+          offerId,
+          publisherId,
+          tenantId,
+          eventValue,
+          metadata: {
+            source: 'postback',
+            query_event: event || event_type || null,
+            status: normalizedIncomingStatus,
+          },
+        });
+
+        if (normalizedEvent !== payoutEvent) {
+          return {
+            success: true,
+            message: `Event tracked (${normalizedEvent}), conversion skipped (payout_event=${payoutEvent})`,
+            duplicate: eventInsert.duplicate || false,
+            event_name: normalizedEvent,
+            payout_event: payoutEvent,
+          };
+        }
+      }
 
       // Get assignment by internal id (in-file lookup)
       let assignment = null;
@@ -1689,6 +1811,131 @@ export class PostbackService {
           fired_url: finalUrl,
           http_status: 0,
           error: errorMessage
+        });
+      }
+    });
+  }
+
+  async sendPublisherEventPostback(callbackUrl, conversion, click, eventData = {}) {
+    const startTime = Date.now();
+    let finalUrl = callbackUrl;
+    let httpStatus = 0;
+    let responseBody = '';
+    const eventName = String(eventData.event_name || '').trim();
+    const eventId = eventData.event_id ? String(eventData.event_id) : '';
+    const eventValue = Number(eventData.event_value || 0);
+
+    if (!callbackUrl) {
+      return {
+        success: false,
+        executed: false,
+        reason: 'No callback URL configured'
+      };
+    }
+
+    return new Promise((resolve) => {
+      try {
+        const affiliateClickId = click?.tid || '';
+        const url = replaceMacros(callbackUrl, {
+          click_id: affiliateClickId,
+          affiliate_click_id: affiliateClickId,
+          conversion_id: conversion?.conversion_uuid || '',
+          rcid: conversion?.rcid || '',
+          payout: conversion?.payout?.toString() || '0',
+          amount: conversion?.amount?.toString() || '0',
+          status: conversion?.status || 'approved',
+          event: eventName,
+          event_name: eventName,
+          event_id: eventId,
+          event_value: eventValue.toString(),
+        });
+
+        finalUrl = url
+          .replace(/{event}/gi, eventName)
+          .replace(/{EVENT}/gi, eventName)
+          .replace(/{event_name}/gi, eventName)
+          .replace(/{EVENT_NAME}/gi, eventName)
+          .replace(/{event_id}/gi, eventId)
+          .replace(/{EVENT_ID}/gi, eventId)
+          .replace(/{event_value}/gi, eventValue.toString())
+          .replace(/{EVENT_VALUE}/gi, eventValue.toString());
+
+        const urlObj = new URL(finalUrl);
+        const client = urlObj.protocol === 'https:' ? https : http;
+
+        const req = client.get(finalUrl, { timeout: 5000 }, async (res) => {
+          httpStatus = res.statusCode;
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', async () => {
+            responseBody = data.substring(0, 1000);
+            try {
+              await this.logPostbackAttempt({
+                publisher_id: conversion?.publisher_id || click?.publisher_id,
+                conversion_id: conversion?.id || null,
+                affiliate_click_id: affiliateClickId,
+                fired_url: finalUrl,
+                http_status: httpStatus,
+                response_body: responseBody,
+                execution_time_ms: Date.now() - startTime,
+                tenant_id: conversion?.tenant_id || null
+              });
+            } catch (logErr) {
+              logger.warn('sendPublisherEventPostback log failed', { error: logErr.message });
+            }
+
+            resolve({
+              success: httpStatus >= 200 && httpStatus < 300,
+              fired_url: finalUrl,
+              http_status: httpStatus,
+              response_body: responseBody
+            });
+          });
+        });
+
+        req.on('error', async (err) => {
+          try {
+            await this.logPostbackAttempt({
+              publisher_id: conversion?.publisher_id || click?.publisher_id,
+              conversion_id: conversion?.id || null,
+              affiliate_click_id: click?.tid || '',
+              fired_url: finalUrl,
+              http_status: 0,
+              response_body: null,
+              error_message: err.message,
+              execution_time_ms: Date.now() - startTime,
+              tenant_id: conversion?.tenant_id || null
+            });
+          } catch (logErr) {
+            logger.warn('sendPublisherEventPostback error log failed', { error: logErr.message });
+          }
+
+          resolve({
+            success: false,
+            fired_url: finalUrl,
+            http_status: 0,
+            error: err.message
+          });
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({
+            success: false,
+            fired_url: finalUrl,
+            http_status: 0,
+            error: 'Timeout'
+          });
+        });
+
+        req.setTimeout(5000);
+      } catch (error) {
+        logger.error('PostbackService.sendPublisherEventPostback error:', error);
+        resolve({
+          success: false,
+          fired_url: finalUrl,
+          http_status: 0,
+          error: error.message
         });
       }
     });

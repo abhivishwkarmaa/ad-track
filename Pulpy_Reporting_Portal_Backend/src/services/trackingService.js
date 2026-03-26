@@ -17,12 +17,35 @@ import redis from '../config/redis.js';
 
 import cacheService from './cacheService.js';
 import postbackService from './postbackService.js';
+import dailyAggregateService from './dailyAggregateService.js';
 
 const getIstDateString = () => {
   const now = new Date();
   const istTime = new Date(now.getTime() + (330 * 60 * 1000));
   return istTime.toISOString().split('T')[0];
 };
+
+const normalizeEventName = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+
+const parseMetadata = (metadata) => {
+  if (metadata === null || metadata === undefined || metadata === '') return null;
+  if (typeof metadata === 'object') return metadata;
+  if (typeof metadata === 'string') {
+    try {
+      return JSON.parse(metadata);
+    } catch {
+      return { raw: metadata };
+    }
+  }
+  return null;
+};
+let dailyEventStatsColumnsMissingLogged = false;
+let eventAnalyticsTableMissingLogged = false;
 
 export class TrackingService {
   async trackClick(query, request) {
@@ -836,80 +859,653 @@ export class TrackingService {
     });
   }
 
-  _buildRedirectUrlFromDestination(destinationUrl, query, clickUuid) {
-    let url = destinationUrl;
-    url = replaceMacros(url, {
-      click_id: clickUuid,
-      rcid: query.rcid || '',
-      tid: query.tid || '',
-    });
-    return appendClickParams(url, {
-      click_id: clickUuid,
-      tid: query.tid || null,
-      rcid: query.rcid || null,
-    });
+  _getConfiguredAllowedEvents() {
+    const configured = String(process.env.TRACKING_ALLOWED_EVENTS || '')
+      .split(',')
+      .map((item) => normalizeEventName(item))
+      .filter(Boolean);
+
+    if (configured.length > 0) return new Set(configured);
+
+    return new Set([
+      'click',
+      'view',
+      'impression',
+      'landing',
+      'page_view',
+      'session_start',
+      'signup',
+      'login',
+      'lead',
+      'install',
+      'add_to_cart',
+      'initiate_checkout',
+      'add_payment_info',
+      'purchase',
+      'conversion',
+      'subscribe',
+      'trial_start',
+      'kyc_submitted',
+      'kyc_approved',
+      'first_deposit'
+    ]);
   }
 
-  async _persistClickToRedisFast({
-    tenantId,
-    offerId,
-    publicOfferId,
-    publisherId,
-    publicPublisherId,
-    publisherOfferId,
-    clickUuid,
-    redirectUrl,
-    redirectCacheKey,
-    request,
-    query,
-  }) {
-    const userAgent = request.headers['user-agent'] || '';
-    const ip = extractIP(request);
-    const referrer = request.headers.referer || '';
-    const finalTenantId = tenantId;
-    const redisKey = `click:${finalTenantId}:${offerId}:${publisherId}:${clickUuid}`;
+  async _updateDailyEventStats({ offerId, tenantId, isPayable }) {
+    const today = getIstDateString();
+    const payableInc = isPayable ? 1 : 0;
+    const nonPayableInc = isPayable ? 0 : 1;
 
-    const clickData = {
-      click_uuid: String(clickUuid),
-      offer_id: String(offerId),
-      public_offer_id: String(publicOfferId),
-      publisher_id: String(publisherId),
-      public_publisher_id: String(publicPublisherId),
-      publisher_offer_id: publisherOfferId ? String(publisherOfferId) : '',
-      tenant_id: String(finalTenantId),
-      ip: ip || '',
-      user_agent: userAgent || '',
-      referrer: referrer || '',
-      country: '',
-      region: '',
-      city: '',
-      location: '',
-      isp: '',
-      domain: '',
-      device_type: '',
-      browser: '',
-      os: '',
-      os_version: '',
-      device_brand: '',
-      device_model: '',
-      tid: query.tid || query.click_id || '',
-      rcid: query.rcid || '',
+    try {
+      await pool.query(
+        `INSERT INTO daily_offer_stats (
+           offer_id, tenant_id, day, events, payable_events, non_payable_events, created_at, updated_at
+         )
+         VALUES (?, ?, ?, 1, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         ON DUPLICATE KEY UPDATE
+           events = COALESCE(daily_offer_stats.events, 0) + 1,
+           payable_events = COALESCE(daily_offer_stats.payable_events, 0) + VALUES(payable_events),
+           non_payable_events = COALESCE(daily_offer_stats.non_payable_events, 0) + VALUES(non_payable_events),
+           updated_at = UTC_TIMESTAMP()`,
+        [offerId, tenantId, today, payableInc, nonPayableInc]
+      );
+    } catch (statsErr) {
+      if (statsErr.code === 'ER_BAD_FIELD_ERROR') {
+        if (!dailyEventStatsColumnsMissingLogged) {
+          logger.warn('daily_offer_stats event columns missing. Run migration to add events/payable_events/non_payable_events');
+          dailyEventStatsColumnsMissingLogged = true;
+        }
+        return;
+      }
+      throw statsErr;
+    }
+  }
+
+  async _insertEventAnalyticsFact(payload) {
+    try {
+      await pool.query(
+        `INSERT INTO event_analytics (
+           tenant_id, event_at, event_day, event_hour, click_uuid, offer_id, publisher_id, publisher_offer_id,
+           event_name, event_id, event_value, is_known_event, is_payable_event, payout_event,
+           conversion_status, conversion_amount, conversion_payout, conversion_already_exists,
+           approval_percentage, payout_override, metadata, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+        [
+          payload.tenant_id,
+          payload.event_at,
+          payload.event_day,
+          payload.event_hour,
+          payload.click_uuid,
+          payload.offer_id,
+          payload.publisher_id,
+          payload.publisher_offer_id,
+          payload.event_name,
+          payload.event_id || null,
+          payload.event_value,
+          payload.is_known_event ? 1 : 0,
+          payload.is_payable_event ? 1 : 0,
+          payload.payout_event,
+          payload.conversion_status || null,
+          payload.conversion_amount ?? null,
+          payload.conversion_payout ?? null,
+          payload.conversion_already_exists ? 1 : 0,
+          payload.approval_percentage ?? null,
+          payload.payout_override ?? null,
+          payload.metadata ? JSON.stringify(payload.metadata) : null,
+        ]
+      );
+    } catch (statsErr) {
+      if (statsErr.code === 'ER_NO_SUCH_TABLE') {
+        if (!eventAnalyticsTableMissingLogged) {
+          logger.warn('event_analytics table missing. Run migration create_event_analytics.sql');
+          eventAnalyticsTableMissingLogged = true;
+        }
+        return;
+      }
+      throw statsErr;
+    }
+  }
+
+  async trackEvent(payload, request) {
+    const tenantId = getTenantIdFromRequest(request);
+    if (!tenantId) {
+      return { success: false, message: 'Tenant identity required from subdomain' };
+    }
+
+    const clickId = String(payload.click_id || '').trim();
+    if (!clickId) {
+      return { success: false, message: 'click_id is required' };
+    }
+
+    const eventName = normalizeEventName(payload.event || 'purchase');
+    if (!eventName) {
+      return { success: false, message: 'event is required' };
+    }
+
+    const allowedEvents = this._getConfiguredAllowedEvents();
+    const isKnownEvent = allowedEvents.has(eventName);
+    const strictAllowedEvents = String(process.env.TRACKING_STRICT_ALLOWED_EVENTS || 'false').toLowerCase() === 'true';
+    if (strictAllowedEvents && !isKnownEvent) {
+      return { success: false, message: `Unsupported event: ${eventName}` };
+    }
+    if (!isKnownEvent) {
+      logger.warn('TrackingService.trackEvent received non-standard event', {
+        event_name: eventName,
+        tenant_id: tenantId,
+        click_id: clickId,
+      });
+    }
+
+    const eventIdRaw = payload.event_id ? String(payload.event_id).trim() : null;
+    const metadata = parseMetadata(payload.metadata);
+    const amountFromPayload = Number(payload.amount);
+    const eventAt = new Date();
+    const eventDay = getIstDateString();
+    const eventHour = parseInt(new Date(eventAt.getTime() + (330 * 60 * 1000)).toISOString().split('T')[1].slice(0, 2), 10);
+
+    let click = null;
+    const clickCacheKey = `event:clickctx:${tenantId}:${clickId}`;
+    try {
+      const cachedClick = await redis.get(clickCacheKey);
+      if (cachedClick) {
+        click = JSON.parse(cachedClick);
+      }
+    } catch (cacheErr) {
+      logger.debug('trackEvent click cache read failed', { error: cacheErr.message });
+    }
+
+    if (!click) {
+      const [clickRows] = await pool.query(
+        `SELECT click_uuid, offer_id, publisher_id, publisher_offer_id, rcid, tid
+         FROM clicks
+         WHERE click_uuid = ? AND tenant_id = ?
+         LIMIT 1`,
+        [clickId, tenantId]
+      );
+
+      if (!Array.isArray(clickRows) || clickRows.length === 0) {
+        return { success: false, message: 'Invalid click_id' };
+      }
+
+      click = clickRows[0];
+      try {
+        await redis.setex(clickCacheKey, 300, JSON.stringify(click));
+      } catch (cacheErr) {
+        logger.debug('trackEvent click cache write failed', { error: cacheErr.message });
+      }
+    }
+
+    let offer = null;
+    const offerCacheKey = `event:offerctx:${tenantId}:${click.offer_id}`;
+    try {
+      const cachedOffer = await redis.get(offerCacheKey);
+      if (cachedOffer) {
+        offer = JSON.parse(cachedOffer);
+      }
+    } catch (cacheErr) {
+      logger.debug('trackEvent offer cache read failed', { error: cacheErr.message });
+    }
+
+    if (!offer) {
+      const [offerRows] = await pool.query(
+        `SELECT id, payout_event, advertiser_amount, affiliate_amount
+         FROM offers
+         WHERE id = ? AND tenant_id = ?
+         LIMIT 1`,
+        [click.offer_id, tenantId]
+      );
+
+      if (!Array.isArray(offerRows) || offerRows.length === 0) {
+        return {
+          success: true,
+          duplicate_event: false,
+          conversion_created: false,
+          message: 'Event tracked but offer no longer exists'
+        };
+      }
+
+      offer = offerRows[0];
+      try {
+        await redis.setex(offerCacheKey, 300, JSON.stringify(offer));
+      } catch (cacheErr) {
+        logger.debug('trackEvent offer cache write failed', { error: cacheErr.message });
+      }
+    }
+    const payoutEvent = normalizeEventName(offer.payout_event || 'purchase') || 'purchase';
+    const isPayableEvent = eventName === payoutEvent;
+    // For the payable event, enforce "only once per click" regardless of retries with different event_id values.
+    const eventId = isPayableEvent ? null : eventIdRaw;
+    const fallbackOfferAmount = Number(offer.advertiser_amount || 0);
+    const eventValue = Number.isFinite(amountFromPayload) && amountFromPayload > 0
+      ? amountFromPayload
+      : (isPayableEvent && Number.isFinite(fallbackOfferAmount) && fallbackOfferAmount > 0 ? fallbackOfferAmount : 0);
+
+    const asyncEventEnabled = String(process.env.TRACKING_EVENT_ASYNC || 'true').toLowerCase() !== 'false';
+    if (asyncEventEnabled) {
+      try {
+        const requestIp = extractIP(request);
+        await redis.xadd(
+          'stream:events',
+          '*',
+          'tenant_id',
+          String(tenantId),
+          'click_uuid',
+          click.click_uuid,
+          'offer_id',
+          String(click.offer_id),
+          'publisher_id',
+          String(click.publisher_id),
+          'publisher_offer_id',
+          click.publisher_offer_id ? String(click.publisher_offer_id) : '',
+          'event_name',
+          eventName,
+          'event_id',
+          eventId || '',
+          'event_value',
+          String(eventValue),
+          'metadata',
+          metadata ? JSON.stringify(metadata) : '',
+          'payout_event',
+          payoutEvent,
+          'is_payable',
+          isPayableEvent ? '1' : '0',
+          'is_known_event',
+          isKnownEvent ? '1' : '0',
+          'advertiser_amount',
+          String(Number(offer.advertiser_amount || 0)),
+          'affiliate_amount',
+          String(Number(offer.affiliate_amount || 0)),
+          'rcid',
+          click.rcid || '',
+          'tid',
+          click.tid || '',
+          'request_ip',
+          requestIp || '',
+          'timestamp',
+          new Date().toISOString()
+        );
+
+        return {
+          success: true,
+          duplicate_event: false,
+          conversion_created: false,
+          conversion_already_exists: false,
+          conversion_queued: !!isPayableEvent,
+          non_standard_event: !isKnownEvent,
+          event_name: eventName,
+          payout_event: payoutEvent,
+          event_value: eventValue,
+          click_id: click.click_uuid,
+          processing_mode: 'async'
+        };
+      } catch (queueErr) {
+        logger.error('TrackingService.trackEvent async queue failed, falling back to sync', {
+          error: queueErr.message,
+          click_id: click.click_uuid,
+          tenant_id: tenantId
+        });
+      }
+    }
+
+    const [eventInsert] = await pool.query(
+      `INSERT INTO events (
+         click_uuid, event_name, event_id, offer_id, publisher_id, tenant_id, event_value, metadata, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+       ON DUPLICATE KEY UPDATE id = id`,
+      [
+        click.click_uuid,
+        eventName,
+        eventId || null,
+        click.offer_id,
+        click.publisher_id,
+        tenantId,
+        eventValue,
+        metadata ? JSON.stringify(metadata) : null
+      ]
+    );
+
+    const duplicateEvent = eventInsert.affectedRows !== 1;
+    if (!duplicateEvent) {
+      await this._updateDailyEventStats({
+        offerId: click.offer_id,
+        tenantId,
+        isPayable: isPayableEvent
+      });
+    }
+    let assignment = null;
+    let callbackUrl = null;
+    let approvalPercentage = null;
+
+    if (click.publisher_offer_id) {
+      const [assignmentRows] = await pool.query(
+        `SELECT po.id as assignment_id, po.payout_override, po.conversion_approval_percentage, po.callback_url, p.global_postback_url
+         FROM publisher_offers po
+         LEFT JOIN publishers p ON p.id = po.publisher_id
+         WHERE po.id = ? AND po.tenant_id = ?
+         LIMIT 1`,
+        [click.publisher_offer_id, tenantId]
+      );
+      assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : null;
+      callbackUrl = assignment?.callback_url || assignment?.global_postback_url || null;
+      approvalPercentage = assignment?.conversion_approval_percentage;
+    } else {
+      const [publisherRows] = await pool.query(
+        `SELECT global_postback_url
+         FROM publishers
+         WHERE id = ? AND tenant_id = ?
+         LIMIT 1`,
+        [click.publisher_id, tenantId]
+      );
+      const publisher = Array.isArray(publisherRows) ? publisherRows[0] : null;
+      callbackUrl = publisher?.global_postback_url || null;
+    }
+
+    if (!duplicateEvent && callbackUrl) {
+      await postbackService.sendPublisherEventPostback(
+        callbackUrl,
+        {
+          tenant_id: tenantId,
+          publisher_id: click.publisher_id,
+          rcid: click.rcid || null,
+          status: 'approved',
+          amount: Number(eventValue || 0),
+          payout: 0,
+        },
+        {
+          tid: click.tid || '',
+          publisher_id: click.publisher_id,
+        },
+        {
+          event_name: eventName,
+          event_id: eventId || null,
+          event_value: Number(eventValue || 0),
+        }
+      );
+    }
+
+    if (!isPayableEvent) {
+      await this._insertEventAnalyticsFact({
+        tenant_id: tenantId,
+        event_at: eventAt.toISOString().slice(0, 19).replace('T', ' '),
+        event_day: eventDay,
+        event_hour: Number.isFinite(eventHour) ? eventHour : 0,
+        click_uuid: click.click_uuid,
+        offer_id: click.offer_id,
+        publisher_id: click.publisher_id,
+        publisher_offer_id: click.publisher_offer_id || null,
+        event_name: eventName,
+        event_id: eventId || null,
+        event_value: Number(eventValue || 0),
+        is_known_event: isKnownEvent,
+        is_payable_event: false,
+        payout_event: payoutEvent,
+        conversion_status: null,
+        conversion_amount: null,
+        conversion_payout: null,
+        conversion_already_exists: false,
+        approval_percentage: approvalPercentage != null ? Number(approvalPercentage) : null,
+        payout_override: assignment?.payout_override != null ? Number(assignment.payout_override) : null,
+        metadata,
+      });
+      await dailyAggregateService.upsertWithRollup({
+        tenantId,
+        day: eventDay,
+        offerId: click.offer_id,
+        publisherId: click.publisher_id,
+        eventName,
+        events: duplicateEvent ? 0 : 1,
+        payableEvents: 0,
+        nonPayableEvents: duplicateEvent ? 0 : 1,
+      });
+      return {
+        success: true,
+        duplicate_event: duplicateEvent,
+        conversion_created: false,
+        non_standard_event: !isKnownEvent,
+        event_name: eventName,
+        payout_event: payoutEvent
+      };
+    }
+
+    const conversionAmount = eventValue > 0 ? eventValue : Number(offer.advertiser_amount || 0);
+    const conversionPayout = Number(assignment?.payout_override || offer.affiliate_amount || 0);
+    const conversionRcid = click.rcid || uuidv4();
+    let finalStatus = 'approved';
+    if (
+      assignment?.assignment_id &&
+      approvalPercentage !== null &&
+      approvalPercentage !== undefined
+    ) {
+      finalStatus = await postbackService.determineDeterministicApprovalStatus({
+        tenantId,
+        offerId: click.offer_id,
+        publisherId: click.publisher_id,
+        assignmentId: assignment.assignment_id,
+        decisionKey: conversionRcid || click.click_uuid || click.tid,
+        approvalPercentage: Number(approvalPercentage),
+        fallbackStatus: 'approved',
+      });
+    }
+
+    const [existingConversionRows] = await pool.query(
+      `SELECT id
+       FROM conversions
+       WHERE click_uuid = ? AND tenant_id = ?
+       LIMIT 1`,
+      [click.click_uuid, tenantId]
+    );
+    const hasExistingConversion = Array.isArray(existingConversionRows) && existingConversionRows.length > 0;
+    if (hasExistingConversion) {
+      await this._insertEventAnalyticsFact({
+        tenant_id: tenantId,
+        event_at: eventAt.toISOString().slice(0, 19).replace('T', ' '),
+        event_day: eventDay,
+        event_hour: Number.isFinite(eventHour) ? eventHour : 0,
+        click_uuid: click.click_uuid,
+        offer_id: click.offer_id,
+        publisher_id: click.publisher_id,
+        publisher_offer_id: click.publisher_offer_id || null,
+        event_name: eventName,
+        event_id: eventId || null,
+        event_value: Number(eventValue || 0),
+        is_known_event: isKnownEvent,
+        is_payable_event: true,
+        payout_event: payoutEvent,
+        conversion_status: 'already_exists',
+        conversion_amount: conversionAmount,
+        conversion_payout: finalStatus === 'approved' ? conversionPayout : 0,
+        conversion_already_exists: true,
+        approval_percentage: approvalPercentage != null ? Number(approvalPercentage) : null,
+        payout_override: assignment?.payout_override != null ? Number(assignment.payout_override) : null,
+        metadata,
+      });
+      await dailyAggregateService.upsertWithRollup({
+        tenantId,
+        day: eventDay,
+        offerId: click.offer_id,
+        publisherId: click.publisher_id,
+        eventName,
+        events: duplicateEvent ? 0 : 1,
+        payableEvents: duplicateEvent ? 0 : 1,
+        nonPayableEvents: 0,
+      });
+      return {
+        success: true,
+        duplicate_event: duplicateEvent,
+        conversion_created: false,
+        conversion_already_exists: true,
+        conversion_queued: false,
+        non_standard_event: !isKnownEvent,
+        event_name: eventName,
+        payout_event: payoutEvent,
+        event_value: eventValue,
+        click_id: click.click_uuid
+      };
+    }
+
+    const conversionData = {
+      click_uuid: click.click_uuid,
+      offer_id: click.offer_id,
+      publisher_id: click.publisher_id,
+      publisher_offer_id: click.publisher_offer_id || null,
+      tenant_id: tenantId,
+      rcid: conversionRcid,
+      status: finalStatus,
+      amount: conversionAmount,
+      payout: finalStatus === 'approved' ? conversionPayout : 0,
+      ip: extractIP(request),
       timestamp: new Date().toISOString(),
-      flushed: 'false',
-      force_reject: 'false',
+      postback_payload: JSON.stringify({
+        source: 'event_api',
+        event_name: eventName,
+        event_id: eventId || null,
+        metadata
+      }),
+      callback_url: callbackUrl,
+      tid: click.tid || '',
+      force_reject: false
     };
 
-    const pipeline = redis.pipeline();
-    pipeline.hset(redisKey, clickData);
-    pipeline.expire(redisKey, 3600);
-    pipeline.xadd('stream:clicks', '*',
-      'tenant_id', String(finalTenantId),
-      'offer_id', String(offerId),
-      'publisher_id', String(publisherId),
-      'click_id', String(clickUuid)
-    );
-    pipeline.setex(redirectCacheKey, 5, redirectUrl);
-    await pipeline.exec();
+    try {
+      await redis.setex(`conversion:${click.click_uuid}`, 900, JSON.stringify(conversionData));
+      await redis.xadd(
+        'stream:conversions',
+        '*',
+        'click_uuid',
+        click.click_uuid,
+        'timestamp',
+        new Date().toISOString()
+      );
+    } catch (queueErr) {
+      logger.error('TrackingService.trackEvent queueing failed, using DB fallback', {
+        error: queueErr.message,
+        click_id: click.click_uuid,
+        tenant_id: tenantId
+      });
+
+      const fallbackConversionUuid = generateClickId(tenantId || 0, click.offer_id || 0, click.publisher_id || 0, 96);
+      const [conversionInsert] = await pool.query(
+        `INSERT INTO conversions (
+           conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+           rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         ON DUPLICATE KEY UPDATE id = id`,
+        [
+          fallbackConversionUuid,
+          click.click_uuid,
+          click.offer_id,
+          click.publisher_id,
+          click.publisher_offer_id || null,
+          tenantId,
+          conversionRcid,
+          finalStatus,
+          conversionAmount,
+          finalStatus === 'approved' ? conversionPayout : 0,
+          extractIP(request),
+          conversionData.postback_payload
+        ]
+      );
+
+      const conversionCreated = conversionInsert.affectedRows === 1;
+      await this._insertEventAnalyticsFact({
+        tenant_id: tenantId,
+        event_at: eventAt.toISOString().slice(0, 19).replace('T', ' '),
+        event_day: eventDay,
+        event_hour: Number.isFinite(eventHour) ? eventHour : 0,
+        click_uuid: click.click_uuid,
+        offer_id: click.offer_id,
+        publisher_id: click.publisher_id,
+        publisher_offer_id: click.publisher_offer_id || null,
+        event_name: eventName,
+        event_id: eventId || null,
+        event_value: Number(eventValue || 0),
+        is_known_event: isKnownEvent,
+        is_payable_event: true,
+        payout_event: payoutEvent,
+        conversion_status: conversionCreated ? finalStatus : 'already_exists',
+        conversion_amount: conversionAmount,
+        conversion_payout: finalStatus === 'approved' ? conversionPayout : 0,
+        conversion_already_exists: !conversionCreated,
+        approval_percentage: approvalPercentage != null ? Number(approvalPercentage) : null,
+        payout_override: assignment?.payout_override != null ? Number(assignment.payout_override) : null,
+        metadata,
+      });
+      await dailyAggregateService.upsertWithRollup({
+        tenantId,
+        day: eventDay,
+        offerId: click.offer_id,
+        publisherId: click.publisher_id,
+        eventName,
+        events: duplicateEvent ? 0 : 1,
+        payableEvents: duplicateEvent ? 0 : 1,
+        nonPayableEvents: 0,
+        conversions: conversionCreated ? 1 : 0,
+        approvedConversions: conversionCreated && finalStatus === 'approved' ? 1 : 0,
+        pendingConversions: conversionCreated && finalStatus === 'pending' ? 1 : 0,
+        rejectedConversions: conversionCreated && finalStatus !== 'approved' && finalStatus !== 'pending' ? 1 : 0,
+        revenue: conversionCreated ? conversionAmount : 0,
+        payout: conversionCreated && finalStatus === 'approved' ? conversionPayout : 0,
+      });
+      return {
+        success: true,
+        duplicate_event: duplicateEvent,
+        conversion_created: conversionCreated,
+        conversion_already_exists: !conversionCreated,
+        conversion_queued: false,
+        non_standard_event: !isKnownEvent,
+        event_name: eventName,
+        payout_event: payoutEvent,
+        event_value: eventValue,
+        click_id: click.click_uuid
+      };
+    }
+
+    await this._insertEventAnalyticsFact({
+      tenant_id: tenantId,
+      event_at: eventAt.toISOString().slice(0, 19).replace('T', ' '),
+      event_day: eventDay,
+      event_hour: Number.isFinite(eventHour) ? eventHour : 0,
+      click_uuid: click.click_uuid,
+      offer_id: click.offer_id,
+      publisher_id: click.publisher_id,
+      publisher_offer_id: click.publisher_offer_id || null,
+      event_name: eventName,
+      event_id: eventId || null,
+      event_value: Number(eventValue || 0),
+      is_known_event: isKnownEvent,
+      is_payable_event: true,
+      payout_event: payoutEvent,
+      conversion_status: 'queued',
+      conversion_amount: conversionAmount,
+      conversion_payout: finalStatus === 'approved' ? conversionPayout : 0,
+      conversion_already_exists: false,
+      approval_percentage: approvalPercentage != null ? Number(approvalPercentage) : null,
+      payout_override: assignment?.payout_override != null ? Number(assignment.payout_override) : null,
+      metadata,
+    });
+    await dailyAggregateService.upsertWithRollup({
+      tenantId,
+      day: eventDay,
+      offerId: click.offer_id,
+      publisherId: click.publisher_id,
+      eventName,
+      events: duplicateEvent ? 0 : 1,
+      payableEvents: duplicateEvent ? 0 : 1,
+      nonPayableEvents: 0,
+    });
+
+    return {
+      success: true,
+      duplicate_event: duplicateEvent,
+      conversion_created: false,
+      conversion_already_exists: false,
+      conversion_queued: true,
+      non_standard_event: !isKnownEvent,
+      event_name: eventName,
+      payout_event: payoutEvent,
+      event_value: eventValue,
+      click_id: click.click_uuid
+    };
   }
 
   async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {
@@ -1165,8 +1761,8 @@ export class TrackingService {
 
   async trackImpression(query, request) {
     try {
-      const offerId = parseInt(query.offer_id);
-      const publisherId = parseInt(query.pub_id);
+      const publicOfferId = parseInt(query.offer_id);
+      const publicPublisherId = parseInt(query.pub_id);
 
       // ============================================
       // 🔒 STRICT MULTI-TENANT: TENANT RESOLUTION
@@ -1183,8 +1779,8 @@ export class TrackingService {
         logger.error('❌ CRITICAL: No tenant resolved from subdomain for impression - REJECTED', {
           host: request.headers.host,
           url: request.url,
-          offer_id: offerId,
-          pub_id: publisherId
+          offer_id: publicOfferId,
+          pub_id: publicPublisherId
         });
         return {
           success: false,
@@ -1195,46 +1791,49 @@ export class TrackingService {
       logger.info('[IMP] Tenant resolved from subdomain', {
         host: request.headers.host,
         tenant_id: tenantId,
-        offer_id: offerId,
-        pub_id: publisherId
+        public_offer_id: publicOfferId,
+        public_publisher_id: publicPublisherId
       });
 
-      // ✅ STEP 2: Fetch offer and publisher WITH tenant filtering
-      // Business data is validated AFTER tenant resolution
-      const [offer, publisher] = await Promise.all([
-        offerService.getOfferById(offerId, tenantId), // ✅ Filter by resolved tenant_id
-        publisherService.findById(publisherId, tenantId) // ✅ Filter by resolved tenant_id
-      ]);
+      // ✅ STEP 2: Resolve Public IDs to Internal IDs (consistency with trackClick)
+      const internalOfferId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
+      const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
+      const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+      const internalPublisherId = publisher ? publisher.id : null;
+
+      const offer = internalOfferId
+        ? await offerService.getOfferById(internalOfferId, tenantId, true)
+        : null;
 
       // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
       if (!offer) {
         logger.error('❌ Offer not found or does not belong to tenant', {
-          offer_id: offerId,
+          public_offer_id: publicOfferId,
           tenant_id: tenantId
         });
-        return { success: false, error: `Offer ${offerId} not found or does not belong to tenant ${tenantId}` };
+        return { success: false, error: `Offer ${publicOfferId} not found or does not belong to tenant ${tenantId}` };
       }
 
       if (!publisher) {
         logger.error('❌ Publisher not found or does not belong to tenant', {
-          publisher_id: publisherId,
+          public_publisher_id: publicPublisherId,
           tenant_id: tenantId
         });
-        return { success: false, error: `Publisher ${publisherId} not found or does not belong to tenant ${tenantId}` };
+        return { success: false, error: `Publisher ${publicPublisherId} not found or does not belong to tenant ${tenantId}` };
       }
 
       // ✅ STEP 4: Verify ownership (defense in depth)
-      if (offer.tenant_id && offer.tenant_id !== tenantId) {
+      if (offer.tenant_id && parseInt(offer.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ Tenant mismatch: Offer does not belong to tenant', {
-          offer_id: offerId,
+          offer_id: offer.id,
           offer_tenant_id: offer.tenant_id,
           resolved_tenant_id: tenantId
         });
         return { success: false, error: 'Offer does not belong to this tenant' };
       }
-      if (publisher.tenant_id && publisher.tenant_id !== tenantId) {
+      if (publisher.tenant_id && parseInt(publisher.tenant_id) !== parseInt(tenantId)) {
         logger.error('❌ Tenant mismatch: Publisher does not belong to tenant', {
-          publisher_id: publisherId,
+          publisher_id: publisher.id,
           publisher_tenant_id: publisher.tenant_id,
           resolved_tenant_id: tenantId
         });
@@ -1247,7 +1846,7 @@ export class TrackingService {
 
       // ✅ CRITICAL: Check assignment exists (with tenant_id if available)
       let assignmentQuery = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
-      const assignmentParams = [publisherId, offerId, 'active'];
+      const assignmentParams = [internalPublisherId, internalOfferId, 'active'];
 
       if (tenantId) {
         assignmentQuery += ' AND tenant_id = ?';
@@ -1262,7 +1861,7 @@ export class TrackingService {
       }
 
       // ✅ Verify assignment belongs to tenant if tenant_id is set
-      if (tenantId && assignment.tenant_id && assignment.tenant_id !== tenantId) {
+      if (tenantId && assignment.tenant_id && parseInt(assignment.tenant_id) !== parseInt(tenantId)) {
         return { success: false, error: 'Assignment does not belong to this tenant' };
       }
 
@@ -1280,7 +1879,7 @@ export class TrackingService {
         return { success: false, error: 'Tenant identity required from subdomain. Cannot track impression without tenant context.' };
       }
 
-      // ✅ Validate offer belongs to resolved tenant
+      // ✅ Validate offer belongs to resolved tenant (redundant but safe)
       if (offer && offer.tenant_id && parseInt(offer.tenant_id) !== parseInt(finalTenantId)) {
         logger.error('❌ HARD FAILURE: Offer tenant mismatch for impression', {
           offer_id: offer.id,
@@ -1290,25 +1889,17 @@ export class TrackingService {
         return { success: false, error: `Security violation: Offer ${offer.id} belongs to tenant ${offer.tenant_id}, but request is for tenant ${finalTenantId}. Access denied.` };
       }
 
-      // ✅ Verify ownership if tenant_id is set on offer/publisher
-      if (offer.tenant_id && offer.tenant_id !== finalTenantId) {
-        return { success: false, error: 'Offer does not belong to this tenant' };
-      }
-      if (publisher.tenant_id && publisher.tenant_id !== finalTenantId) {
-        return { success: false, error: 'Publisher does not belong to this tenant' };
-      }
-
       // ✅ CRITICAL: Insert impression with resolved tenant_id
       const impUuid = uuidv4();
       await pool.query(
         `INSERT INTO impressions (
           imp_uuid, offer_id, publisher_id, tenant_id, ip, user_agent, referrer, timestamp, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [impUuid, offerId, publisherId, finalTenantId, ip, userAgent, referrer]
+        [impUuid, internalOfferId, internalPublisherId, finalTenantId, ip, userAgent, referrer]
       );
 
       // Update daily stats
-      await this.updateDailyStats(offerId, publisherId, 'impression', finalTenantId);
+      await this.updateDailyStats(internalOfferId, internalPublisherId, 'impression', finalTenantId);
 
       return { success: true, impUuid };
     } catch (error) {

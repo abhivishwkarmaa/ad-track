@@ -10,7 +10,7 @@ export class TenantMetricsService {
   /**
    * Get comprehensive metrics for a tenant
    */
-  async getTenantMetrics(tenantId, dateFrom = null, dateTo = null) {
+  async getTenantMetrics(tenantId, dateFrom = null, dateTo = null, dateTimeFrom = null, dateTimeTo = null) {
     try {
       const metrics = {
         tenant_id: tenantId,
@@ -36,12 +36,12 @@ export class TenantMetricsService {
       }
 
       // IST Day boundaries for "Today"
-      const todayStartUTC = new Date(`${dateTo}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const todayEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const todayStartUTC = `${dateTo} 00:00:00`;
+      const todayEndUTC = `${dateTo} 23:59:59`;
 
       // Period boundaries
-      const periodStartUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const periodStartUTC = dateTimeFrom || `${dateFrom} 00:00:00`;
+      const periodEndUTC = dateTimeTo || `${dateTo} 23:59:59`;
 
       // Clicks metrics
       const [clicksToday] = await pool.query(
@@ -208,8 +208,8 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
-      const startUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const endUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const startUTC = `${dateFrom} 00:00:00`;
+      const endUTC = `${dateTo} 23:59:59`;
 
       const [rows] = await pool.query(
         `SELECT 

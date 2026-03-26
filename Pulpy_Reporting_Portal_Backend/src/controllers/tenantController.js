@@ -533,7 +533,7 @@ export class TenantController {
   async getTenantMetrics(request, reply) {
     try {
       const { id } = request.params;
-      const { date_from, date_to } = request.query;
+      const { date_from, date_to, datetime_from, datetime_to } = request.query;
 
       // Verify tenant exists
       const [tenantRows] = await pool.query(
@@ -550,7 +550,7 @@ export class TenantController {
       }
 
       const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
-      const metrics = await tenantMetricsService.getTenantMetrics(id, date_from, date_to);
+      const metrics = await tenantMetricsService.getTenantMetrics(id, date_from, date_to, datetime_from, datetime_to);
 
       return reply.send({
         success: true,

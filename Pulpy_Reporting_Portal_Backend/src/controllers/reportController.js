@@ -1,5 +1,7 @@
 import reportService from '../services/reportService.js';
 import postbackService from '../services/postbackService.js';
+import offerService from '../services/offer.service.js';
+import offerPublicIdService from '../services/offerPublicIdService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
@@ -20,8 +22,35 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
-      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
+      if (request.query.publisher_id) {
+        const requestedPublisherId = request.query.publisher_id;
+        let resolvedPublisherId = null;
+
+        try {
+          const publisher = await offerPublicIdService.getPublisherByPublicId(
+            Number(requestedPublisherId),
+            tenantId
+          );
+          resolvedPublisherId = publisher?.id || null;
+        } catch (_) {
+          resolvedPublisherId = null;
+        }
+
+        // Backward compatibility: allow internal publisher id if public lookup fails.
+        if (!resolvedPublisherId) {
+          const numericPublisherId = parseInt(requestedPublisherId, 10);
+          if (!Number.isNaN(numericPublisherId) && numericPublisherId > 0) {
+            resolvedPublisherId = numericPublisherId;
+          }
+        }
+
+        if (resolvedPublisherId) {
+          filters.publisher_id = resolvedPublisherId;
+        }
+      }
       if (request.query.country) filters.country = request.query.country;
       if (request.query.ip) filters.ip = request.query.ip;
       if (request.query.tid) filters.tid = request.query.tid;
@@ -69,6 +98,8 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.country) filters.country = request.query.country;
@@ -170,6 +201,8 @@ export class ReportController {
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
 
       const result = await reportService.getPublisherConversionStats(filters, tenantId);
 
@@ -199,6 +232,8 @@ export class ReportController {
       if (request.query.limit) filters.limit = request.query.limit;
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.datetime_from) filters.datetime_from = request.query.datetime_from;
+      if (request.query.datetime_to) filters.datetime_to = request.query.datetime_to;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.status) filters.status = request.query.status;
@@ -213,6 +248,164 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getConversions error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getEventSummary(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {};
+      if (request.query.date_from) filters.date_from = request.query.date_from;
+      if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.offer_id) {
+        const requestedOfferId = request.query.offer_id;
+        let resolvedOfferId = await offerService.getInternalOfferIdByPublicId(
+          Number(requestedOfferId),
+          tenantId
+        );
+
+        // Backward compatibility: allow internal offer id if public lookup fails.
+        if (!resolvedOfferId) {
+          const numericOfferId = parseInt(requestedOfferId, 10);
+          if (!Number.isNaN(numericOfferId) && numericOfferId > 0) {
+            resolvedOfferId = numericOfferId;
+          }
+        }
+
+        if (resolvedOfferId) {
+          filters.offer_id = resolvedOfferId;
+        }
+      }
+      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
+      if (request.query.event_name) filters.event_name = request.query.event_name;
+
+      const data = await reportService.getEventSummary(filters, tenantId);
+      return reply.send({ success: true, data });
+    } catch (error) {
+      logger.error('ReportController.getEventSummary error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getEventAnalytics(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {};
+      if (request.query.page) filters.page = parseInt(request.query.page, 10);
+      if (request.query.limit) filters.limit = parseInt(request.query.limit, 10);
+      if (request.query.date_from) filters.date_from = request.query.date_from;
+      if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.click_uuid) filters.click_uuid = request.query.click_uuid;
+      if (request.query.event_name) filters.event_name = request.query.event_name;
+      if (request.query.conversion_status) filters.conversion_status = request.query.conversion_status;
+      if (request.query.is_payable_event !== undefined) filters.is_payable_event = request.query.is_payable_event;
+
+      if (request.query.offer_id) {
+        const requestedOfferId = request.query.offer_id;
+        let resolvedOfferId = await offerService.getInternalOfferIdByPublicId(Number(requestedOfferId), tenantId);
+        if (!resolvedOfferId) {
+          const numericOfferId = parseInt(requestedOfferId, 10);
+          if (!Number.isNaN(numericOfferId) && numericOfferId > 0) resolvedOfferId = numericOfferId;
+        }
+        if (resolvedOfferId) filters.offer_id = resolvedOfferId;
+      }
+
+      if (request.query.publisher_id) {
+        const requestedPublisherId = request.query.publisher_id;
+        let resolvedPublisherId = null;
+        try {
+          const publisher = await offerPublicIdService.getPublisherByPublicId(Number(requestedPublisherId), tenantId);
+          resolvedPublisherId = publisher?.id || null;
+        } catch (_) {
+          resolvedPublisherId = null;
+        }
+        if (!resolvedPublisherId) {
+          const numericPublisherId = parseInt(requestedPublisherId, 10);
+          if (!Number.isNaN(numericPublisherId) && numericPublisherId > 0) resolvedPublisherId = numericPublisherId;
+        }
+        if (resolvedPublisherId) filters.publisher_id = resolvedPublisherId;
+      }
+
+      const result = await reportService.getEventAnalytics(filters, tenantId);
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      logger.error('ReportController.getEventAnalytics error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  async getDailyOfferPublisherStats(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {};
+      if (request.query.page) filters.page = parseInt(request.query.page, 10);
+      if (request.query.limit) filters.limit = parseInt(request.query.limit, 10);
+      if (request.query.date_from) filters.date_from = request.query.date_from;
+      if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.event_name) filters.event_name = request.query.event_name;
+      if (request.query.group_by) filters.group_by = request.query.group_by;
+
+      if (request.query.offer_id) {
+        const requestedOfferId = request.query.offer_id;
+        let resolvedOfferId = await offerService.getInternalOfferIdByPublicId(Number(requestedOfferId), tenantId);
+        if (!resolvedOfferId) {
+          const numericOfferId = parseInt(requestedOfferId, 10);
+          if (!Number.isNaN(numericOfferId) && numericOfferId > 0) resolvedOfferId = numericOfferId;
+        }
+        if (resolvedOfferId) filters.offer_id = resolvedOfferId;
+      }
+
+      if (request.query.publisher_id) {
+        const requestedPublisherId = request.query.publisher_id;
+        let resolvedPublisherId = null;
+        try {
+          const publisher = await offerPublicIdService.getPublisherByPublicId(Number(requestedPublisherId), tenantId);
+          resolvedPublisherId = publisher?.id || null;
+        } catch (_) {
+          resolvedPublisherId = null;
+        }
+        if (!resolvedPublisherId) {
+          const numericPublisherId = parseInt(requestedPublisherId, 10);
+          if (!Number.isNaN(numericPublisherId) && numericPublisherId > 0) resolvedPublisherId = numericPublisherId;
+        }
+        if (resolvedPublisherId) filters.publisher_id = resolvedPublisherId;
+      }
+
+      const result = await reportService.getDailyOfferPublisherStats(filters, tenantId);
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      logger.error('ReportController.getDailyOfferPublisherStats error:', error);
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }

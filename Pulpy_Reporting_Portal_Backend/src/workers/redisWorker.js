@@ -3,6 +3,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import trackingService from '../services/trackingService.js';
 import postbackService from '../services/postbackService.js';
+import dailyAggregateService from '../services/dailyAggregateService.js';
 
 const BATCH_SIZE = 100; // Batch Insert Size
 const BATCH_TIMEOUT = 1000; // Wait max 1s to fill batch
@@ -266,31 +267,24 @@ async function processBatch(buffer) {
             // Aggregate by offer+tenant for a single upsert per group to avoid double-counting.
             try {
                 const today = getIstDateString();
-                const groups = {}; // key -> { offerId, tenantId, clicks: n }
+                const groups = {}; // key -> { offerId, tenantId, publisherId, clicks: n, uniqueClicks: n }
 
                 for (const c of clicks) {
                     const offerId = parseInt(c.offer_id, 10);
+                    const publisherId = parseInt(c.publisher_id, 10);
                     const tenantId = (c.tenant_id && c.tenant_id !== '0') ? parseInt(c.tenant_id, 10) : null;
-                    const key = `${offerId}:${tenantId ?? 'null'}`;
-                    if (!groups[key]) groups[key] = { offerId, tenantId, clicks: 0 };
+                    const key = `${offerId}:${tenantId ?? 'null'}:${publisherId}`;
+                    if (!groups[key]) groups[key] = { offerId, tenantId, publisherId, clicks: 0, uniqueClicks: 0 };
                     groups[key].clicks += 1;
+                    groups[key].uniqueClicks += 1;
                 }
 
-                // For each group, compute today's actual distinct IPs and upsert:
-                // - clicks: increment by delta (existing behavior)
-                // - unique_clicks: set to actual distinct count (strictly unique only)
+                // For each group, upsert click deltas.
                 await Promise.all(Object.values(groups).map(async (g) => {
                     const offerId = g.offerId;
                     const tenantId = g.tenantId;
                     const deltaClicks = g.clicks;
-
-                    // Count distinct IPs for this offer+tenant for today
-                    const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-                    const ipParams = tenantId ? [offerId, tenantId, today] : [offerId, today];
-                    const [ipRows] = await pool.query(ipCountQuery, ipParams);
-                    const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
+                    const uniqueClicks = g.uniqueClicks;
 
                     // Upsert with calculated deltas
                     await pool.query(
@@ -298,10 +292,19 @@ async function processBatch(buffer) {
                          VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
                          ON DUPLICATE KEY UPDATE
                            clicks = daily_offer_stats.clicks + VALUES(clicks),
-                           unique_clicks = VALUES(unique_clicks),
+                           unique_clicks = daily_offer_stats.unique_clicks + VALUES(unique_clicks),
                            updated_at = UTC_TIMESTAMP()`,
-                        [offerId, tenantId, today, deltaClicks, uniqToday]
+                        [offerId, tenantId, today, deltaClicks, uniqueClicks]
                     );
+                    await dailyAggregateService.upsertWithRollup({
+                        tenantId,
+                        day: today,
+                        offerId,
+                        publisherId: g.publisherId,
+                        eventName: 'click',
+                        clicks: deltaClicks,
+                        uniqueClicks,
+                    });
                 }));
             } catch (statsErr) {
                 logger.error('❌ Failed to update daily_offer_stats after inserting clicks:', statsErr);

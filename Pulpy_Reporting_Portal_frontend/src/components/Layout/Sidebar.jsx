@@ -111,6 +111,15 @@ const PostbackIcon = () => (
     </svg>
 );
 
+const TrackingApisIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 6h16" />
+        <path d="M4 12h10" />
+        <path d="M4 18h16" />
+        <path d="M18 9l3 3-3 3" />
+    </svg>
+);
+
 function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
     const { user, logout } = useAuth();
     const location = useLocation();
@@ -173,6 +182,12 @@ function Sidebar({ collapsed, mobileOpen, onCloseMobile }) {
                 path: '/affiliate/postback-test',
                 icon: <PostbackIcon />,
                 text: 'Test Postback'
+            },
+            {
+                type: 'link',
+                path: '/tracking-apis',
+                icon: <TrackingApisIcon />,
+                text: 'Tracking APIs'
             },
             {
                 type: 'link',
