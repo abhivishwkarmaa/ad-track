@@ -385,6 +385,12 @@ export class TrackingService {
       if (fastRedirectEnabled) {
         const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
         const destinationUrl = assignment?.destination_url || offer?.offer_url || '';
+
+        logger.info('[DEBUG] Checking if _persistClickToRedisFast exists', {
+          exists: typeof this._persistClickToRedisFast,
+          allMethods: Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+        });
+
         const redirectUrl = this._buildRedirectUrlFromDestination(destinationUrl, query, clickUuid);
 
         await this._persistClickToRedisFast({
@@ -609,18 +615,6 @@ export class TrackingService {
 
       // (clickUuid generated above for cap support)
 
-      // Parse params
-      const referrer = request.headers.referer || '';
-      const domain = extractDomain(referrer);
-
-      // Geo & ISP Lookup (already performed country lookup earlier)
-
-      // Async ISP lookup (with timeout protection)
-      let isp = null;
-      try {
-        isp = await getISP(ip);
-      } catch (e) { /* ignore */ }
-
       // redirectUrl is already set above based on cap checks
 
       // ✅ CRITICAL: Use resolved tenant_id (from subdomain) - NO FALLBACKS
@@ -628,208 +622,26 @@ export class TrackingService {
       // Business identifiers (offer_id, pub_id) are NEVER used for tenant resolution
       const finalTenantId = tenantId;
 
-      if (!finalTenantId) {
-        logger.error('❌ CRITICAL: No tenant_id available - this should never happen after validation');
-        throw new Error('Tenant identity required. This error indicates a system failure.');
-      }
+      // ✅ 5. PERSIST CLICK
+      // ============================================
 
-      // ✅ CRITICAL: Log final tenant_id for debugging
-      logger.info('[CLICK] Final tenant_id', {
-        click_uuid: clickUuid,
-        offer_id: offer.id,
-        public_offer_id: publicOfferId,
-        tenant_id: finalTenantId,
-        from_request: !!tenantId,
-        from_offer: !!offer.tenant_id,
-        from_publisher: !!publisher.tenant_id
-      });
-
-      // Persist to Redis (include tenant_id for database insertion later)
-      // ✅ CRITICAL: Store all values as strings (Redis hash values are strings)
-      // ✅ CRITICAL: Add flushed flag to track if click has been inserted into DB
-      // 🔥 NEW: Store public_offer_id for tracking URL stability
-      const clickData = {
-        click_uuid: clickUuid,
-        offer_id: String(offer.id),
-        public_offer_id: String(publicOfferId),
-        publisher_id: String(publisher.id), // 🔥 Use Internal ID
-        public_publisher_id: String(publicPublisherId), // 🔥 Store Public ID (from URL) for reference
-        publisher_offer_id: assignment.id ? String(assignment.id) : '',
-        tenant_id: finalTenantId ? String(finalTenantId) : '', // ✅ CRITICAL: Store as string (should never be empty in strict multi-tenant)
-        ip: ip || '',
-        user_agent: userAgent || '',
-        referrer: referrer || '',
-        country: country_final || '',
-        region: location.region || '',
-        city: location.city || '',
-        location: JSON.stringify({
-          city: location.city,
-          region: location.region,
-          country: country_final
-        }) || '', // Store as JSON string
-        isp: isp || '',
-        domain: domain || '',
-        device_type: deviceInfo.deviceType || '',
-        browser: deviceInfo.browser || '',
-        os: deviceInfo.os || '',
-        os_version: deviceInfo.osVersion || '', // Corrected to snake_case for DB consistency
-        device_brand: deviceInfo.deviceBrand || '',
-        device_model: deviceInfo.deviceModel || '',
-        tid: query.tid || query.click_id || '', // Affiliate ID
-        rcid: query.rcid || '',
-        timestamp: new Date().toISOString(), // UTC ENFORCEMENT: Store UTC timestamp only
-        flushed: 'false', // ✅ CRITICAL: Track if click has been inserted into DB
-        force_reject: (isCapErr === false && (
+      await this._persistClickToRedisFast({
+        tenantId: finalTenantId,
+        offerId: offer.id,
+        publicOfferId,
+        publisherId: publisher.id,
+        publicPublisherId,
+        publisherOfferId: assignment.id,
+        clickUuid,
+        redirectUrl,
+        redirectCacheKey,
+        request,
+        query,
+        forceReject: (isCapErr === false && (
           (offerCapStatus.isHit && offer.capping_action === 'reject') ||
           (pubCapStatus.isHit && assignment.capping_action === 'reject')
         )) ? 'true' : 'false'
-      };
-
-      // NOTE: Avoid synchronous file I/O on hot tracking path.
-
-      try {
-        // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
-        // This ensures clicks from different publishers on same offer are isolated
-        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for Redis key
-        const redisKey = `click:${finalTenantId}:${offer.id}:${publisher.id}:${clickUuid}`;
-
-        // ✅ CRITICAL: Log click received
-        logger.info('[CLICK] Click received', {
-          tenant_id: finalTenantId,
-          offer_id: offer.id,
-          public_offer_id: publicOfferId,
-          publisher_id: publisher.id,
-          public_publisher_id: publicPublisherId,
-          click_id: clickUuid,
-          redis_key: redisKey
-        });
-
-        // ✅ CRITICAL: Write click data ONLY ONCE to Redis HASH
-        // Use pipeline for atomicity - ensure hash is written before stream entry
-        const pipeline = redis.pipeline();
-        pipeline.hset(redisKey, clickData);
-        pipeline.expire(redisKey, 3600); // 1 hours TTL
-
-        // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
-        const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
-        if (!tenantIdStr) {
-          logger.error('❌ CRITICAL: Attempting to add click to stream without tenant_id!', {
-            click_uuid: clickUuid,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-          throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
-        }
-
-        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for stream
-        pipeline.xadd('stream:clicks', '*',
-          'tenant_id', tenantIdStr,
-          'offer_id', String(offer.id),
-          'publisher_id', String(publisher.id),
-          'click_id', clickUuid
-        );
-
-        // ✅ OPTIONAL: Cache redirect URL for quick lookup (performance optimization, not blocking)
-        // This cache does NOT affect click counting or DB insertion
-        pipeline.setex(redirectCacheKey, 5, redirectUrl);
-
-        const results = await pipeline.exec();
-
-        // ✅ CRITICAL: Verify hash write succeeded (MANDATORY)
-        // Stream write failure is NON-FATAL - click is still in Redis hash and can be backfilled
-        let hashWriteSuccess = false;
-        let streamWriteSuccess = false;
-        let hashWriteError = null;
-        let streamWriteError = null;
-
-        for (let i = 0; i < results.length; i++) {
-          const [err, result] = results[i];
-          if (err) {
-            const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
-            logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
-
-            if (i === 0) {
-              // Hash write failure is FATAL - click data is lost
-              hashWriteError = err;
-              throw new Error(`Redis hash write failed: ${err.message}`);
-            } else if (i === 2) {
-              // Stream write failure is NON-FATAL - click is still in Redis hash
-              streamWriteError = err;
-              logger.warn(`⚠️ Redis stream enqueue failed - click stored in Redis hash, will be backfilled:`, {
-                error: err.message,
-                redis_key: redisKey,
-                click_id: clickUuid
-              });
-            }
-          } else {
-            if (i === 0) hashWriteSuccess = true; // Hash write
-            if (i === 2) streamWriteSuccess = true; // Stream add
-          }
-        }
-
-        // ✅ CRITICAL: Log Redis stored
-        if (hashWriteSuccess) {
-          logger.info('[CLICK] Redis stored', {
-            redis_key: redisKey,
-            click_id: clickUuid,
-            tenant_id: finalTenantId,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-        }
-
-        // ✅ CRITICAL: Log stream enqueued (or failed)
-        if (streamWriteSuccess) {
-          logger.info('[CLICK] Stream enqueued', {
-            stream: 'stream:clicks',
-            click_id: clickUuid,
-            tenant_id: finalTenantId,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-        } else if (streamWriteError) {
-          logger.warn('[CLICK] Stream enqueue failed - click will be backfilled', {
-            stream: 'stream:clicks',
-            error: streamWriteError.message,
-            redis_key: redisKey,
-            click_id: clickUuid
-          });
-        }
-
-        // Verify the hash was actually written (with retry in case of timing issue)
-        // redisKey already defined above
-        let hashCheck = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          hashCheck = await redis.hget(redisKey, 'offer_id');
-          if (hashCheck) break;
-          if (attempt < 2) await new Promise(r => setTimeout(r, 100)); // Wait 100ms before retry
-        }
-
-        if (hashCheck) {
-          logger.info(`✅ Verified click hash exists: ${redisKey} (offer_id: ${hashCheck})`);
-        } else {
-          logger.error(`❌ CRITICAL: Click hash was NOT written or was deleted! ${redisKey}`);
-          logger.error('   This will cause the worker to fail when processing this click.');
-          // Try to write it again as a fallback
-          try {
-            await redis.hset(redisKey, clickData);
-            await redis.expire(redisKey, 86400);
-            logger.info(`✅ Fallback: Re-wrote click hash: ${redisKey}`);
-          } catch (fallbackErr) {
-            logger.error(`❌ Fallback hash write also failed: ${fallbackErr.message}`);
-          }
-        }
-      } catch (err) {
-        logger.error('[CLICK] Redis Write Failed:', err);
-        throw err;
-      }
-
-      // NOTE: Avoid synchronous file I/O on hot tracking path.
-
-      // ✅ CRITICAL: Log that click was stored in Redis (already logged above, but keeping for compatibility)
+      });
 
       return {
         redirect: redirectUrl,
@@ -845,8 +657,11 @@ export class TrackingService {
   _buildRedirectUrl(assignment, offer, query, clickUuid) {
     let url = assignment.destination_url || offer.offer_url;
     if (offer.status === 'deactivate') url = offer.fallback_url || url;
+    return this._buildRedirectUrlFromDestination(url, query, clickUuid);
+  }
 
-    url = replaceMacros(url, {
+  _buildRedirectUrlFromDestination(destinationUrl, query, clickUuid) {
+    let url = replaceMacros(destinationUrl, {
       click_id: clickUuid,
       rcid: query.rcid || '',
       tid: query.tid || '',
@@ -2035,6 +1850,111 @@ export class TrackingService {
       }
     } catch (error) {
       logger.error('TrackingService.updateDailyStats error:', error);
+    }
+  }
+
+  async _persistClickToRedisFast({
+    tenantId,
+    offerId,
+    publicOfferId,
+    publisherId,
+    publicPublisherId,
+    publisherOfferId,
+    clickUuid,
+    redirectUrl,
+    redirectCacheKey,
+    request,
+    query,
+    forceReject = 'false'
+  }) {
+    const userAgent = request.headers['user-agent'] || '';
+    const ip = extractIP(request);
+    const referrer = request.headers.referer || '';
+    const domain = extractDomain(referrer);
+    const deviceInfo = parseDevice(userAgent);
+    const location = getLocationFromIP(ip);
+    const country = location.country || getCountryFromHeaders(request) || '';
+
+    let isp = null;
+    try {
+      isp = await getISP(ip);
+    } catch (e) { /* ignore */ }
+
+    const clickData = {
+      click_uuid: clickUuid,
+      offer_id: String(offerId),
+      public_offer_id: String(publicOfferId),
+      publisher_id: String(publisherId),
+      public_publisher_id: String(publicPublisherId),
+      publisher_offer_id: String(publisherOfferId || ''),
+      tenant_id: String(tenantId),
+      ip: ip || '',
+      user_agent: userAgent || '',
+      referrer: referrer || '',
+      country: country || '',
+      region: location.region || '',
+      city: location.city || '',
+      location: JSON.stringify({
+        city: location.city,
+        region: location.region,
+        country: country
+      }) || '',
+      isp: isp || '',
+      domain: domain || '',
+      device_type: deviceInfo.deviceType || '',
+      browser: deviceInfo.browser || '',
+      os: deviceInfo.os || '',
+      os_version: deviceInfo.osVersion || '',
+      device_brand: deviceInfo.deviceBrand || '',
+      device_model: deviceInfo.deviceModel || '',
+      tid: query.tid || query.click_id || '',
+      rcid: query.rcid || '',
+      timestamp: new Date().toISOString(),
+      flushed: 'false',
+      force_reject: forceReject
+    };
+
+    const redisKey = `click:${tenantId}:${offerId}:${publisherId}:${clickUuid}`;
+
+    try {
+      const pipeline = redis.pipeline();
+      pipeline.hset(redisKey, clickData);
+      pipeline.expire(redisKey, 3600);
+      pipeline.xadd('stream:clicks', '*',
+        'tenant_id', String(tenantId),
+        'offer_id', String(offerId),
+        'publisher_id', String(publisherId),
+        'click_id', clickUuid
+      );
+      if (redirectCacheKey && redirectUrl) {
+        pipeline.setex(redirectCacheKey, 5, redirectUrl);
+      }
+      const results = await pipeline.exec();
+
+      // Log success/failures
+      let hashWriteSuccess = false;
+      for (let i = 0; i < results.length; i++) {
+        const [err] = results[i];
+        if (err) {
+          logger.error(`❌ Redis operation ${i} failed:`, { error: err.message, click_id: clickUuid });
+          if (i === 0) throw new Error(`Redis hash write failed: ${err.message}`);
+        } else {
+          if (i === 0) hashWriteSuccess = true;
+        }
+      }
+
+      if (hashWriteSuccess) {
+        logger.info('[CLICK] Redis stored', {
+          redis_key: redisKey,
+          click_id: clickUuid,
+          tenant_id: tenantId,
+          offer_id: offerId,
+          publisher_id: publisherId
+        });
+      }
+    } catch (err) {
+      logger.error('❌ Redis persistence failed:', { error: err.message, click_id: clickUuid });
+      throw err;
     }
   }
 }
