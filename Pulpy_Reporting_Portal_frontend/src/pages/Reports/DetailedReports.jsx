@@ -202,6 +202,8 @@ function DetailedReports() {
 
     const [showFilters, setShowFilters] = useState(true);
     const exportMode = 'backend'; // Server export only (full dataset)
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportJustFinished, setExportJustFinished] = useState(false);
 
     /** Bumps only on Apply so filters refetch without double-invoking fetchReports + useEffect. */
     const [applyFetchKey, setApplyFetchKey] = useState(0);
@@ -462,7 +464,11 @@ function DetailedReports() {
 
     const handleExport = async () => {
         try {
-            toast.info('Preparing full export from server...');
+            if (isExporting) return;
+            setIsExporting(true);
+            setExportJustFinished(false);
+
+            toast.info('Preparing full export ...');
             const params = new URLSearchParams();
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
@@ -499,10 +505,15 @@ function DetailedReports() {
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
-            toast.success('Full export downloaded!');
+            setExportJustFinished(true);
+            toast.success('Downloaded successfully');
+            // Auto-hide the inline success state
+            setTimeout(() => setExportJustFinished(false), 4000);
         } catch (error) {
             console.error('Export error:', error);
             toast.error(error.message || 'Failed to export data');
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -577,9 +588,28 @@ function DetailedReports() {
                         onClick={handleExport}
                         type="button"
                         title="Export full dataset from server"
+                        disabled={isExporting}
                     >
-                        <DownloadIcon /> Export CSV
+                        <DownloadIcon /> {isExporting ? 'Exporting…' : 'Export CSV'}
                     </button>
+                    {exportJustFinished && (
+                        <div
+                            style={{
+                                marginLeft: '10px',
+                                fontSize: '12px',
+                                padding: '6px 10px',
+                                borderRadius: '999px',
+                                border: '1px solid rgba(34, 197, 94, 0.35)',
+                                background: 'rgba(34, 197, 94, 0.10)',
+                                color: '#166534',
+                                whiteSpace: 'nowrap',
+                            }}
+                            role="status"
+                            aria-live="polite"
+                        >
+                            Downloaded successfully
+                        </div>
+                    )}
                 </div>
             </div>
 
