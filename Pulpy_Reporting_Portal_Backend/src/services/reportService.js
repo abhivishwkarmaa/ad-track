@@ -901,6 +901,7 @@ export class ReportService {
             if (filters.export === 'csv' || filters.export === 'true') {
               const exportQuery = dataQuery;
               const [exportRows] = await pool.query(exportQuery, baseParams);
+              exportRows.forEach(r => { delete r.__total; });
               return { data: exportRows, isExport: true };
             }
 
