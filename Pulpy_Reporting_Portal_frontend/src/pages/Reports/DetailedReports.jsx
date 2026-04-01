@@ -201,8 +201,7 @@ function DetailedReports() {
     const [pendingMetrics, setPendingMetrics] = useState(initialMetrics);
 
     const [showFilters, setShowFilters] = useState(true);
-    const [exportMode, setExportMode] = useState('frontend'); // frontend | backend
-    const [showExportMenu, setShowExportMenu] = useState(false);
+    const exportMode = 'backend'; // Server export only (full dataset)
 
     /** Bumps only on Apply so filters refetch without double-invoking fetchReports + useEffect. */
     const [applyFetchKey, setApplyFetchKey] = useState(0);
@@ -461,77 +460,8 @@ function DetailedReports() {
         setPagination(prev => ({ ...prev, page: newPage }));
     };
 
-    const handleExport = async (modeOverride = null) => {
-        const mode = modeOverride || exportMode;
+    const handleExport = async () => {
         try {
-            if (mode === 'frontend') {
-                if (!reports || reports.length === 0) {
-                    toast.error('No loaded data to export');
-                    return;
-                }
-
-                toast.info('Preparing CSV from loaded data...');
-
-                const csvEscape = (value) => {
-                    if (value === null || value === undefined) return '';
-                    const str = String(value);
-                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-                        return `"${str.replace(/"/g, '""')}"`;
-                    }
-                    return str;
-                };
-
-                const formatStatusForCsv = (status) => {
-                    if (!status) return '';
-                    const normalizedStatus = String(status).toLowerCase();
-                    if (normalizedStatus === 'click_expired') return 'Rejected (Click Expired)';
-                    if (normalizedStatus === 'rejected_cap') return 'Rejected (Cap Hit)';
-                    return String(status).replace(/_/g, ' ');
-                };
-
-                const getCsvCellValue = (row, colId) => {
-                    const val = row[colId];
-                    if (colId === 'offer_id') {
-                        return row.offer_name ? `${row.offer_id} - ${row.offer_name}` : (row.offer_id || '');
-                    }
-                    if (colId === 'publisher_id') {
-                        return row.publisher_name || row.publisher_company
-                            ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
-                            : (row.publisher_id || '');
-                    }
-                    if (colId === 'conversion_status') return formatStatusForCsv(val);
-                    if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(colId)) {
-                        return val === null || val === undefined ? '' : Number(val).toFixed(2);
-                    }
-                    if (colId === 'timestamp_bucket') return formatAggregatedTimestampCell(row) || '';
-                    if (colId === 'timestamp') return getDetailTimestampCsv(row);
-                    if (colId === 'date_group') return formatDate(val, 'date') || '';
-                    if (colId === 'hour_group') return formatDate(val, 'hour') || '';
-                    if (colId === 'referrer' || colId === 'referer') return val ? String(val).trim() : 'Direct';
-                    return val ?? '';
-                };
-
-                const headers = tableColumns.map((c) => c.label);
-                const lines = [headers.map(csvEscape).join(',')];
-                reports.forEach((row) => {
-                    const line = tableColumns.map((col) => csvEscape(getCsvCellValue(row, col.id))).join(',');
-                    lines.push(line);
-                });
-
-                const csvContent = lines.join('\n');
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `report-loaded-${new Date().toISOString().split('T')[0]}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                toast.success('Export downloaded!');
-                return;
-            }
-
             toast.info('Preparing full export from server...');
             const params = new URLSearchParams();
             const resolvedRange = datePreset === 'custom'
@@ -642,48 +572,14 @@ function DetailedReports() {
                     <button className="btn btn-outline" onClick={() => setShowFilters(!showFilters)}>
                         <FilterIcon /> {showFilters ? 'Hide Filters' : 'Show Filters'}
                     </button>
-                    <div className="reports-export-dropdown">
-                        <button
-                            className="btn btn-primary"
-                            onClick={() => handleExport()}
-                            type="button"
-                            title={`Export using ${exportMode === 'frontend' ? 'Fast Export (Loaded)' : 'Full Export (Server)'}`}
-                        >
-                            <DownloadIcon /> Export CSV
-                        </button>
-                        <button
-                            className="btn btn-outline reports-export-toggle"
-                            type="button"
-                            onClick={() => setShowExportMenu(prev => !prev)}
-                            title="Choose export mode"
-                        >
-                            <ChevronDownIcon />
-                        </button>
-                        {showExportMenu && (
-                            <div className="reports-export-menu">
-                                <button
-                                    type="button"
-                                    className={`reports-export-menu-item ${exportMode === 'frontend' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setExportMode('frontend');
-                                        setShowExportMenu(false);
-                                    }}
-                                >
-                                    Fast Export (Loaded)
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`reports-export-menu-item ${exportMode === 'backend' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setExportMode('backend');
-                                        setShowExportMenu(false);
-                                    }}
-                                >
-                                    Full Export (Server)
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleExport}
+                        type="button"
+                        title="Export full dataset from server"
+                    >
+                        <DownloadIcon /> Export CSV
+                    </button>
                 </div>
             </div>
 
@@ -887,6 +783,7 @@ function DetailedReports() {
                                         if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
                                         if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
                                         if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
+                                        if (col.id === 'advertiser_id') return <td key={col.id}>{row.advertiser_name ? `${row.advertiser_id} - ${row.advertiser_name}` : row.advertiser_id}</td>;
                                         if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
                                         if (col.id === 'timestamp') {
                                             const clickT = formatDate(getClickTimeRaw(row), 'datetime');
@@ -964,6 +861,8 @@ function DetailedReports() {
                                         displayValue = row.publisher_name || row.publisher_company
                                             ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
                                             : row.publisher_id;
+                                    } else if (col.id === 'advertiser_id') {
+                                        displayValue = row.advertiser_name ? `${row.advertiser_id} - ${row.advertiser_name}` : row.advertiser_id;
                                     } else if (col.id === 'timestamp') {
                                         displayValue = getDetailTimestampCsv(row) || '-';
                                     } else if (col.id === 'timestamp_bucket') {
