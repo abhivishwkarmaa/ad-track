@@ -770,6 +770,153 @@ export class ReportService {
           };
         }
 
+        // Fast path: offer+publisher+advertiser+date aggregation (UI default for month view).
+        // Avoids `LEFT JOIN conversions ON click_uuid` (fanout) and avoids UNION DISTINCT over raw rows.
+        //
+        // Strategy:
+        // - Pre-aggregate clicks and conversions into grouped subqueries (offer_id, publisher_id, date_group)
+        // - Build keys from the grouped results (much smaller than raw tables)
+        // - Join grouped clicks + grouped conversions onto keys
+        // - Apply pagination at the grouped level
+        const wantsOfferPubAdvDate =
+          groupBy.length === 4 &&
+          groupBy.includes('offer_id') &&
+          groupBy.includes('publisher_id') &&
+          groupBy.includes('advertiser_id') &&
+          groupBy.includes('date');
+        if (wantsOfferPubAdvDate && !hasComplexFilters) {
+          const allDates = filters.all_dates === true || filters.all_dates === 'true';
+          // Guard: "all time" can still be huge; let the generic path handle it.
+          if (!allDates) {
+            const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+            const fromDate = filters.date_from || todayIST;
+            const toDate = filters.date_to || todayIST;
+            const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+
+            const needsConversionMetrics =
+              wantsMetric('conversions') ||
+              wantsMetric('approved_conversions') ||
+              wantsMetric('pending_conversions') ||
+              wantsMetric('rejected_conversions') ||
+              wantsMetric('revenue') ||
+              wantsMetric('payout') ||
+              wantsMetric('profit') ||
+              wantsMetric('pending_payout') ||
+              wantsMetric('approved_payout');
+
+            // Use a single statement with CTEs so clicks/conversions are scanned once.
+
+            const selectParts = [
+              'base.date_group as date_group',
+              'COALESCE(o.public_offer_id, CAST(base.offer_id AS CHAR)) as offer_id',
+              'COALESCE(NULLIF(TRIM(o.name), \'\'), CONCAT(\'Offer #\', base.offer_id)) as offer_name',
+              'base.publisher_id as publisher_id',
+              `COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', base.publisher_id)) as publisher_name`,
+              `COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', base.publisher_id, '@unknown')) as publisher_email`,
+              'o.advertiser_id as advertiser_id',
+            ];
+
+            if (wantsMetric('clicks') || includeAllMetrics) selectParts.push('COALESCE(ca.clicks, 0) as clicks');
+            if (wantsMetric('unique_clicks') || includeAllMetrics) selectParts.push('COALESCE(ca.unique_clicks, 0) as unique_clicks');
+            if (wantsMetric('impressions')) selectParts.push('0 as impressions');
+
+            if (needsConversionMetrics) {
+              if (wantsMetric('conversions') || includeAllMetrics) selectParts.push('COALESCE(va.conversions, 0) as conversions');
+              if (wantsMetric('approved_conversions') || includeAllMetrics) selectParts.push('COALESCE(va.approved_conversions, 0) as approved_conversions');
+              if (wantsMetric('pending_conversions') || includeAllMetrics) selectParts.push('COALESCE(va.pending_conversions, 0) as pending_conversions');
+              if (wantsMetric('rejected_conversions') || includeAllMetrics) selectParts.push('COALESCE(va.rejected_conversions, 0) as rejected_conversions');
+              if (wantsMetric('revenue') || includeAllMetrics) selectParts.push('COALESCE(va.revenue, 0) as revenue');
+              if (wantsMetric('payout') || includeAllMetrics) selectParts.push('COALESCE(va.payout, 0) as payout');
+              if (wantsMetric('profit') || includeAllMetrics) selectParts.push('COALESCE(va.profit, 0) as profit');
+              if (wantsMetric('pending_payout') || includeAllMetrics) selectParts.push('COALESCE(va.pending_payout, 0) as pending_payout');
+              if (wantsMetric('approved_payout') || includeAllMetrics) selectParts.push('COALESCE(va.approved_payout, 0) as approved_payout');
+            }
+
+            const cteHeader = `
+              WITH
+              ca AS (
+                SELECT
+                  c.offer_id,
+                  c.publisher_id,
+                  DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) as date_group,
+                  COUNT(*) as clicks,
+                  COUNT(DISTINCT c.ip) as unique_clicks
+                FROM clicks c
+                WHERE c.tenant_id = ? AND c.created_at BETWEEN ? AND ?
+                GROUP BY c.offer_id, c.publisher_id, date_group
+              )
+              ${needsConversionMetrics ? `,
+              va AS (
+                SELECT
+                  conv.offer_id,
+                  conv.publisher_id,
+                  DATE(DATE_ADD(conv.created_at, INTERVAL 330 MINUTE)) as date_group,
+                  COUNT(*) as conversions,
+                  SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                  SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                  SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
+                  COALESCE(SUM(conv.amount), 0) as revenue,
+                  COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                  COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                  COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                  COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+                FROM conversions conv
+                WHERE conv.tenant_id = ? AND conv.created_at BETWEEN ? AND ?
+                GROUP BY conv.offer_id, conv.publisher_id, date_group
+              )` : ''}
+              ,
+              base AS (
+                SELECT offer_id, publisher_id, date_group FROM ca
+                ${needsConversionMetrics ? `
+                UNION DISTINCT
+                SELECT offer_id, publisher_id, date_group FROM va
+                ` : ''}
+              )
+            `;
+
+            // Window total avoids a second COUNT query.
+            const dataQuery = `
+              ${cteHeader}
+              SELECT
+                ${selectParts.join(',\n                ')},
+                COUNT(*) OVER() as __total
+              FROM base
+              LEFT JOIN offers o ON o.id = base.offer_id
+              LEFT JOIN publishers p ON p.id = base.publisher_id
+              LEFT JOIN ca
+                ON ca.offer_id = base.offer_id AND ca.publisher_id = base.publisher_id AND ca.date_group = base.date_group
+              ${needsConversionMetrics ? `
+              LEFT JOIN va
+                ON va.offer_id = base.offer_id AND va.publisher_id = base.publisher_id AND va.date_group = base.date_group
+              ` : ''}
+              ORDER BY base.date_group DESC, COALESCE(ca.clicks, 0) DESC, base.offer_id ASC, base.publisher_id ASC
+            `;
+
+            const baseParams = needsConversionMetrics
+              ? [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd]
+              : [tenantId, utcStart, utcEnd];
+
+            // Export: reuse same query with large limit, no pagination count needed.
+            if (filters.export === 'csv' || filters.export === 'true') {
+              const exportQuery = `${dataQuery} LIMIT 100000 OFFSET 0`;
+              const [exportRows] = await pool.query(exportQuery, baseParams);
+              return { data: exportRows, isExport: true };
+            }
+
+            const pagedQuery = `${dataQuery} LIMIT ? OFFSET ?`;
+            const [rows] = await pool.query(pagedQuery, [...baseParams, limit, offset]);
+            const total = rows.length > 0 ? Number(rows[0].__total || 0) : 0;
+            rows.forEach(r => { delete r.__total; });
+
+            return {
+              data: rows,
+              pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+              isAggregated: true
+            };
+          }
+        }
+
         // --- AGGREGATED REPORT MODE ---
         let selects = [];
         let groups = [];
