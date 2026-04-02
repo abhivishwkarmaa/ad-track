@@ -355,9 +355,9 @@ export async function enforceSubscriptionAccess(request, reply) {
             return;
         }
 
-        // Keep state synchronized with subscription/trial dates on every request.
-        // This ensures tenant status becomes EXPIRED immediately after end time.
-        const status = await subscriptionService.updateTenantState(request.tenantId);
+        // Read-only effective state from expiry timestamps to avoid per-request
+        // row locks/transactions (which can stall heavy report queries in prod).
+        const status = await subscriptionService.getTenantSubscriptionStatus(request.tenantId);
         request.subscriptionStatus = status;
 
         const state = status.tenant.status;
