@@ -456,9 +456,21 @@ export class AuthController {
   async getProfile(request, reply) {
     try {
       // Admin info is already attached by auth middleware
+      const hostUsed =
+        request.headers['x-forwarded-host'] ||
+        request.headers.host ||
+        '';
       return reply.send({
         success: true,
-        data: request.admin,
+        data: {
+          ...request.admin,
+          // Support debugging "works on my PC, not on client" — confirms subdomain → tenant resolution on the server
+          ...(request.tenant && {
+            tenant_slug: request.tenant.slug,
+            tenant_name: request.tenant.name,
+          }),
+          request_host: hostUsed,
+        },
       });
     } catch (error) {
       logger.error('AuthController.getProfile error:', error);

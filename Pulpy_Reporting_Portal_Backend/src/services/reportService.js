@@ -803,6 +803,9 @@ export class ReportService {
               wantsMetric('pending_payout') ||
               wantsMetric('approved_payout');
 
+            // COUNT(DISTINCT ip) is expensive on large month ranges — only compute when UI asks for unique clicks.
+            const needsUniqueClicksAgg = wantsMetric('unique_clicks') || includeAllMetrics;
+
             // Use a single statement with CTEs so clicks/conversions are scanned once.
 
             const selectParts = [
@@ -839,8 +842,8 @@ export class ReportService {
                   c.offer_id,
                   c.publisher_id,
                   DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) as date_group,
-                  COUNT(*) as clicks,
-                  COUNT(DISTINCT c.ip) as unique_clicks
+                  COUNT(*) as clicks
+                  ${needsUniqueClicksAgg ? ', COUNT(DISTINCT c.ip) as unique_clicks' : ''}
                 FROM clicks c
                 WHERE c.tenant_id = ? AND c.created_at BETWEEN ? AND ?
                 GROUP BY c.offer_id, c.publisher_id, date_group
@@ -874,12 +877,12 @@ export class ReportService {
               )
             `;
 
-            // Window total avoids a second COUNT query.
+            // Total row count: scalar subquery via CROSS JOIN avoids COUNT(*) OVER() window on the full joined rowset.
             const dataQuery = `
               ${cteHeader}
               SELECT
                 ${selectParts.join(',\n                ')},
-                COUNT(*) OVER() as __total
+                bt.__total
               FROM base
               LEFT JOIN offers o ON o.id = base.offer_id
               LEFT JOIN publishers p ON p.id = base.publisher_id
@@ -890,6 +893,7 @@ export class ReportService {
               LEFT JOIN va
                 ON va.offer_id = base.offer_id AND va.publisher_id = base.publisher_id AND va.date_group = base.date_group
               ` : ''}
+              CROSS JOIN (SELECT COUNT(*) AS __total FROM base) bt
               ORDER BY base.date_group DESC, COALESCE(ca.clicks, 0) DESC, base.offer_id ASC, base.publisher_id ASC
             `;
 
