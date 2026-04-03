@@ -48,6 +48,9 @@ export const offerStatsQuerySchema = {
   properties: {
     date_from: { type: 'string', format: 'date' },
     date_to: { type: 'string', format: 'date' },
+    range_start_utc: { type: 'string', maxLength: 32 },
+    range_end_utc: { type: 'string', maxLength: 32 },
+    report_timezone: { type: 'string', maxLength: 64 },
   },
 };
 

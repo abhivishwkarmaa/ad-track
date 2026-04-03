@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useToast } from '../../context/ToastContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import { formatDateTimeIST } from '../../utils/dateTime';
+import { formatYmdInTimeZone, userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
 
@@ -23,22 +25,15 @@ const ApproveIcon = () => (
     </svg>
 );
 
-const toYmd = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
-
 const LiveLogs = () => {
     const navigate = useNavigate();
     const toast = useToast();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [activeTab, setActiveTab] = useState('clicks');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [limit, setLimit] = useState(100);
-    const [searchParams, setSearchParams] = useSearchParams();
     const [approvingId, setApprovingId] = useState(null);
 
     // Filter State
@@ -47,10 +42,9 @@ const LiveLogs = () => {
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublisher, setSelectedPublisher] = useState('');
 
-    // Date Filter
-    const today = toYmd(new Date());
-    const [dateFrom, setDateFrom] = useState(today);
-    const [dateTo, setDateTo] = useState(today);
+    // Date Filter (calendar days in report timezone; API receives IST range)
+    const [dateFrom, setDateFrom] = useState(() => formatYmdInTimeZone(new Date(), reportTimezone));
+    const [dateTo, setDateTo] = useState(() => formatYmdInTimeZone(new Date(), reportTimezone));
 
     // Auto-refresh timer reference
     const [autoRefresh, setAutoRefresh] = useState(false);
@@ -88,7 +82,7 @@ const LiveLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey]);
+    }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         let interval;
@@ -96,7 +90,7 @@ const LiveLogs = () => {
             interval = setInterval(() => fetchLogs(true), 5000);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo]);
+    }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, reportTimezone, timezoneRevision]);
 
     const fetchLogs = async (isBackground = false) => {
         setLoading(true);
@@ -104,8 +98,11 @@ const LiveLogs = () => {
             const params = { limit, page: 1 };
             if (selectedOffer) params.offer_id = selectedOffer;
             if (selectedPublisher) params.publisher_id = selectedPublisher;
-            if (dateFrom) params.date_from = dateFrom;
-            if (dateTo) params.date_to = dateTo;
+            if (dateFrom && dateTo) {
+                const { date_from, date_to } = userRangeYmdToBackendIstRange(dateFrom, dateTo, reportTimezone);
+                if (date_from) params.date_from = date_from;
+                if (date_to) params.date_to = date_to;
+            }
 
             if (activeTab === 'clicks') {
                 const response = await dashboardAPI.getDetailed(params, { trackActivity: !isBackground });

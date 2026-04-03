@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { normalizeMysqlUtcDatetime } from '../utils/mysqlUtcRange.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
@@ -696,8 +697,17 @@ class OfferService {
       const dateTo = filters?.date_to || null;
       const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
-      const rangeEndExclusive = dateTo ? toUtcIstEnd(dateTo) : null;
+      const rs = normalizeMysqlUtcDatetime(filters?.range_start_utc);
+      const re = normalizeMysqlUtcDatetime(filters?.range_end_utc);
+      let rangeStart;
+      let rangeEndExclusive;
+      if (rs && re) {
+        rangeStart = rs;
+        rangeEndExclusive = re;
+      } else {
+        rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+        rangeEndExclusive = dateTo ? toUtcIstEnd(dateTo) : null;
+      }
 
       const buildTimeFilteredWhere = (tableAlias = '') => {
         const prefix = tableAlias ? `${tableAlias}.` : '';
@@ -909,8 +919,17 @@ class OfferService {
       const dateTo = filters?.date_to || null;
       const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
-      const rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
+      const rs = normalizeMysqlUtcDatetime(filters?.range_start_utc);
+      const re = normalizeMysqlUtcDatetime(filters?.range_end_utc);
+      let rangeStart;
+      let rangeEnd;
+      if (rs && re) {
+        rangeStart = rs;
+        rangeEnd = re;
+      } else {
+        rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+        rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
+      }
 
       // Assigned publishers for this offer + offer-scoped performance metrics (dashboard-style)
       let query = `SELECT 

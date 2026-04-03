@@ -1,3 +1,11 @@
+import {
+    formatYmdInTimeZone,
+    addDaysToYmdInTimeZone,
+    zonedDayStartUtcMs,
+    dayOfWeekInTimeZone,
+    DEFAULT_REPORT_TIMEZONE,
+} from './reportTimezone.js';
+
 export const TIMELINE_OPTIONS = [
     { id: 'today', label: 'Today' },
     { id: 'yesterday', label: 'Yesterday' },
@@ -8,48 +16,51 @@ export const TIMELINE_OPTIONS = [
     { id: 'custom', label: 'Custom Range' },
 ];
 
-const toYmd = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
-
-export const getTimelineRange = (preset, customRange = {}) => {
+/**
+ * Calendar range in the user's report timezone (YYYY-MM-DD).
+ * Backend still receives IST dates via userRangeYmdToBackendIstRange before API calls.
+ */
+export const getTimelineRange = (preset, customRange = {}, timeZone = DEFAULT_REPORT_TIMEZONE) => {
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayYmd = formatYmdInTimeZone(now, timeZone);
 
-    if (preset === 'today') return { from: toYmd(today), to: toYmd(today) };
+    if (preset === 'today') return { from: todayYmd, to: todayYmd };
 
     if (preset === 'yesterday') {
-        const d = new Date(today);
-        d.setDate(d.getDate() - 1);
-        return { from: toYmd(d), to: toYmd(d) };
+        const y = addDaysToYmdInTimeZone(todayYmd, -1, timeZone);
+        return { from: y, to: y };
     }
 
     if (preset === 'this_week') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        return { from: toYmd(start), to: toYmd(today) };
+        const t0 = zonedDayStartUtcMs(todayYmd, timeZone);
+        const dow = dayOfWeekInTimeZone(new Date(t0 + 43200000), timeZone);
+        const startYmd = addDaysToYmdInTimeZone(todayYmd, -dow, timeZone);
+        return { from: startYmd, to: todayYmd };
     }
 
     if (preset === 'last_week') {
-        const end = new Date(today);
-        end.setDate(end.getDate() - end.getDay() - 1);
-        const start = new Date(end);
-        start.setDate(end.getDate() - 6);
-        return { from: toYmd(start), to: toYmd(end) };
+        const t0 = zonedDayStartUtcMs(todayYmd, timeZone);
+        const dow = dayOfWeekInTimeZone(new Date(t0 + 43200000), timeZone);
+        const thisWeekStart = addDaysToYmdInTimeZone(todayYmd, -dow, timeZone);
+        const lastWeekEnd = addDaysToYmdInTimeZone(thisWeekStart, -1, timeZone);
+        const lastWeekStart = addDaysToYmdInTimeZone(lastWeekEnd, -6, timeZone);
+        return { from: lastWeekStart, to: lastWeekEnd };
     }
 
     if (preset === 'this_month') {
-        const start = new Date(today.getFullYear(), today.getMonth(), 1);
-        return { from: toYmd(start), to: toYmd(today) };
+        const [y, m] = todayYmd.split('-');
+        const monthStart = `${y}-${m}-01`;
+        return { from: monthStart, to: todayYmd };
     }
 
     if (preset === 'last_month') {
-        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const end = new Date(today.getFullYear(), today.getMonth(), 0);
-        return { from: toYmd(start), to: toYmd(end) };
+        const [y, m] = todayYmd.split('-').map(Number);
+        const thisMonthStart = `${y}-${String(m).padStart(2, '0')}-01`;
+        const lastMonthEnd = addDaysToYmdInTimeZone(thisMonthStart, -1, timeZone);
+        const lm = m === 1 ? 12 : m - 1;
+        const ly = m === 1 ? y - 1 : y;
+        const lastMonthStart = `${ly}-${String(lm).padStart(2, '0')}-01`;
+        return { from: lastMonthStart, to: lastMonthEnd };
     }
 
     if (preset === 'custom') {
@@ -59,5 +70,13 @@ export const getTimelineRange = (preset, customRange = {}) => {
         };
     }
 
-    return { from: toYmd(today), to: toYmd(today) };
+    return { from: todayYmd, to: todayYmd };
 };
+
+/** Detailed Reports presets include 'all' (no date filter). */
+export function getDetailedReportsPresetRange(preset, timeZone = DEFAULT_REPORT_TIMEZONE) {
+    if (preset === 'all') return { from: '', to: '', allDates: true };
+    if (preset === 'custom') return { from: '', to: '', allDates: false };
+    const r = getTimelineRange(preset, {}, timeZone);
+    return { ...r, allDates: false };
+}

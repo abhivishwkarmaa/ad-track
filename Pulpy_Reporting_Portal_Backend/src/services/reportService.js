@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
@@ -26,8 +27,18 @@ export class ReportService {
       const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
       const fromDate = filters.date_from || todayIST;
       const toDate = filters.date_to || todayIST;
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rs = normalizeMysqlUtcDatetime(filters.range_start_utc);
+      const re = normalizeMysqlUtcDatetime(filters.range_end_utc);
+      let utcStart;
+      let utcEnd;
+      if (rs && re) {
+        utcStart = rs;
+        utcEnd = re;
+      } else {
+        const span = istYmdSpanToMysqlUtcRange(fromDate, toDate);
+        utcStart = span.start;
+        utcEnd = span.end;
+      }
 
       clickWhere += ' AND created_at BETWEEN ? AND ?'; clickParams.push(utcStart, utcEnd);
       convWhere += ' AND created_at BETWEEN ? AND ?'; convParams.push(utcStart, utcEnd);

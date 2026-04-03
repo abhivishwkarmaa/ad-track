@@ -20,6 +20,8 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
+      if (request.query.range_start_utc) filters.range_start_utc = request.query.range_start_utc;
+      if (request.query.range_end_utc) filters.range_end_utc = request.query.range_end_utc;
       if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
       if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
       if (request.query.country) filters.country = request.query.country;

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
 import {
@@ -10,6 +11,8 @@ import {
     formatHourSlotIST,
     formatISTDateTimeNumeric,
 } from '../../utils/dateTime';
+import { getDetailedReportsPresetRange } from '../../utils/timelineRange';
+import { userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import './Reports.css';
 
 // Icons
@@ -110,46 +113,11 @@ const DATE_PRESET_OPTIONS = [
     { id: 'custom', label: 'Custom Range' },
 ];
 
-const toYmd = (date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
-
-const getPresetDateRange = (preset) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    if (preset === 'today') return { from: toYmd(today), to: toYmd(today), allDates: false };
-    if (preset === 'yesterday') {
-        const y = new Date(today);
-        y.setDate(y.getDate() - 1);
-        return { from: toYmd(y), to: toYmd(y), allDates: false };
-    }
-    if (preset === 'this_week') {
-        const start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        return { from: toYmd(start), to: toYmd(today), allDates: false };
-    }
-    if (preset === 'this_month') {
-        const start = new Date(today.getFullYear(), today.getMonth(), 1);
-        return { from: toYmd(start), to: toYmd(today), allDates: false };
-    }
-    if (preset === 'last_month') {
-        const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const end = new Date(today.getFullYear(), today.getMonth(), 0);
-        return { from: toYmd(start), to: toYmd(end), allDates: false };
-    }
-    if (preset === 'all') return { from: '', to: '', allDates: true };
-
-    return { from: '', to: '', allDates: false };
-};
-
 function DetailedReports() {
     const toast = useToast();
     const navigate = useNavigate();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [reports, setReports] = useState([]);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
@@ -230,10 +198,10 @@ function DetailedReports() {
 
     useEffect(() => {
         if (datePreset === 'custom') return;
-        const range = getPresetDateRange(datePreset);
+        const range = getDetailedReportsPresetRange(datePreset, reportTimezone);
         setDateFrom(range.from);
         setDateTo(range.to);
-    }, [datePreset]);
+    }, [datePreset, reportTimezone]);
 
     const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics, opts = {}) => {
         try {
@@ -250,13 +218,18 @@ function DetailedReports() {
 
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
-                : getPresetDateRange(datePreset);
+                : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
             if (resolvedRange.allDates) {
                 params.all_dates = 'true';
             } else {
-                if (resolvedRange.from) params.date_from = resolvedRange.from;
-                if (resolvedRange.to) params.date_to = resolvedRange.to;
+                const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                    resolvedRange.from,
+                    resolvedRange.to,
+                    reportTimezone
+                );
+                if (date_from) params.date_from = date_from;
+                if (date_to) params.date_to = date_to;
             }
             if (offerFilter !== 'all') params.offer_id = offerFilter;
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
@@ -358,16 +331,16 @@ function DetailedReports() {
 
     // Load / pagination / global refresh / Apply — filters refetch via applyFetchKey (not a second fetchReports in handleApply).
     useEffect(() => {
-        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}`;
+        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${reportTimezone}|${timezoneRevision}`;
         const now = Date.now();
         if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
             return;
         }
         lastFetchDedupRef.current = { key, at: now };
         fetchReports();
-        // Intentionally only re-fetch when page, limit, global refreshKey, or applyFetchKey changes; dim/metric state is read inside fetchReports.
+        // Intentionally only re-fetch when page, limit, global refreshKey, applyFetchKey, or timezone changes; dim/metric state is read inside fetchReports.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey]);
+    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey, reportTimezone, timezoneRevision]);
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
@@ -472,13 +445,18 @@ function DetailedReports() {
             const params = new URLSearchParams();
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
-                : getPresetDateRange(datePreset);
+                : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
             if (resolvedRange.allDates) {
                 params.set('all_dates', 'true');
             } else {
-                if (resolvedRange.from) params.set('date_from', resolvedRange.from);
-                if (resolvedRange.to) params.set('date_to', resolvedRange.to);
+                const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                    resolvedRange.from,
+                    resolvedRange.to,
+                    reportTimezone
+                );
+                if (date_from) params.set('date_from', date_from);
+                if (date_to) params.set('date_to', date_to);
             }
             if (offerFilter !== 'all') params.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);

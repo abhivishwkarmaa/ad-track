@@ -34,6 +34,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { RefreshProvider } from './context/RefreshContext';
+import { ReportTimezoneProvider } from './context/ReportTimezoneContext';
 import RefreshButton from './components/RefreshButton/RefreshButton';
 import './App.css';
 
@@ -201,8 +202,10 @@ function App() {
         <AuthProvider>
           <ToastProvider>
             <RefreshProvider>
-              <AppRoutes />
-              <RefreshButton />
+              <ReportTimezoneProvider>
+                <AppRoutes />
+                <RefreshButton />
+              </ReportTimezoneProvider>
             </RefreshProvider>
           </ToastProvider>
         </AuthProvider>

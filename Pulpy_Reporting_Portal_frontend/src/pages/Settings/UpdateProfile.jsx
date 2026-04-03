@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { authAPI } from '../../services/api';
+import { REPORT_TIMEZONE_OPTIONS } from '../../utils/reportTimezone';
 import './Settings.css';
 
 function UpdateProfile() {
     const { user, updateProfile } = useAuth();
     const toast = useToast();
+    const { reportTimezone, setReportTimezone } = useReportTimezone();
     const [loading, setLoading] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -159,6 +162,32 @@ function UpdateProfile() {
                         </button>
                     </div>
                 </form>
+
+                <div className="settings-form-section" style={{ marginTop: '8px' }}>
+                    <h3 className="settings-form-section-title">Reports timezone</h3>
+                    <p style={{ color: '#666', marginBottom: '16px', fontSize: '14px' }}>
+                        Dashboard, detailed reports, and date ranges use this timezone. It is saved on this device.
+                    </p>
+                    <div className="settings-form-row" style={{ maxWidth: '400px' }}>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="profile-report-timezone">
+                                Timezone
+                            </label>
+                            <select
+                                id="profile-report-timezone"
+                                className="form-control"
+                                value={reportTimezone}
+                                onChange={(e) => setReportTimezone(e.target.value)}
+                            >
+                                {REPORT_TIMEZONE_OPTIONS.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
                 <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
 

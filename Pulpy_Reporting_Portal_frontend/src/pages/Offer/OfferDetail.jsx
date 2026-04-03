@@ -3,11 +3,19 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
-import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
+import { formatDateTimeInTimeZone, parseDate } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import { getTimelineRange } from '../../utils/timelineRange';
+import {
+    buildDashboardApiParams,
+    formatYmdInTimeZone,
+    REPORT_TIMEZONE_OPTIONS,
+    userRangeYmdToBackendIstRange,
+    userRangeYmdToBackendUtcMysqlRange,
+} from '../../utils/reportTimezone';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -141,19 +149,12 @@ function OfferDetail() {
         { id: 'custom', label: 'Custom Range' },
     ];
 
-    const toIstYmd = (value) => {
-        if (!value) return '';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return '';
-        const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-        return istDate.toISOString().split('T')[0];
-    };
-
     const { id } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
     const toast = useToast();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [offer, setOffer] = useState(null);
@@ -185,15 +186,62 @@ function OfferDetail() {
     const publisherStatsRequestRef = useRef(0);
     const selectedTimelineRange = useMemo(() => {
         if (selectedRange === 'since_created') {
-            const now = new Date();
-            const istToday = new Date(now.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split('T')[0];
-            return {
-                from: toIstYmd(offer?.created_at) || istToday,
-                to: istToday,
-            };
+            const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
+            const fromUserYmd = offer?.created_at
+                ? formatYmdInTimeZone(new Date(offer.created_at), reportTimezone)
+                : toUserYmd;
+            let from = fromUserYmd;
+            let to = toUserYmd;
+            if (from > to) [from, to] = [to, from];
+            return { from, to };
         }
-        return getTimelineRange(selectedRange, customRange);
-    }, [selectedRange, customRange, offer?.created_at]);
+        return getTimelineRange(selectedRange, customRange, reportTimezone);
+    }, [selectedRange, customRange, offer?.created_at, reportTimezone]);
+
+    const statsApiRange = useMemo(() => {
+        if (selectedRange === 'since_created') {
+            const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
+            const fromUserYmd = offer?.created_at
+                ? formatYmdInTimeZone(new Date(offer.created_at), reportTimezone)
+                : toUserYmd;
+            let a = fromUserYmd;
+            let b = toUserYmd;
+            if (a > b) [a, b] = [b, a];
+            return userRangeYmdToBackendIstRange(a, b, reportTimezone);
+        }
+        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
+            return { date_from: '', date_to: '' };
+        }
+        return userRangeYmdToBackendIstRange(
+            selectedTimelineRange.from,
+            selectedTimelineRange.to,
+            reportTimezone
+        );
+    }, [selectedRange, selectedTimelineRange, offer?.created_at, reportTimezone]);
+
+    const statsUtcRange = useMemo(
+        () =>
+            userRangeYmdToBackendUtcMysqlRange(
+                selectedTimelineRange.from,
+                selectedTimelineRange.to,
+                reportTimezone
+            ),
+        [selectedTimelineRange.from, selectedTimelineRange.to, reportTimezone]
+    );
+
+    const offerStatsQueryParams = useMemo(() => {
+        const base = {
+            date_from: statsApiRange.date_from,
+            date_to: statsApiRange.date_to,
+            ...(statsUtcRange.range_start_utc && statsUtcRange.range_end_utc
+                ? {
+                    range_start_utc: statsUtcRange.range_start_utc,
+                    range_end_utc: statsUtcRange.range_end_utc,
+                }
+                : {}),
+        };
+        return buildDashboardApiParams(base, reportTimezone);
+    }, [statsApiRange.date_from, statsApiRange.date_to, statsUtcRange, reportTimezone]);
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -232,10 +280,7 @@ function OfferDetail() {
                 setLoadingStats(true);
                 setStats(null);
 
-                const response = await offersAPI.getOfferStats(id, {
-                    date_from: selectedTimelineRange.from,
-                    date_to: selectedTimelineRange.to,
-                });
+                const response = await offersAPI.getOfferStats(id, offerStatsQueryParams);
 
                 if (requestId !== statsRequestRef.current) return;
                 if (response.success) {
@@ -255,7 +300,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         if (!id) return;
@@ -268,10 +313,7 @@ function OfferDetail() {
             const requestId = ++publisherStatsRequestRef.current;
             try {
                 setLoadingPublisherStats(true);
-                const response = await offersAPI.getOfferPublisherStats(id, {
-                    date_from: selectedTimelineRange.from,
-                    date_to: selectedTimelineRange.to,
-                });
+                const response = await offersAPI.getOfferPublisherStats(id, offerStatsQueryParams);
 
                 if (requestId !== publisherStatsRequestRef.current) return;
                 if (response.success) {
@@ -291,7 +333,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to]);
+    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -446,23 +488,29 @@ function OfferDetail() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return formatDateIST(dateString, {
+        const date = parseDate(dateString);
+        if (!date) return '-';
+        return date.toLocaleDateString('en-US', {
+            timeZone: reportTimezone,
             year: 'numeric',
             month: 'short',
-            day: 'numeric'
-        }, 'en-US');
+            day: 'numeric',
+        });
     };
 
     const formatDateTime = (dateString) => {
         if (!dateString) return '-';
-        return formatDateTimeIST(dateString, {
+        return formatDateTimeInTimeZone(dateString, reportTimezone, {
             year: 'numeric',
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
         }, 'en-US');
     };
+
+    const reportTzLabel =
+        REPORT_TIMEZONE_OPTIONS.find((o) => o.id === reportTimezone)?.label ?? reportTimezone;
 
     const formatConversionStatus = (status) => {
         if (!status) return '-';
@@ -583,7 +631,7 @@ function OfferDetail() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap' }}>
                     <div>
                         <h2 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: '600' }}>Performance Overview</h2>
-                        <div style={{ color: '#64748b', fontSize: '12px' }}>Data as of IST</div>
+                        <div style={{ color: '#64748b', fontSize: '12px' }}>Metrics use {reportTzLabel} day boundaries</div>
                     </div>
                     <TimelineFilter
                         value={selectedRange}
