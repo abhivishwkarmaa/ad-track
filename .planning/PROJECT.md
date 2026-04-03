@@ -20,13 +20,11 @@ A **multi-tenant ad tracking and reporting platform**: a **Fastify** API plus **
 - ✓ **Auth** — JWT/cookies for admin; bcrypt + jsonwebtoken — existing
 - ✓ **Persistence** — MySQL pool, migrations under `src/db/migrations/` — existing
 - ✓ **Async processing** — dedicated worker entrypoints (click, conversion, event, stats, etc.) — existing
+- ✓ **v1 engineering milestone (2026-04)** — production JWT/CORS/debug gates; tiered rate limits; Docker port alignment; `multipleStatements: false` pool; `(tenant_id, url_key)` uniqueness path; affiliate postback policy + unit tests; ops/maint/reporting docs
 
 ### Active
 
-- [ ] **Production security posture** — no unsafe JWT defaults in prod; CORS aligned with real front-end origins; debug/diagnostic routes not publicly exposed
-- [ ] **Operational clarity** — Docker/port/docs alignment; structured DB startup logging
-- [ ] **Maintainability** — reduce risk in very large service modules; single clear pattern for offer-domain code
-- [ ] **Test and verification** — expand coverage on high-risk paths (tracking, postback, conversion status, reporting filters)
+- [ ] **Next milestone** — define product goals (e.g. new analytics, billing, UI) and add requirements to `.planning/REQUIREMENTS.md` after `/gsd-new-milestone` or manual planning
 
 ### Out of Scope
 
@@ -51,7 +49,7 @@ A **multi-tenant ad tracking and reporting platform**: a **Fastify** API plus **
 |----------|-----------|---------|
 | Subdomain-based tenant resolution | Matches production routing and existing middleware | ✓ Good — established |
 | Redis streams + separate worker processes | High-volume tracking off the API hot path | ✓ Good — established |
-| Brownfield GSD init after codebase map | Planning grounded in actual repo | — Pending |
+| Brownfield GSD init after codebase map | Planning grounded in actual repo | ✓ Good — v1 phases shipped |
 
 ## Evolution
 
@@ -73,4 +71,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after GSD project initialization (brownfield)*
+*Last updated: 2026-04-03 after v1 engineering milestone close-out*
