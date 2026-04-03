@@ -48,7 +48,18 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| — | — | Populated by roadmap |
+| SEC-01 | Phase 1 | Pending |
+| SEC-02 | Phase 1 | Pending |
+| SEC-03 | Phase 1 | Pending |
+| SEC-04 | Phase 1 | Pending |
+| DATA-01 | Phase 2 | Pending |
+| DATA-02 | Phase 2 | Pending |
+| OPS-01 | Phase 3 | Pending |
+| OPS-02 | Phase 3 | Pending |
+| MAINT-01 | Phase 4 | Pending |
+| MAINT-02 | Phase 4 | Pending |
+| QA-01 | Phase 5 | Pending |
+| QA-02 | Phase 5 | Pending |
 
 ---
 *Last updated: 2026-04-03*
