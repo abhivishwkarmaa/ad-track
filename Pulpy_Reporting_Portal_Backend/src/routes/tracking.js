@@ -1,4 +1,5 @@
 import trackingController from '../controllers/trackingController.js';
+import { RATE_LIMITS } from '../config/rateLimits.js';
 
 async function requireTrackingDebugRoutes(request, reply) {
   if (process.env.NODE_ENV !== 'production') return;
@@ -14,6 +15,7 @@ async function trackingRoutes(fastify, options) {
   fastify.route({
     method: ['GET', 'HEAD'],
     url: '/click',
+    config: { rateLimit: RATE_LIMITS.click },
     handler: async (request, reply) => {
       if (request.method === 'HEAD') {
         return reply.code(200).send();
@@ -23,11 +25,11 @@ async function trackingRoutes(fastify, options) {
   });
 
   // Impression tracking
-  fastify.get('/imp', trackingController.handleImpression);
+  fastify.get('/imp', { config: { rateLimit: RATE_LIMITS.imp } }, trackingController.handleImpression);
 
   // Generic event tracking (supports GET for backward compatibility)
-  fastify.get('/event', { config: { rateLimit: false } }, trackingController.handleEvent);
-  fastify.post('/event', { config: { rateLimit: false } }, trackingController.handleEvent);
+  fastify.get('/event', { config: { rateLimit: RATE_LIMITS.event } }, trackingController.handleEvent);
+  fastify.post('/event', { config: { rateLimit: RATE_LIMITS.event } }, trackingController.handleEvent);
 
   // Diagnostic endpoint to check click processing
   fastify.get('/debug/clicks', { preHandler: requireTrackingDebugRoutes }, async (request, reply) => {

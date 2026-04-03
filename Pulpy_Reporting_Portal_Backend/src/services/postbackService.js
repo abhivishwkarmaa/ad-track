@@ -9,6 +9,7 @@ import http from 'http';
 import crypto from 'crypto';
 
 import redis from '../config/redis.js';
+import { getAffiliatePostbackDecision } from '../utils/affiliatePostbackPolicy.js';
 
 // ---------- In-file lookups (no external findById/getOfferById) ----------
 /** Get offer by internal id only. Returns row or null. */
@@ -1371,15 +1372,10 @@ export class PostbackService {
       // Resolve callback URL: assignment.callback_url OR publisher.global_postback_url
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
-      // BUSINESS RULE: Affiliate postback fires ONLY when conversion status = 'approved'.
-      // Pending/rejected/rejected_cap → NO postback. Idempotency: only fire if not already fired.
-      const mayFirePostback = conversion &&
-        conversion.status === 'approved' &&
-        !conversion.affiliate_postback_fired &&
-        callbackUrl;
+      const postbackDecision = getAffiliatePostbackDecision({ conversion, callbackUrl });
 
       let postbackResult = null;
-      if (mayFirePostback) {
+      if (postbackDecision.fire) {
         postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
         if (postbackResult && postbackResult.success) {
           try {
@@ -1398,13 +1394,7 @@ export class PostbackService {
         postbackResult = {
           success: false,
           executed: false,
-          reason: !conversion
-            ? 'No conversion created'
-            : conversion.status !== 'approved'
-              ? 'Affiliate postback only fires for approved conversions'
-              : conversion.affiliate_postback_fired
-                ? 'Postback already fired (idempotency)'
-                : 'No callback URL configured'
+          reason: postbackDecision.reason
         };
       }
 
@@ -2306,13 +2296,10 @@ export class PostbackService {
       // 5. Fire Publisher Postback
       const [updatedConvRows] = await pool.query('SELECT * FROM conversions WHERE id = ?', [finalConversionId]);
       const updatedConv = updatedConvRows[0];
-      console.log('updatedConv', updatedConv);
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
-      console.log('assignment', assignment);
-      console.log('publisher', publisher);
-      console.log('callbackUrl', callbackUrl);
-      let postbackResult = { executed: false };
-      if (callbackUrl) {
+      const manualDecision = getAffiliatePostbackDecision({ conversion: updatedConv, callbackUrl });
+      let postbackResult = { success: false, executed: false, reason: manualDecision.reason };
+      if (manualDecision.fire) {
         postbackResult = await this.sendPublisherPostback(callbackUrl, updatedConv, click);
         if (postbackResult.success) {
           await pool.query(

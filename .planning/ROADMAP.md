@@ -8,11 +8,11 @@ This milestone hardens production security, tightens data and operational correc
 
 **Phase Numbering:** Integer phases only for this milestone.
 
-- [ ] **Phase 1: Production security hardening** — JWT, CORS, debug routes, and test-only surfaces safe in production
-- [ ] **Phase 2: Data correctness & pool safety** — Offer URL-key rules and MySQL pool configuration
-- [ ] **Phase 3: Operations & abuse mitigation** — Docker/port alignment and route-class rate limiting
-- [ ] **Phase 4: Maintainability & module boundaries** — Offer domain clarity and extraction plan for large services
-- [ ] **Phase 5: Quality & high-risk verification** — Postback/conversion tests and reporting regression coverage
+- [x] **Phase 1: Production security hardening** — JWT, CORS, debug routes, and test-only surfaces safe in production
+- [x] **Phase 2: Data correctness & pool safety** — Offer URL-key rules and MySQL pool configuration
+- [x] **Phase 3: Operations & abuse mitigation** — Docker/port alignment and route-class rate limiting
+- [x] **Phase 4: Maintainability & module boundaries** — Offer domain clarity and extraction plan for large services
+- [x] **Phase 5: Quality & high-risk verification** — Postback/conversion tests and reporting regression coverage
 
 ## Phase Details
 
@@ -71,6 +71,6 @@ This milestone hardens production security, tightens data and operational correc
 |-------|----------------|--------|-----------|
 | 1. Production security hardening | 1/1 | Implemented | 2026-04-03 |
 | 2. Data correctness & pool safety | 1/1 | Implemented | 2026-04-03 |
-| 3. Operations & abuse mitigation | 0/TBD | Not started | - |
-| 4. Maintainability & module boundaries | 0/TBD | Not started | - |
-| 5. Quality & high-risk verification | 0/TBD | Not started | - |
+| 3. Operations & abuse mitigation | 1/1 | Implemented | 2026-04-03 |
+| 4. Maintainability & module boundaries | 1/1 | Implemented | 2026-04-03 |
+| 5. Quality & high-risk verification | 1/1 | Implemented | 2026-04-03 |

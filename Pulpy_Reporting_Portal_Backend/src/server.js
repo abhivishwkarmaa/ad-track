@@ -8,6 +8,7 @@ import logger from './utils/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger, responseLogger } from './middleware/requestLogger.js';
 import { assertProductionSecrets } from './config/secrets.js';
+import { RATE_LIMITS } from './config/rateLimits.js';
 
 // Load environment variables
 dotenv.config();
@@ -82,8 +83,8 @@ async function initializeServer() {
   await fastify.register(cookie);
 
   await fastify.register(rateLimit, {
-    max: 5000,
-    timeWindow: '1 minute',
+    max: RATE_LIMITS.global.max,
+    timeWindow: RATE_LIMITS.global.timeWindow,
     skipOnError: true,
   });
 

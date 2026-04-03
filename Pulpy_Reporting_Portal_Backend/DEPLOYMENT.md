@@ -81,7 +81,7 @@ pm2 restart ecosystem.config.js
 Environment variables (in `.env`):
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
 - `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-- `PORT` (for API server)
+- `PORT` (for API server; default **5000**, aligned with `Dockerfile` and `docs/OPERATIONS_PORT_AND_RATELIMIT.md`)
 
 ## Health Checks
 

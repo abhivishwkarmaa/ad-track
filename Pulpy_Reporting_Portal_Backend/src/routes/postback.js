@@ -1,10 +1,10 @@
 import postbackController from '../controllers/postbackController.js';
+import { RATE_LIMITS } from '../config/rateLimits.js';
 
 async function postbackRoutes(fastify, options) {
-  // Postback endpoint - supports both GET and POST
-  fastify.get('/postback',{config:{rateLimit:false}}, postbackController.handlePostback);
-  
-  fastify.post('/postback', {config:{rateLimit:false}}, postbackController.handlePostback);
+  const rl = { config: { rateLimit: RATE_LIMITS.postback } };
+  fastify.get('/postback', rl, postbackController.handlePostback);
+  fastify.post('/postback', rl, postbackController.handlePostback);
 }
 
 export default postbackRoutes;

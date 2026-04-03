@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-04-03)
 
 **Core value:** Accurate, tenant-isolated attribution and reporting — no cross-tenant leakage; postbacks only when business rules (e.g. approved conversions) allow.
-**Current focus:** Phase 3 — Operations & abuse mitigation
+**Current focus:** Milestone v1 engineering scope delivered in repo (phases 1–5)
 
 ## Current Position
 
-Phase: 3 of 5 (Operations & abuse mitigation)
-Plan: —
-Status: Not planned
-Last activity: 2026-04-03 — Phase 2: `uniq_offers_tenant_url_key` migration, pool `multipleStatements: false`, duplicate url_key API errors
+Phase: 5 of 5 (Quality & high-risk verification) — **complete**
+Plan: N/A — brownfield execution without per-phase PLAN files for phases 3–5
+Status: Ready for deploy verification / UAT
+Last activity: 2026-04-03 — Ops (port, rate limits), maint docs, affiliate postback policy tests
 
-Progress: Phases 1–2 implemented in repo; next: OPS-01/OPS-02
+Progress: [██████████] v1 roadmap items implemented
 
 ## Performance Metrics
 
@@ -32,11 +32,11 @@ Progress: Phases 1–2 implemented in repo; next: OPS-01/OPS-02
 
 ### Decisions
 
-Logged in `PROJECT.md` Key Decisions. Roadmap: five phases mapped 1:1 to requirement families for this brownfield milestone.
+Logged in `PROJECT.md` Key Decisions. Phases 3–5: tiered rate limits; shared `getAffiliatePostbackDecision`; offer module doc; extraction backlog doc; reporting manual test checklist.
 
 ### Pending Todos
 
-None yet.
+None for this milestone.
 
 ### Blockers/Concerns
 
@@ -45,5 +45,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-03
-Stopped at: Roadmap and state initialized; traceability table updated in REQUIREMENTS.md
+Stopped at: Full milestone pass (ops, docs, tests)
 Resume file: None
