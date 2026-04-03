@@ -68,6 +68,9 @@ async function runMigrations() {
                 console.log(`   This means some clicks already have multiple conversions.`);
                 console.log(`   To fix this, you need to clean up duplicate conversions manually.`);
                 console.log(`   Skipping constraint addition - please resolve duplicates first.`);
+              } else if (err.code === 'ER_DUP_ENTRY' && err.message && err.message.includes('uniq_offers_tenant_url_key')) {
+                console.log(`⚠️  Skipping: cannot add uniq_offers_tenant_url_key — duplicate (tenant_id, url_key) rows exist.`);
+                console.log(`   Deduplicate offers.url_key per tenant, then re-run migrations.`);
               } else {
                 throw err;
               }

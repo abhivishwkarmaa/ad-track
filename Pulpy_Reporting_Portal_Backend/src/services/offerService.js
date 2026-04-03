@@ -2,6 +2,16 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 
+function mapDuplicateTenantUrlKey(error) {
+  if (error.code === 'ER_DUP_ENTRY' && (error.message || '').includes('uniq_offers_tenant_url_key')) {
+    const err = new Error('An offer with this URL key already exists for this tenant');
+    err.statusCode = 409;
+    err.code = 'DUPLICATE_URL_KEY';
+    return err;
+  }
+  return error;
+}
+
 export class OfferService {
   async create(data, tenantId = null) {
     try {
@@ -48,7 +58,7 @@ export class OfferService {
       return Array.isArray(rows) ? rows[0] : rows;
     } catch (error) {
       logger.error('OfferService.create error:', error);
-      throw error;
+      throw mapDuplicateTenantUrlKey(error);
     }
   }
 
@@ -344,16 +354,14 @@ export class OfferService {
     }
   }
 
-  async findByUrlKey(urlKey) {
-    // ✅ CRITICAL: URL key lookup should also consider tenant_id if provided
-    // Note: url_key uniqueness should be per-tenant, but for now we'll allow cross-tenant url_keys
-    // If tenant_id is provided, filter by it
-    let query = 'SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE url_key = ?';
+  async findByUrlKey(urlKey, tenantId = null) {
+    let query =
+      'SELECT id, name, category, advertiser_revenue, affiliate_model_cost, start_at, end_at, offer_url, preview_url, capping_per_day, fallback_url, status, url_key, tenant_id, created_at, updated_at FROM offers WHERE url_key = ?';
     const params = [urlKey];
-
-    // If tenant_id is provided, filter by it (for tenant isolation)
-    // If not provided, return first match (backward compatibility)
-    // TODO: Consider making url_key unique per tenant in database
+    if (tenantId != null) {
+      query += ' AND tenant_id = ?';
+      params.push(tenantId);
+    }
     const [rows] = await pool.query(query, params);
     return Array.isArray(rows) ? rows[0] : rows;
   }
@@ -454,7 +462,11 @@ export class OfferService {
     params.push(id);
 
     const query = `UPDATE offers SET ${fields.join(', ')} WHERE id = ?`;
-    await pool.query(query, params);
+    try {
+      await pool.query(query, params);
+    } catch (error) {
+      throw mapDuplicateTenantUrlKey(error);
+    }
     return this.findById(id);
   }
 

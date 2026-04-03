@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-04-03)
 
 **Core value:** Accurate, tenant-isolated attribution and reporting — no cross-tenant leakage; postbacks only when business rules (e.g. approved conversions) allow.
-**Current focus:** Phase 1 — Production security hardening
+**Current focus:** Phase 3 — Operations & abuse mitigation
 
 ## Current Position
 
-Phase: 1 of 5 (Production security hardening)
-Plan: 1 of 1 in current phase (`01-PLAN.md`)
-Status: Implemented (pending operator verification / deploy)
-Last activity: 2026-04-03 — Phase 1 code changes: JWT fail-fast, CORS allowlist, debug + test-postback gates
+Phase: 3 of 5 (Operations & abuse mitigation)
+Plan: —
+Status: Not planned
+Last activity: 2026-04-03 — Phase 2: `uniq_offers_tenant_url_key` migration, pool `multipleStatements: false`, duplicate url_key API errors
 
-Progress: [██████████] Phase 1 implementation complete in repo
+Progress: Phases 1–2 implemented in repo; next: OPS-01/OPS-02
 
 ## Performance Metrics
 

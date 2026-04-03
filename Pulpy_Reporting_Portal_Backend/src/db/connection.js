@@ -2,6 +2,8 @@ import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// App pool: multipleStatements false (see pool config below). Migrations run one statement at a time in migrate.js.
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '3306'),
@@ -14,7 +16,7 @@ const dbConfig = {
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
-  multipleStatements: true, // needed for running migration files with multiple SQL statements
+  multipleStatements: false,
 };
 
 // Log database configuration (without password)
@@ -49,7 +51,7 @@ const pool = mysql.createPool({
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
-  multipleStatements: true,
+  multipleStatements: false,
 });
 
 // --- FAULT TOLERANCE & HEALTH CHECK ---

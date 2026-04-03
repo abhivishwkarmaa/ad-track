@@ -52,8 +52,8 @@
 | SEC-02 | Phase 1 | Pending |
 | SEC-03 | Phase 1 | Pending |
 | SEC-04 | Phase 1 | Pending |
-| DATA-01 | Phase 2 | Pending |
-| DATA-02 | Phase 2 | Pending |
+| DATA-01 | Phase 2 | Implemented (migration + API mapping) |
+| DATA-02 | Phase 2 | Implemented (pool multipleStatements: false) |
 | OPS-01 | Phase 3 | Pending |
 | OPS-02 | Phase 3 | Pending |
 | MAINT-01 | Phase 4 | Pending |
