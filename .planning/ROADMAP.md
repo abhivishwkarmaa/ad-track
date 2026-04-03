@@ -69,7 +69,7 @@ This milestone hardens production security, tightens data and operational correc
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Production security hardening | 1/1 | Planned | - |
+| 1. Production security hardening | 1/1 | Implemented | 2026-04-03 |
 | 2. Data correctness & pool safety | 0/TBD | Not started | - |
 | 3. Operations & abuse mitigation | 0/TBD | Not started | - |
 | 4. Maintainability & module boundaries | 0/TBD | Not started | - |

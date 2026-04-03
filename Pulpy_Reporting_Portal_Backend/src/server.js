@@ -7,9 +7,38 @@ import dotenv from 'dotenv';
 import logger from './utils/logger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger, responseLogger } from './middleware/requestLogger.js';
+import { assertProductionSecrets } from './config/secrets.js';
 
 // Load environment variables
 dotenv.config();
+
+function parseCorsOriginList() {
+  const raw = process.env.CORS_ORIGINS || '';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+function assertProductionCorsOrigins() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const list = parseCorsOriginList();
+  if (list.length === 0) {
+    console.error(
+      '[FATAL] CORS_ORIGINS must be set in production to a comma-separated list of allowed browser origins (e.g. https://admin.example.com,https://tenant.example.com).'
+    );
+    process.exit(1);
+  }
+}
+
+function corsOriginCallback(origin, cb) {
+  if (process.env.NODE_ENV === 'production') {
+    const allowed = parseCorsOriginList();
+    if (!origin) return cb(null, true);
+    return cb(null, allowed.includes(origin));
+  }
+  const devDefaults = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+  const allowed = new Set([...devDefaults, ...parseCorsOriginList()]);
+  if (!origin) return cb(null, true);
+  return cb(null, allowed.has(origin));
+}
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -39,7 +68,7 @@ const fastify = Fastify({
 async function initializeServer() {
   // Register plugins
   await fastify.register(cors, {
-    origin: true, // allow all origins/ports
+    origin: corsOriginCallback,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-User-Activity'],
@@ -107,7 +136,11 @@ async function initializeServer() {
   await fastify.register(postbackRoutes);
   await fastify.register(reportRoutes, { prefix: '/api/admin/reports' });
   await fastify.register(dashboardRoutes, { prefix: '/api' });
-  await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
+  const isProd = process.env.NODE_ENV === 'production';
+  const enableTestPostback = !isProd || process.env.ENABLE_TEST_POSTBACK_ROUTES === 'true';
+  if (enableTestPostback) {
+    await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
+  }
   await fastify.register(contactRoutes, { prefix: '/api' }); // Contact form endpoint
   await fastify.register(subscriptionRoutes, { prefix: '/api' }); // Subscription management
 
@@ -168,7 +201,8 @@ async function initializeServer() {
 // Start server
 const start = async () => {
   try {
-    // Initialize server (register plugins and routes)
+    assertProductionSecrets();
+    assertProductionCorsOrigins();
     await initializeServer();
 
     const port = parseInt(process.env.PORT || '5000');

@@ -11,10 +11,10 @@ See: `.planning/PROJECT.md` (updated 2026-04-03)
 
 Phase: 1 of 5 (Production security hardening)
 Plan: 1 of 1 in current phase (`01-PLAN.md`)
-Status: Ready to execute
-Last activity: 2026-04-03 — Phase 1 planned (waves 1–4: SEC-01…SEC-04)
+Status: Implemented (pending operator verification / deploy)
+Last activity: 2026-04-03 — Phase 1 code changes: JWT fail-fast, CORS allowlist, debug + test-postback gates
 
-Progress: [█░░░░░░░░░] Planning complete; execution pending
+Progress: [██████████] Phase 1 implementation complete in repo
 
 ## Performance Metrics
 

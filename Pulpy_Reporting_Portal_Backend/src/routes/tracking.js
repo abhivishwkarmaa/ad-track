@@ -1,5 +1,13 @@
 import trackingController from '../controllers/trackingController.js';
 
+async function requireTrackingDebugRoutes(request, reply) {
+  if (process.env.NODE_ENV !== 'production') return;
+  const e = process.env.ENABLE_TRACKING_DEBUG_ROUTES;
+  if (e !== 'true' && e !== '1') {
+    return reply.code(404).send({ success: false });
+  }
+}
+
 async function trackingRoutes(fastify, options) {
   // Click tracking
   // Click tracking - handle both GET and HEAD
@@ -22,7 +30,7 @@ async function trackingRoutes(fastify, options) {
   fastify.post('/event', { config: { rateLimit: false } }, trackingController.handleEvent);
 
   // Diagnostic endpoint to check click processing
-  fastify.get('/debug/clicks', async (request, reply) => {
+  fastify.get('/debug/clicks', { preHandler: requireTrackingDebugRoutes }, async (request, reply) => {
     try {
       const redis = (await import('../config/redis.js')).default;
       const streamLength = await redis.xlen('stream:clicks');
@@ -67,7 +75,7 @@ async function trackingRoutes(fastify, options) {
   });
 
   // Diagnostic endpoint to check if offer/publisher/tenant exist
-  fastify.get('/debug/validate/:offerId/:publisherId', async (request, reply) => {
+  fastify.get('/debug/validate/:offerId/:publisherId', { preHandler: requireTrackingDebugRoutes }, async (request, reply) => {
     try {
       const { offerId, publisherId } = request.params;
       const pool = (await import('../db/connection.js')).default;
@@ -123,7 +131,7 @@ async function trackingRoutes(fastify, options) {
   });
 
   // Diagnostic endpoint to check worker status and recent database clicks
-  fastify.get('/debug/worker-status', async (request, reply) => {
+  fastify.get('/debug/worker-status', { preHandler: requireTrackingDebugRoutes }, async (request, reply) => {
     try {
       const redis = (await import('../config/redis.js')).default;
       const pool = (await import('../db/connection.js')).default;

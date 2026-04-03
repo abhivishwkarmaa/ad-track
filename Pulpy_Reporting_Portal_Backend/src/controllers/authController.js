@@ -8,10 +8,7 @@ import emailService from '../services/emailService.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
 import subscriptionService from '../services/subscriptionService.js';
-
-// JWT secrets - separate for admin and tenant users
-const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
-const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
+import { getAdminJwtSecret, getTenantJwtSecret } from '../config/secrets.js';
 const ACCESS_TOKEN_TTL = '5m';
 const REFRESH_TTL_SECONDS = 180 * 60; // 180 minutes (3 hours)
 const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
@@ -121,7 +118,7 @@ export class AuthController {
       }
 
       // ✅ STEP 6: Generate JWT token with appropriate secret
-      const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
+      const jwtSecret = tenantId ? getTenantJwtSecret() : getAdminJwtSecret();
       const tokenType = tenantId ? 'tenant' : 'admin';
 
       // Generate JWT token (include tenant_id and token type)
@@ -391,7 +388,7 @@ export class AuthController {
 
       // ✅ STEP 7: All validations passed - generate JWT token
       const tenantId = userTenantId; // Use user's tenant_id (matches request tenant)
-      const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
+      const jwtSecret = tenantId ? getTenantJwtSecret() : getAdminJwtSecret();
       const tokenType = tenantId ? 'tenant' : 'admin';
 
       // Generate JWT token (include tenant_id and token type)
@@ -663,7 +660,7 @@ export class AuthController {
       );
       reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
-      const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
+      const jwtSecret = tenantId ? getTenantJwtSecret() : getAdminJwtSecret();
       const tokenType = tenantId ? 'tenant' : 'admin';
       const token = jwt.sign(
         {
@@ -793,7 +790,7 @@ export class AuthController {
       // Generate a short-lived reset token
       const resetToken = jwt.sign(
         { email: userEmail, type: 'password_reset' },
-        ADMIN_JWT_SECRET,
+        getAdminJwtSecret(),
         { expiresIn: '15m' }
       );
 
@@ -823,7 +820,7 @@ export class AuthController {
       // Verify token
       let decoded;
       try {
-        decoded = jwt.verify(resetToken, ADMIN_JWT_SECRET);
+        decoded = jwt.verify(resetToken, getAdminJwtSecret());
       } catch (err) {
         return reply.code(401).send({ success: false, message: 'Invalid or expired reset token' });
       }

@@ -3,10 +3,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getTenantId } from './tenant.js';
 import redis from '../config/redis.js';
-
-// JWT secrets - separate for admin and tenant users
-const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
-const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
+import { getAdminJwtSecret, getTenantJwtSecret, getLegacyJwtSecret } from '../config/secrets.js';
 const REFRESH_COOKIE_NAME = 'refresh_token';
 const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours) inactivity
 const REFRESH_TTL_SECONDS = 180 * 60;   // Redis key TTL: 3 hours (extend on activity)
@@ -44,17 +41,17 @@ export async function authenticateAdmin(request, reply) {
 
     try {
       // Try admin secret first (for super admins)
-      decoded = jwt.verify(token, ADMIN_JWT_SECRET);
+      decoded = jwt.verify(token, getAdminJwtSecret());
       isAdminToken = true;
     } catch (adminError) {
       try {
         // Try tenant secret (for tenant admins)
-        decoded = jwt.verify(token, TENANT_JWT_SECRET);
+        decoded = jwt.verify(token, getTenantJwtSecret());
         isAdminToken = false;
       } catch (tenantError) {
         // Fallback to old secret for backward compatibility
         try {
-          decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+          decoded = jwt.verify(token, getLegacyJwtSecret());
           logger.warn('Using legacy JWT secret - consider migrating to new secrets');
         } catch (legacyError) {
           // All attempts failed

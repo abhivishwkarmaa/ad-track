@@ -7,6 +7,20 @@ import {
   TenantRequiredError
 } from '../utils/secureErrors.js';
 
+function isTrackingDebugPath(url) {
+  return (
+    url.startsWith('/debug/clicks') ||
+    url.startsWith('/debug/validate/') ||
+    url.startsWith('/debug/worker-status')
+  );
+}
+
+function trackingDebugRoutesEnabled() {
+  if (process.env.NODE_ENV !== 'production') return true;
+  const e = process.env.ENABLE_TRACKING_DEBUG_ROUTES;
+  return e === 'true' || e === '1';
+}
+
 /**
  * Tenant Resolution Middleware
  * 
@@ -23,10 +37,12 @@ import {
  */
 export async function resolveTenant(request, reply) {
   try {
-    // Skip tenant resolution for health checks, static assets, and debug endpoints
-    if (request.url === '/health' ||
+    // Skip tenant resolution for health checks, static assets, and debug endpoints (only when debug routes are enabled)
+    if (
+      request.url === '/health' ||
       request.url.startsWith('/static') ||
-      request.url.startsWith('/debug/')) {
+      (isTrackingDebugPath(request.url) && trackingDebugRoutesEnabled())
+    ) {
       return;
     }
 
