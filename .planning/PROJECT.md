@@ -24,7 +24,7 @@ A **multi-tenant ad tracking and reporting platform**: a **Fastify** API plus **
 
 ### Active
 
-- [ ] **Next milestone** — define product goals (e.g. new analytics, billing, UI) and add requirements to `.planning/REQUIREMENTS.md` after `/gsd-new-milestone` or manual planning
+- [ ] **vNext milestone** — define product or engineering goals; replace placeholder `.planning/REQUIREMENTS.md` and extend `.planning/ROADMAP.md` after `/gsd-new-milestone` or manual planning
 
 ### Out of Scope
 
@@ -71,4 +71,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-03 after v1 engineering milestone close-out*
+*Last updated: 2026-04-03 after v1.0 milestone archival and living roadmap/requirements reset*
