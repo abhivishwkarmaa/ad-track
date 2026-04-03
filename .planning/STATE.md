@@ -10,11 +10,11 @@ See: `.planning/PROJECT.md` (updated 2026-04-03)
 ## Current Position
 
 Phase: 1 of 5 (Production security hardening)
-Plan: — of — in current phase
-Status: Ready to plan
-Last activity: 2026-04-03 — Roadmap created (SEC → DATA → OPS → MAINT → QA)
+Plan: 1 of 1 in current phase (`01-PLAN.md`)
+Status: Ready to execute
+Last activity: 2026-04-03 — Phase 1 planned (waves 1–4: SEC-01…SEC-04)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] Planning complete; execution pending
 
 ## Performance Metrics
 
