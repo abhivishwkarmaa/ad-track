@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'Pulpy',
       script: 'src/server.js',
-      instances: 'max',
+      instances: 2,
       exec_mode: 'cluster',
 
       env: {
