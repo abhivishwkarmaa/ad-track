@@ -59,11 +59,8 @@ async function aggregateDay(istDate) {
       COUNT(DISTINCT ip)  AS unique_ips
     FROM clicks
     WHERE created_at BETWEEN ? AND ?
-      AND referrer IS NOT NULL AND referrer <> ''
     GROUP BY tenant_id, publisher_id, offer_id
   `, [utcStart, utcEnd]);
-
-    if (clickRows.length === 0) return 0; // no data this day
 
     // --- Conversion aggregates (reads from main conversions table) ---
     // FINANCIAL SEPARATION RULES:
@@ -79,7 +76,7 @@ async function aggregateDay(istDate) {
       COUNT(*)                                                                AS total_conversions,
       COUNT(CASE WHEN status = 'approved'                    THEN 1 END)     AS approved_conversions,
       COUNT(CASE WHEN status = 'pending'                     THEN 1 END)     AS pending_conversions,
-      COUNT(CASE WHEN status IN ('rejected','rejected_cap')  THEN 1 END)     AS rejected_conversions,
+      COUNT(CASE WHEN status IN ('rejected','rejected_cap','click_expired')  THEN 1 END)     AS rejected_conversions,
       COALESCE(SUM(amount), 0)                                               AS revenue,
       COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout,
       COALESCE(SUM(CASE WHEN status = 'pending'  THEN payout ELSE 0 END), 0) AS pending_payout
@@ -94,8 +91,11 @@ async function aggregateDay(istDate) {
         convMap.set(`${row.tenant_id}:${row.publisher_id}:${row.offer_id}`, row);
     }
 
-    const values = clickRows.map(c => {
-        const conv = convMap.get(`${c.tenant_id}:${c.publisher_id}:${c.offer_id}`) || {};
+    const clickKeySet = new Set();
+    const values = clickRows.map((c) => {
+        const key = `${c.tenant_id}:${c.publisher_id}:${c.offer_id}`;
+        clickKeySet.add(key);
+        const conv = convMap.get(key) || {};
         const revenue = parseFloat(conv.revenue || 0);
         const payout = parseFloat(conv.payout || 0);
         const pendingPayout = parseFloat(conv.pending_payout || 0);
@@ -118,6 +118,33 @@ async function aggregateDay(istDate) {
             profit,
         ];
     });
+
+    for (const row of convRows) {
+        const key = `${row.tenant_id}:${row.publisher_id}:${row.offer_id}`;
+        if (clickKeySet.has(key)) continue;
+        const revenue = parseFloat(row.revenue || 0);
+        const payout = parseFloat(row.payout || 0);
+        const pendingPayout = parseFloat(row.pending_payout || 0);
+        const profit = parseFloat((revenue - payout).toFixed(4));
+        values.push([
+            row.tenant_id,
+            istDate,
+            row.publisher_id,
+            row.offer_id,
+            0,
+            0,
+            parseInt(row.total_conversions || 0),
+            parseInt(row.approved_conversions || 0),
+            parseInt(row.pending_conversions || 0),
+            parseInt(row.rejected_conversions || 0),
+            revenue,
+            payout,
+            pendingPayout,
+            profit,
+        ]);
+    }
+
+    if (values.length === 0) return 0;
 
     // --- Upsert into daily_click_stats ---
     await pool.query(`

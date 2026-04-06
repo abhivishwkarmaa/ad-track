@@ -1,6 +1,11 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
+import {
+  summaryShouldUseDailyClickStats,
+  fourDimShouldUseDailyClickStats,
+} from '../utils/reportDailyRollup.js';
+import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 
 export class ReportService {
   async getSummary(filters = {}, tenantId = null) {
@@ -68,6 +73,44 @@ export class ReportService {
           convParams.push(`%${filters.referrer}%`);
         }
       }
+
+      // Pre-aggregated path: sealed IST days — reads `daily_reporting_rollup` (REPORTING_ROLLUP_TABLE).
+      if (tenantId && summaryShouldUseDailyClickStats(filters)) {
+        const rt = getReportingRollupTableName();
+        const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+        const fromDate = filters.date_from || todayIST;
+        const toDate = filters.date_to || todayIST;
+        const dParams = [tenantId, fromDate, toDate];
+        let dWhere = 'tenant_id = ? AND stat_date BETWEEN ? AND ?';
+        if (filters.offer_id) {
+          dWhere += ' AND offer_id = ?';
+          dParams.push(filters.offer_id);
+        }
+        if (filters.publisher_id) {
+          dWhere += ' AND publisher_id = ?';
+          dParams.push(filters.publisher_id);
+        }
+        const rollupSql = `
+          SELECT
+            COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN publisher_id END) AS affiliates,
+            COALESCE(SUM(total_clicks), 0) AS unique_clicks,
+            COALESCE(SUM(total_conversions), 0) AS conversions,
+            COALESCE(SUM(revenue), 0) AS revenue,
+            COALESCE(SUM(payout), 0) AS payout,
+            COALESCE(SUM(profit), 0) AS profit,
+            0 AS impressions
+          FROM ${rt}
+          WHERE ${dWhere}
+        `;
+        const [dRows] = await pool.query(rollupSql, dParams);
+        const summary = dRows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
+        const conversionRate = summary.unique_clicks > 0
+          ? (summary.conversions / summary.unique_clicks) * 100
+          : 0;
+        return { ...summary, conversion_rate: parseFloat(conversionRate.toFixed(2)) };
+      }
+
+
       const sql = `
         SELECT
           (SELECT COUNT(DISTINCT publisher_id) FROM clicks      WHERE ${clickWhere}) AS affiliates,
@@ -816,6 +859,76 @@ export class ReportService {
 
             // COUNT(DISTINCT ip) is expensive on large month ranges — only compute when UI asks for unique clicks.
             const needsUniqueClicksAgg = wantsMetric('unique_clicks') || includeAllMetrics;
+
+            const useDailyRollupFourDim = fourDimShouldUseDailyClickStats({
+              groupBy,
+              hasComplexFilters,
+              allDates,
+              dateTo: toDate,
+            });
+
+            if (useDailyRollupFourDim) {
+              const selectPartsDaily = [
+                'd.stat_date as date_group',
+                'COALESCE(o.public_offer_id, CAST(d.offer_id AS CHAR)) as offer_id',
+                'COALESCE(NULLIF(TRIM(o.name), \'\'), CONCAT(\'Offer #\', d.offer_id)) as offer_name',
+                'd.publisher_id as publisher_id',
+                `COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', d.publisher_id)) as publisher_name`,
+                `COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', d.publisher_id, '@unknown')) as publisher_email`,
+                'COALESCE(a.public_advertiser_id, CAST(o.advertiser_id AS CHAR)) as advertiser_id',
+                `COALESCE(NULLIF(TRIM(a.name), ''), CONCAT('Advertiser #', o.advertiser_id)) as advertiser_name`,
+              ];
+              if (wantsMetric('clicks') || includeAllMetrics) selectPartsDaily.push('d.total_clicks as clicks');
+              if (needsUniqueClicksAgg) selectPartsDaily.push('d.unique_ips as unique_clicks');
+              if (wantsMetric('impressions')) selectPartsDaily.push('0 as impressions');
+              if (needsConversionMetrics) {
+                if (wantsMetric('conversions') || includeAllMetrics) selectPartsDaily.push('d.total_conversions as conversions');
+                if (wantsMetric('approved_conversions') || includeAllMetrics) selectPartsDaily.push('d.approved_conversions as approved_conversions');
+                if (wantsMetric('pending_conversions') || includeAllMetrics) selectPartsDaily.push('d.pending_conversions as pending_conversions');
+                if (wantsMetric('rejected_conversions') || includeAllMetrics) selectPartsDaily.push('d.rejected_conversions as rejected_conversions');
+                if (wantsMetric('revenue') || includeAllMetrics) selectPartsDaily.push('d.revenue as revenue');
+                if (wantsMetric('payout') || includeAllMetrics) selectPartsDaily.push('d.payout as payout');
+                if (wantsMetric('profit') || includeAllMetrics) selectPartsDaily.push('d.profit as profit');
+                if (wantsMetric('pending_payout') || includeAllMetrics) selectPartsDaily.push('d.pending_payout as pending_payout');
+                if (wantsMetric('approved_payout') || includeAllMetrics) selectPartsDaily.push('d.payout as approved_payout');
+              }
+
+              const dailyParams = [tenantId, fromDate, toDate];
+
+              const dataQueryDaily = `
+                SELECT
+                  ${selectPartsDaily.join(',\n                  ')},
+                  cnt.__total
+                FROM daily_click_stats d
+                LEFT JOIN offers o ON o.id = d.offer_id
+                LEFT JOIN publishers p ON p.id = d.publisher_id
+                LEFT JOIN advertisers a ON a.id = o.advertiser_id
+                CROSS JOIN (
+                  SELECT COUNT(*) AS __total
+                  FROM daily_click_stats dcnt
+                  WHERE dcnt.tenant_id = ? AND dcnt.stat_date BETWEEN ? AND ?
+                ) cnt
+                WHERE d.tenant_id = ? AND d.stat_date BETWEEN ? AND ?
+                ORDER BY d.stat_date DESC, d.total_clicks DESC, d.offer_id ASC, d.publisher_id ASC
+              `;
+              const dataParamsDaily = [...dailyParams, tenantId, fromDate, toDate, tenantId, fromDate, toDate];
+
+              if (filters.export === 'csv' || filters.export === 'true') {
+                const [exportRows] = await pool.query(dataQueryDaily, dataParamsDaily);
+                exportRows.forEach(r => { delete r.__total; });
+                return { data: exportRows, isExport: true };
+              }
+
+              const pagedQueryDaily = `${dataQueryDaily} LIMIT ? OFFSET ?`;
+              const [rows] = await pool.query(pagedQueryDaily, [...dataParamsDaily, limit, offset]);
+              const total = rows.length > 0 ? Number(rows[0].__total || 0) : 0;
+              rows.forEach(r => { delete r.__total; });
+              return {
+                data: rows,
+                pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+                isAggregated: true,
+              };
+            }
 
             // Use a single statement with CTEs so clicks/conversions are scanned once.
 

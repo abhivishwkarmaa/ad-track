@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
 import logoImage from '../../assets/logo.png';
 import './Login.css';
+import { resetAppClientData } from '../../utils/appClientLifecycle.js';
 
 function Login() {
     const { login } = useAuth();
@@ -22,7 +23,7 @@ function Login() {
             if (!result.success) {
                 setError(result.error || 'Login failed. Please try again.');
             }
-        } catch (err) {
+        } catch {
             setError('An unexpected error occurred. Please try again.');
         } finally {
             setLoading(false);
@@ -102,6 +103,15 @@ function Login() {
                         <button type="submit" className="login-btn" disabled={loading}>
                             {loading ? 'Signing in...' : 'Sign In'}
                         </button>
+                        <p className="login-troubleshoot">
+                            <button
+                                type="button"
+                                className="login-troubleshoot-btn"
+                                onClick={() => resetAppClientData()}
+                            >
+                                Page not loading correctly? Clear app data
+                            </button>
+                        </p>
                     </form>
                 </div>
             </div>

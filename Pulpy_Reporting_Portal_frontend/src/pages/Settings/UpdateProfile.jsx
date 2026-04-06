@@ -4,6 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { authAPI } from '../../services/api';
 import { REPORT_TIMEZONE_OPTIONS } from '../../utils/reportTimezone';
+import { resetAppClientData } from '../../utils/appClientLifecycle.js';
 import './Settings.css';
 
 function UpdateProfile() {
@@ -38,7 +39,7 @@ function UpdateProfile() {
         try {
             await updateProfile(formData);
             toast.success('Profile updated successfully!');
-        } catch (error) {
+        } catch {
             toast.error('Failed to update profile');
         } finally {
             setLoading(false);
@@ -255,6 +256,22 @@ function UpdateProfile() {
                             </div>
                         </div>
                     )}
+                </div>
+
+                <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+                <div className="settings-form-section">
+                    <h3 className="settings-form-section-title">App &amp; browser</h3>
+                    <p className="settings-app-help">
+                        The app also refreshes on its own after you have been idle for a while so updates load without you doing anything. If something still looks wrong on this device, you can clear saved app data—you will need to sign in again.
+                    </p>
+                    <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={() => resetAppClientData()}
+                    >
+                        Clear app data and sign out
+                    </button>
                 </div>
             </div>
         </div>

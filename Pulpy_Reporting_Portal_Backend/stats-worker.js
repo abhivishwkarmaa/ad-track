@@ -27,6 +27,8 @@ async function main() {
         // Start the stats worker
         await startStatsWorker();
 
+        // Reporting rollup lives in reporting-stats-worker.js → daily_reporting_rollup (not started here).
+
         // Start Redis hygiene worker (runs every hour) - moved from server.js to run as singleton here
         if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
             try {
