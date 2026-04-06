@@ -5,6 +5,10 @@
  *
  *   node backfill-reporting-rollup.js
  *   node backfill-reporting-rollup.js 2026-01-22 2026-02-24
+ *
+ * Live log line-by-line (nohup file): stdbuf -oL node backfill-reporting-rollup.js ...
+ *
+ * Days with zero clicks AND zero conversions insert nothing (rollup stays empty for that date).
  */
 import dotenv from 'dotenv';
 dotenv.config();
@@ -18,10 +22,12 @@ function istDateToUtcRange(dateStr) {
   return { utcStart, utcEnd };
 }
 
+/** Next calendar day for YYYY-MM-DD (IST labels; no mixed TZ bugs). */
 function addDays(dateStr, n) {
-  const d = new Date(`${dateStr}T00:00:00+05:30`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return new Date(d.getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
 }
 
 function dateRange(fromDate, toDate) {
