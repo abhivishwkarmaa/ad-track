@@ -5,6 +5,9 @@ import assignmentService from './assignmentService.js';
 import logger from '../utils/logger.js';
 import pool from '../db/connection.js';
 
+/** publisher_offers columns needed for tracking (capping + publisher fallback redirect) */
+export const PUBLISHER_OFFERS_TRACKING_COLUMNS = `id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_type, capping_duration, capping_action, fallback_type, fallback_url, fallback_offer_id, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes`;
+
 const TTL = {
     OFFER: 300,        // 5 Minutes (Reference data doesn't change often)
     PUBLISHER: 300,
@@ -67,7 +70,7 @@ export class CacheService {
         } catch (e) { }
 
         // ✅ CRITICAL: Add tenant_id filtering to query
-        let query = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
+        let query = `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?`;
         const params = [publisherId, offerId, 'active'];
 
         if (tenantId) {

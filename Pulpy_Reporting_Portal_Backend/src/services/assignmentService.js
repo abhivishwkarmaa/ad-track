@@ -71,6 +71,14 @@ export class AssignmentService {
         const capAction = pubData.capping_action || 'stop';
         const capAmount = pubData.capping_amount || 0;
 
+        const fallbackType = capAction === 'fallback' ? (pubData.fallback_type || null) : null;
+        const fallbackUrl = capAction === 'fallback' && pubData.fallback_type === 'custom'
+          ? (pubData.fallback_url || null)
+          : null;
+        const fallbackOfferId = capAction === 'fallback' && pubData.fallback_type === 'offer' && pubData.fallback_offer_id
+          ? parseInt(pubData.fallback_offer_id, 10)
+          : null;
+
         let budgetAmount = null;
         let convAmount = null;
 
@@ -90,17 +98,21 @@ export class AssignmentService {
             publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, 
             conversion_approval_percentage,
             capping_type, capping_duration, capping_action,
+            fallback_type, fallback_url, fallback_offer_id,
             capping_budget_duration, capping_budget_amount,
             capping_conversions_duration, capping_conversions_amount,
             callback_url, destination_url,
             notes, status, assigned_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
           ON DUPLICATE KEY UPDATE 
             payout_override = VALUES(payout_override),
             conversion_approval_percentage = VALUES(conversion_approval_percentage),
             capping_type = VALUES(capping_type),
             capping_duration = VALUES(capping_duration),
             capping_action = VALUES(capping_action),
+            fallback_type = VALUES(fallback_type),
+            fallback_url = VALUES(fallback_url),
+            fallback_offer_id = VALUES(fallback_offer_id),
             capping_budget_duration = VALUES(capping_budget_duration),
             capping_budget_amount = VALUES(capping_budget_amount),
             capping_conversions_duration = VALUES(capping_conversions_duration),
@@ -119,6 +131,9 @@ export class AssignmentService {
             capType,
             capDuration,
             capAction,
+            fallbackType,
+            fallbackUrl,
+            fallbackOfferId,
             cappingBudgetDuration,
             budgetAmount,
             cappingConversionsDuration,
@@ -267,6 +282,9 @@ export class AssignmentService {
       capping_type: assignment.capping_type,
       capping_duration: assignment.capping_duration,
       capping_action: assignment.capping_action,
+      fallback_type: assignment.fallback_type,
+      fallback_url: assignment.fallback_url,
+      fallback_offer_id: assignment.fallback_offer_id,
       capping_amount: assignment.capping_type === 'budget'
         ? assignment.capping_budget_amount
         : (assignment.capping_type === 'conversion' ? assignment.capping_conversions_amount : null),
@@ -559,6 +577,25 @@ export class AssignmentService {
       if (data.capping_action !== undefined) {
         updateFields.push('capping_action = ?');
         updateValues.push(data.capping_action);
+        if (data.capping_action !== 'fallback') {
+          updateFields.push('fallback_type = ?', 'fallback_url = ?', 'fallback_offer_id = ?');
+          updateValues.push(null, null, null);
+        }
+      }
+
+      if (data.capping_action === undefined || data.capping_action === 'fallback') {
+        if (data.fallback_type !== undefined) {
+          updateFields.push('fallback_type = ?');
+          updateValues.push(data.fallback_type);
+        }
+        if (data.fallback_url !== undefined) {
+          updateFields.push('fallback_url = ?');
+          updateValues.push(data.fallback_url || null);
+        }
+        if (data.fallback_offer_id !== undefined) {
+          updateFields.push('fallback_offer_id = ?');
+          updateValues.push(data.fallback_offer_id ?? null);
+        }
       }
 
       // Legacy support (optional, if frontend sends old structure)

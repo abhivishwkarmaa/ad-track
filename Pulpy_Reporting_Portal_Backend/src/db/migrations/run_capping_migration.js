@@ -66,7 +66,16 @@ async function runMigration() {
         const [pubAct] = await connection.query("SHOW COLUMNS FROM publisher_offers LIKE 'capping_action'");
         if (pubAct.length === 0) {
             logger.info('Adding capping_action to publisher_offers...');
-            await connection.query("ALTER TABLE publisher_offers ADD COLUMN capping_action ENUM('stop', 'reject') DEFAULT 'stop'");
+            await connection.query("ALTER TABLE publisher_offers ADD COLUMN capping_action ENUM('stop', 'reject', 'fallback') DEFAULT 'stop'");
+        }
+
+        const [pubFallbackType] = await connection.query("SHOW COLUMNS FROM publisher_offers LIKE 'fallback_type'");
+        if (pubFallbackType.length === 0) {
+            logger.info('Extending publisher_offers capping_action + adding fallback columns...');
+            await connection.query("ALTER TABLE publisher_offers MODIFY COLUMN capping_action ENUM('stop', 'reject', 'fallback') DEFAULT 'stop'");
+            await connection.query("ALTER TABLE publisher_offers ADD COLUMN fallback_type ENUM('offer', 'custom') NULL DEFAULT NULL AFTER capping_action");
+            await connection.query("ALTER TABLE publisher_offers ADD COLUMN fallback_url VARCHAR(500) NULL DEFAULT NULL AFTER fallback_type");
+            await connection.query("ALTER TABLE publisher_offers ADD COLUMN fallback_offer_id INT NULL DEFAULT NULL AFTER fallback_url");
         }
 
         logger.info('Migration complete.');

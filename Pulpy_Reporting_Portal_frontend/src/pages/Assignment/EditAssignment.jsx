@@ -41,6 +41,9 @@ function EditAssignment() {
         capping_duration: 'daily',
         capping_amount: '',
         capping_action: 'stop',
+        fallback_type: 'offer',
+        fallback_url: '',
+        fallback_offer_id: '',
         callback_url: '',
         offer_url: '',
         notes: '',
@@ -80,6 +83,9 @@ function EditAssignment() {
                         capping_type: data.capping_type || 'none',
                         capping_duration: data.capping_duration || 'daily',
                         capping_action: data.capping_action || 'stop',
+                        fallback_type: data.fallback_type || 'offer',
+                        fallback_url: data.fallback_url || '',
+                        fallback_offer_id: data.fallback_offer_id?.toString() || '',
                         capping_amount: data.capping_type !== 'none' ? data.capping_amount : '',
                         callback_url: data.callback_url || '',
                         offer_url: data.offer_url || '',
@@ -132,6 +138,11 @@ function EditAssignment() {
                 capping_duration: formData.capping_duration,
                 capping_action: formData.capping_action,
                 capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+                fallback_type: formData.capping_action === 'fallback' ? formData.fallback_type : null,
+                fallback_url: formData.capping_action === 'fallback' && formData.fallback_type === 'custom' ? (formData.fallback_url || null) : null,
+                fallback_offer_id: formData.capping_action === 'fallback' && formData.fallback_type === 'offer' && formData.fallback_offer_id
+                    ? parseInt(formData.fallback_offer_id, 10)
+                    : null,
 
                 callback_url: formData.callback_url || null,
                 offer_url: formData.offer_url || null, // Will be mapped to destination_url in backend
@@ -286,11 +297,66 @@ function EditAssignment() {
                                         >
                                             <option value="stop">Stop Traffic</option>
                                             <option value="reject">Reject Conversions</option>
+                                            <option value="fallback">Fallback (redirect)</option>
                                         </select>
                                     </div>
                                 </>
                             )}
                         </div>
+
+                        {formData.capping_type !== 'none' && formData.capping_action === 'fallback' && (
+                            <div className="assignment-form-section" style={{ marginTop: '16px' }}>
+                                <h3 className="assignment-form-section-title">Publisher cap — fallback</h3>
+                                <div className="assignment-form-row two-col">
+                                    <div className="form-group">
+                                        <label className="form-label">Fallback type</label>
+                                        <select
+                                            className="form-control"
+                                            value={formData.fallback_type}
+                                            onChange={(e) => handleChange('fallback_type', e.target.value)}
+                                        >
+                                            <option value="offer">Redirect to another offer</option>
+                                            <option value="custom">Custom URL</option>
+                                        </select>
+                                    </div>
+                                    {formData.fallback_type === 'custom' ? (
+                                        <div className="form-group">
+                                            <label className="form-label required">Custom URL</label>
+                                            <input
+                                                type="url"
+                                                className="form-control"
+                                                value={formData.fallback_url}
+                                                onChange={(e) => handleChange('fallback_url', e.target.value)}
+                                                placeholder="https://..."
+                                                required
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="form-group">
+                                            <label className="form-label required">Fallback offer</label>
+                                            <select
+                                                className="form-control"
+                                                value={formData.fallback_offer_id}
+                                                onChange={(e) => handleChange('fallback_offer_id', e.target.value)}
+                                                required
+                                            >
+                                                <option value="">Select offer…</option>
+                                                {offers
+                                                    .filter(offer => String(offer.id) !== String(formData.offer_id))
+                                                    .map(offer => (
+                                                    <option key={offer.id} value={offer.id}>
+                                                        #{offer.public_offer_id ?? offer.id} — {offer.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="form-hint" style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
+                                    For “another offer”, this publisher must also be assigned to that offer (active).
+                                </p>
+                            </div>
+                        )}
 
                         <div className="form-group">
                             <label className="form-label">Callback URL</label>
