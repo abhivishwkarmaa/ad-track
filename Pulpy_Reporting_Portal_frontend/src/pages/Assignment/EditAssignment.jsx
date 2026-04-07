@@ -32,6 +32,8 @@ function EditAssignment() {
     const [assignment, setAssignment] = useState(null);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
+    /** Internal offer_ids this publisher already has an active assignment for (for fallback-offer picker). */
+    const [publisherAssignedOfferIds, setPublisherAssignedOfferIds] = useState([]);
     const [formData, setFormData] = useState({
         offer_id: '',
         publisher_id: '',
@@ -66,6 +68,28 @@ function EditAssignment() {
         };
         fetchData();
     }, [refreshKey]);
+
+    useEffect(() => {
+        const loadPublisherAssignments = async () => {
+            const pubId = formData.publisher_id;
+            if (!pubId) {
+                setPublisherAssignedOfferIds([]);
+                return;
+            }
+            try {
+                const res = await assignmentsAPI.getAssignments({ publisher_id: pubId, status: 'active' });
+                if (res.success && Array.isArray(res.data)) {
+                    setPublisherAssignedOfferIds(res.data.map(a => String(a.offer_id)));
+                } else {
+                    setPublisherAssignedOfferIds([]);
+                }
+            } catch (err) {
+                console.error('Error loading publisher assignments for fallback offers:', err);
+                setPublisherAssignedOfferIds([]);
+            }
+        };
+        loadPublisherAssignments();
+    }, [formData.publisher_id, refreshKey]);
 
     useEffect(() => {
         const fetchAssignment = async () => {
@@ -172,6 +196,13 @@ function EditAssignment() {
             </div>
         );
     }
+
+    const fallbackOfferOptions = offers.filter(offer => {
+        const id = String(offer.id);
+        if (id === String(formData.fallback_offer_id)) return true;
+        if (id === String(formData.offer_id)) return false;
+        return publisherAssignedOfferIds.includes(id);
+    });
 
     return (
         <div className="assignment-page">
@@ -341,9 +372,7 @@ function EditAssignment() {
                                                 required
                                             >
                                                 <option value="">Select offer…</option>
-                                                {offers
-                                                    .filter(offer => String(offer.id) !== String(formData.offer_id))
-                                                    .map(offer => (
+                                                {fallbackOfferOptions.map(offer => (
                                                     <option key={offer.id} value={offer.id}>
                                                         #{offer.public_offer_id ?? offer.id} — {offer.name}
                                                     </option>
@@ -353,7 +382,7 @@ function EditAssignment() {
                                     )}
                                 </div>
                                 <p className="form-hint" style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
-                                    For “another offer”, this publisher must also be assigned to that offer (active).
+                                    Only offers this publisher is already assigned to (active) are listed. Clicks after redirect are counted on the fallback offer only — not on this offer.
                                 </p>
                             </div>
                         )}

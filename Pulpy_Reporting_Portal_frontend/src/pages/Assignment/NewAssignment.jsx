@@ -15,6 +15,10 @@ function NewAssignment() {
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublishers, setSelectedPublishers] = useState([]);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
+    /** publisher_id -> list of internal offer_ids that publisher already has an active assignment for */
+    const [assignedOffersByPublisher, setAssignedOffersByPublisher] = useState({});
+
+    const publisherIdsKey = publisherAssignments.map(a => a.publisher_id).sort((a, b) => a - b).join(',');
 
     useEffect(() => {
         const fetchData = async () => {
@@ -31,8 +35,35 @@ function NewAssignment() {
             }
         };
         fetchData();
-        fetchData();
     }, [toast, refreshKey]);
+
+    useEffect(() => {
+        const loadAssignedOffers = async () => {
+            const ids = [...new Set(publisherAssignments.map(a => a.publisher_id))];
+            if (ids.length === 0) {
+                setAssignedOffersByPublisher({});
+                return;
+            }
+            const next = {};
+            await Promise.all(
+                ids.map(async (pid) => {
+                    try {
+                        const res = await assignmentsAPI.getAssignments({ publisher_id: pid, status: 'active' });
+                        if (res.success && Array.isArray(res.data)) {
+                            next[pid] = res.data.map(a => String(a.offer_id));
+                        } else {
+                            next[pid] = [];
+                        }
+                    } catch (err) {
+                        console.error('Error loading assignments for publisher', pid, err);
+                        next[pid] = [];
+                    }
+                })
+            );
+            setAssignedOffersByPublisher(next);
+        };
+        loadAssignedOffers();
+    }, [publisherIdsKey, refreshKey]);
 
     const handleAddPublisher = (publisherId) => {
         if (!publisherId) return;
@@ -316,9 +347,13 @@ function NewAssignment() {
                                                                         required
                                                                     >
                                                                         <option value="">Select offer…</option>
-                                                                        {offers
-                                                                            .filter(o => String(o.id) !== String(selectedOffer))
-                                                                            .map(offer => (
+                                                                        {(offers.filter(o => {
+                                                                            const id = String(o.id);
+                                                                            const assignedIds = assignedOffersByPublisher[assignment.publisher_id] || [];
+                                                                            if (id === String(assignment.fallback_offer_id)) return true;
+                                                                            if (id === String(selectedOffer)) return false;
+                                                                            return assignedIds.includes(id);
+                                                                        })).map(offer => (
                                                                                 <option key={offer.id} value={offer.id}>
                                                                                     #{offer.public_offer_id ?? offer.id} — {offer.name}
                                                                                 </option>
@@ -327,6 +362,9 @@ function NewAssignment() {
                                                                 </div>
                                                             )}
                                                         </div>
+                                                        <p style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
+                                                            Only offers this publisher is already assigned to (excluding the offer above). If the list is empty, assign them to the fallback offer first, then return here. Clicks after redirect are counted on the fallback offer only.
+                                                        </p>
                                                     </div>
                                                 )}
 
