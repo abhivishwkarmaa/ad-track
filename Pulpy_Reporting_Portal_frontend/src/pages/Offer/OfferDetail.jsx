@@ -67,6 +67,16 @@ const CopyIcon = () => (
     </svg>
 );
 
+const ShareIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="18" cy="5" r="3" />
+        <circle cx="6" cy="12" r="3" />
+        <circle cx="18" cy="19" r="3" />
+        <line x1="8.7" y1="10.7" x2="15.3" y2="6.3" />
+        <line x1="8.7" y1="13.3" x2="15.3" y2="17.7" />
+    </svg>
+);
+
 const CheckIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <polyline points="20 6 9 17 4 12" />
@@ -512,6 +522,50 @@ function OfferDetail() {
     const reportTzLabel =
         REPORT_TIMEZONE_OPTIONS.find((o) => o.id === reportTimezone)?.label ?? reportTimezone;
 
+    const safeParseJson = (value) => {
+        if (!value) return null;
+        if (typeof value === 'object') return value;
+        try {
+            return JSON.parse(value);
+        } catch {
+            return null;
+        }
+    };
+
+    const buildAssignmentShareText = (offerObj, assignmentObj) => {
+        const conversionModel = offerObj?.advertiser_model || offerObj?.affiliate_model || '-';
+        const country = offerObj?.country || '-';
+        const carrierJson = safeParseJson(offerObj?.carrier_targeting_json);
+        const carrier =
+            (carrierJson?.carrier && Array.isArray(carrierJson.carrier) && carrierJson.carrier.length > 0)
+                ? carrierJson.carrier.join(', ')
+                : '-';
+
+        const hasDeviceTargeting = !!(safeParseJson(offerObj?.device_targeting_json)?.device?.length);
+        const hasOsTargeting = !!(safeParseJson(offerObj?.os_targeting_json)?.os?.length);
+        const hasBrowserTargeting = !!(safeParseJson(offerObj?.browser_targeting_json)?.browser?.length);
+        const platforms = (!hasDeviceTargeting && !hasOsTargeting && !hasBrowserTargeting) ? 'All platforms' : 'Targeted';
+
+        const payout = assignmentObj?.payout_override ?? offerObj?.affiliate_amount ?? '-';
+        const description = offerObj?.description || '-';
+        const tags = offerObj?.tags || '-';
+        const categories = offerObj?.category || '-';
+        const trackingLink = assignmentObj?.tracking_url || '-';
+
+        return [
+            `Offer:  ${offerObj?.name || '-'}`,
+            `Conversion model: ${conversionModel}`,
+            `Country:  ${country}`,
+            `Carrier:  ${carrier}`,
+            `Platforms: ${platforms}`,
+            `Payout: ${payout}`,
+            `Description: ${description}`,
+            `Tags: ${tags}`,
+            `Categories: ${categories}`,
+            `Tracking link: ${trackingLink}`,
+        ].join('\n');
+    };
+
     const formatConversionStatus = (status) => {
         if (!status) return '-';
         const normalized = String(status).toLowerCase();
@@ -691,6 +745,14 @@ function OfferDetail() {
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Currency:</span>
                             <span className="detail-value">{offer.offer_currency}</span>
+                        </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Billing Flow:</span>
+                            <span className="detail-value">{offer.billing_flow || '-'}</span>
+                        </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Billing Type:</span>
+                            <span className="detail-value">{offer.billing_type || '-'}</span>
                         </div>
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Start Date:</span>
@@ -1183,6 +1245,39 @@ function OfferDetail() {
 
                                     {/* Column 3: Actions */}
                                     <div className="actions-col">
+                                        <button
+                                            className="icon-btn"
+                                            onClick={async () => {
+                                                try {
+                                                    const text = buildAssignmentShareText(offer, assignment);
+
+                                                    // Prefer native share when available (mobile)
+                                                    if (navigator?.share) {
+                                                        await navigator.share({
+                                                            title: `Offer: ${offer?.name || ''}`,
+                                                            text,
+                                                        });
+                                                        return;
+                                                    }
+
+                                                    const result = await safeCopyToClipboard(text);
+                                                    if (result.success) {
+                                                        toast.success('Offer details copied. You can paste and share.');
+                                                    } else {
+                                                        toast.error(result.error || 'Failed to copy share text');
+                                                    }
+                                                } catch (error) {
+                                                    // If user cancels native share, ignore silently
+                                                    if (error?.name === 'AbortError') return;
+                                                    console.error(error);
+                                                    toast.error('Failed to share details');
+                                                }
+                                            }}
+                                            title="Share Offer Details"
+                                        >
+                                            <ShareIcon />
+                                        </button>
+
                                         <button
                                             className="icon-btn"
                                             onClick={() => {

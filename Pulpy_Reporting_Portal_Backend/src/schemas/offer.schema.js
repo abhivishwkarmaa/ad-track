@@ -86,6 +86,8 @@ export const createOfferSchema = {
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
+    billing_flow: { type: ['string', 'null'], maxLength: 50 },
+    billing_type: { type: ['string', 'null'], maxLength: 50 },
     token_type: { type: ['string', 'null'], maxLength: 100 },
     macros_json: { type: ['object', 'null'] },
 
@@ -164,6 +166,8 @@ export const updateOfferSchema = {
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
+    billing_flow: { type: ['string', 'null'], maxLength: 50 },
+    billing_type: { type: ['string', 'null'], maxLength: 50 },
     token_type: { type: ['string', 'null'], maxLength: 100 },
     macros_json: { type: ['object', 'null'] },
 

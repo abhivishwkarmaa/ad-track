@@ -239,9 +239,8 @@ export class TenantController {
           return reply.code(503).send({
             success: false,
             error: 'Service Unavailable',
-            message: 'Database migration required. Please run migration 001_add_multi_tenant_support.sql to create the tenants table.',
+            message: 'Database schema is missing required tables. Please update the database schema to match the current backend.',
             migration_required: true,
-            migration_file: 'src/db/migrations/001_add_multi_tenant_support.sql',
           });
         }
         throw tableError;

@@ -7,10 +7,6 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "migrate": "node src/db/migrate.js",
-    "migrate:tenant": "node src/db/run-tenant-migration.js",
-    "validate": "node src/db/validate-constraints.js",
-    "cleanup": "node src/db/cleanup-duplicates.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
   },

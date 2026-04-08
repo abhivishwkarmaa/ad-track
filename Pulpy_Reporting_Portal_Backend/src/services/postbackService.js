@@ -1268,7 +1268,7 @@ export class PostbackService {
             conversion.affiliate_postback_fired = 1;
           } catch (updateErr) {
             if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
-              logger.warn('affiliate_postback_fired column missing - run migration add_affiliate_postback_fired.sql');
+              logger.warn('affiliate_postback_fired column missing - database schema update required');
             } else throw updateErr;
           }
         }

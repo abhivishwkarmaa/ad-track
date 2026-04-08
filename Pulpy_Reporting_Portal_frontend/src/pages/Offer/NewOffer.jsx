@@ -141,6 +141,24 @@ const osList = [
 // Token types - matching HTML (hasoffers, affise shown, but including API ones)
 const tokenTypes = ['hasoffers', 'affise'];
 
+const billingFlows = [
+    'Preview Link',
+    'Billing Flow: Give Option',
+    '1click',
+    '2click',
+    '3 click',
+    'OTP',
+    'HE+OTP',
+    'Captcha',
+    'SMS',
+    'DOI'
+];
+
+const billingTypes = [
+    'Billable',
+    'Non billable'
+];
+
 // Advertiser Parameters - matching HTML
 const advertiserParameters = [
     'aff_sub',
@@ -243,6 +261,8 @@ function NewOffer() {
         status: 'live',
         offer_visibility: 'PUBLIC',
         preview_url: '',
+        billing_flow: '',
+        billing_type: '',
         token_type: '',
         start_date: defaultDates.startDate,
         start_time: defaultDates.startTime,
@@ -504,6 +524,8 @@ function NewOffer() {
                 status: formData.status.toLowerCase(), // LIVE -> live, PAUSE -> paused
                 offer_visibility: formData.offer_visibility,
                 preview_url: formData.preview_url || null,
+                billing_flow: formData.billing_flow || null,
+                billing_type: formData.billing_type || null,
                 token_type: formData.token_type || null,
                 start_date: formData.start_date || null,
                 end_date: formData.end_date || null,
@@ -752,6 +774,37 @@ function NewOffer() {
                                     <option value="PUBLIC">Public</option>
                                     <option value="PUBLICREQUIREAPPROVAL">Public Require Approval</option>
                                     <option value="PRIVATE">Private</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="offer-form-row two-col">
+                            <div className="form-group">
+                                <label className="form-label">Billing Flow</label>
+                                <select
+                                    className="form-control"
+                                    name="billing_flow"
+                                    value={formData.billing_flow}
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Billing Flow</option>
+                                    {billingFlows.map(flow => (
+                                        <option key={flow} value={flow}>{flow}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Billing Type</label>
+                                <select
+                                    className="form-control"
+                                    name="billing_type"
+                                    value={formData.billing_type}
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Billing Type</option>
+                                    {billingTypes.map(type => (
+                                        <option key={type} value={type}>{type}</option>
+                                    ))}
                                 </select>
                             </div>
                         </div>

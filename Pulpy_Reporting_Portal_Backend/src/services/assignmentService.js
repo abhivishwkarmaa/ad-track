@@ -170,8 +170,8 @@ export class AssignmentService {
 
         // Check if it's a database schema error (missing columns)
         if (error.code === 'ER_BAD_FIELD_ERROR' || error.message?.includes('Unknown column')) {
-          errorMessage = 'Database schema is outdated. Please run migration: src/db/migrations/004_add_assignment_fields.sql';
-          logger.error('AssignmentService.createMultiple: Database schema error - migration required');
+          errorMessage = 'Database schema is outdated. Please update the database schema to match the current backend.';
+          logger.error('AssignmentService.createMultiple: Database schema error - schema update required');
         }
 
         errors.push({
