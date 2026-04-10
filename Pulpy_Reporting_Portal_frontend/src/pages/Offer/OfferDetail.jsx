@@ -443,7 +443,7 @@ function OfferDetail() {
                                 offer_id: assignment.offer_id?.toString() || '',
                                 publisher_id: assignment.publisher_id,
                                 publisher_email: assignment.publisher_email,
-                                payout_override: assignment.payout_override || '',
+                                payout_override: assignment.payout_override ?? null,
                                 conversion_approval_percentage: assignment.conversion_approval_percentage || '',
                                 capping_type: assignment.capping_type || 'none',
                                 capping_duration: assignment.capping_duration || 'daily',
@@ -546,7 +546,12 @@ function OfferDetail() {
         const hasBrowserTargeting = !!(safeParseJson(offerObj?.browser_targeting_json)?.browser?.length);
         const platforms = (!hasDeviceTargeting && !hasOsTargeting && !hasBrowserTargeting) ? 'All platforms' : 'Targeted';
 
-        const payout = assignmentObj?.payout_override ?? offerObj?.affiliate_amount ?? '-';
+        const payoutOverride = assignmentObj?.payout_override;
+        const hasPayoutOverride =
+            payoutOverride !== null &&
+            payoutOverride !== undefined &&
+            String(payoutOverride).trim() !== '';
+        const payout = hasPayoutOverride ? payoutOverride : (offerObj?.affiliate_amount ?? '-');
         const description = offerObj?.description || '-';
         const tags = offerObj?.tags || '-';
         const categories = offerObj?.category || '-';
@@ -793,7 +798,7 @@ function OfferDetail() {
                                 </a>
                             </span>
                         </div>
-                        {/* <div className="detail-item">
+                        <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview URL:</span>
                             <span className="detail-value">
                                 {offer.preview_url ? (
@@ -802,7 +807,7 @@ function OfferDetail() {
                                     </a>
                                 ) : '-'}
                             </span>
-                        </div> */}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1250,12 +1255,15 @@ function OfferDetail() {
                                             onClick={async () => {
                                                 try {
                                                     const text = buildAssignmentShareText(offer, assignment);
+                                                    const textForNativeShare = text.startsWith('Offer:')
+                                                        ? text.split('\n').slice(1).join('\n').trim()
+                                                        : text;
 
                                                     // Prefer native share when available (mobile)
                                                     if (navigator?.share) {
                                                         await navigator.share({
                                                             title: `Offer: ${offer?.name || ''}`,
-                                                            text,
+                                                            text: textForNativeShare,
                                                         });
                                                         return;
                                                     }
@@ -1361,7 +1369,7 @@ function OfferDetail() {
                                                     offer_id: assignment.offer_id?.toString() || id?.toString(),
                                                     publisher_id: assignment.publisher_id,
                                                     publisher_email: assignment.publisher_email,
-                                                    payout_override: assignment.payout_override || '',
+                                                    payout_override: assignment.payout_override ?? null,
                                                     conversion_approval_percentage: assignment.conversion_approval_percentage || '',
                                                     capping_type: assignment.capping_type || 'none',
                                                     capping_duration: assignment.capping_duration || 'daily',

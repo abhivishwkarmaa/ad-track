@@ -269,6 +269,11 @@ export class AssignmentService {
   formatAssignment(assignment) {
     if (!assignment) return null;
 
+    // Offer detail page "Share" section expects a payout even when assignment payout is NULL.
+    // If assignment payout_override is NULL, fall back to offer's affiliate payout.
+    const offerPayout = assignment.offer_affiliate_amount ?? null;
+    const effectivePayoutOverride = (assignment.payout_override ?? offerPayout);
+
     return {
       id: assignment.public_assignment_id || assignment.id,
       internal_id: assignment.id,
@@ -276,7 +281,7 @@ export class AssignmentService {
       public_publisher_id: assignment.public_publisher_id, // 🔥 Separate Public ID
       offer_id: assignment.offer_id, // 🔥 Return Internal ID
       public_offer_id: assignment.public_offer_id, // 🔥 Separate Public ID
-      payout_override: assignment.payout_override,
+      payout_override: effectivePayoutOverride,
       cap_override: assignment.cap_override,
       conversion_approval_percentage: assignment.conversion_approval_percentage,
       capping_type: assignment.capping_type,
@@ -342,7 +347,8 @@ export class AssignmentService {
         const [publicRows] = await pool.query(
           `SELECT po.*, 
                   p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-                  o.name as offer_name, o.category as offer_category, o.public_offer_id
+                  o.name as offer_name, o.category as offer_category, o.public_offer_id,
+                  o.affiliate_amount as offer_affiliate_amount
            FROM publisher_offers po
            JOIN publishers p ON po.publisher_id = p.id
            JOIN offers o ON po.offer_id = o.id
@@ -364,7 +370,8 @@ export class AssignmentService {
     // 2. Fallback to internal ID (use numeric id for primary key lookup)
     let query = `SELECT po.*, 
               p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-              o.name as offer_name, o.category as offer_category, o.public_offer_id
+              o.name as offer_name, o.category as offer_category, o.public_offer_id,
+              o.affiliate_amount as offer_affiliate_amount
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
@@ -385,7 +392,8 @@ export class AssignmentService {
     const [rows] = await pool.query(
       `SELECT po.*, 
               p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-              o.name as offer_name, o.category as offer_category, o.public_offer_id
+              o.name as offer_name, o.category as offer_category, o.public_offer_id,
+              o.affiliate_amount as offer_affiliate_amount
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
@@ -408,7 +416,8 @@ export class AssignmentService {
     let query = `
       SELECT po.*, 
              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-             o.name as offer_name, o.category as offer_category, o.public_offer_id
+             o.name as offer_name, o.category as offer_category, o.public_offer_id,
+             o.affiliate_amount as offer_affiliate_amount
       FROM publisher_offers po
       JOIN publishers p ON po.publisher_id = p.id
       JOIN offers o ON po.offer_id = o.id
