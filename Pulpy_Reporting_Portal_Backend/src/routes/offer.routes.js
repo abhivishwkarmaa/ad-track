@@ -1,179 +1,141 @@
 import offerController from '../controllers/offer.controller.js';
+import adminController from '../controllers/adminController.js';
 import { authenticateAdmin } from '../middleware/auth.js';
-import {
-  assignmentIdParamSchema,
-  changeOfferStatusSchema,
-  createOfferSchema,
-  listOffersQuerySchema,
-  offerStatsQuerySchema,
-  offerIdParamSchema,
-  searchOffersQuerySchema,
-  updateAssignmentSchema,
-  updateOfferSchema,
-} from '../schemas/offer.schema.js';
 
 async function offerRoutes(fastify) {
   // Protected routes (create/update/delete/status)
   fastify.post(
-    '/api/admin/offers',
+    '/',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        body: createOfferSchema,
-      },
     },
     offerController.createOffer
   );
 
   fastify.get(
-    '/api/admin/offers/:id/edit',
+    '/:id/edit',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        params: offerIdParamSchema,
-      },
     },
     offerController.getofferDetail
   );
 
   fastify.patch(
-    '/api/admin/offers/:id',
+    '/:id',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        params: offerIdParamSchema,
-        body: updateOfferSchema,
-      },
     },
     offerController.updateOffer
   );
 
   fastify.patch(
-    '/api/admin/offers/:id/status',
+    '/:id/status',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        params: offerIdParamSchema,
-        body: changeOfferStatusSchema,
-      },
     },
     offerController.changeStatus
   );
 
   fastify.delete(
-    '/api/admin/offers/:id',
+    '/:id',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        params: offerIdParamSchema,
-      },
-      // ✅ CRITICAL: DELETE requests don't need body - handled by custom JSON parser in server.js
     },
     offerController.deleteOffer
   );
 
-  fastify.patch(
-    '/api/admin/offers/assignments/:assignmentId',
+  // --- Assignment Management (Moved from admin.js) ---
+  fastify.post(
+    '/assignments',
     {
       preHandler: authenticateAdmin,
-      schema: {
-        params: assignmentIdParamSchema,
-        body: updateAssignmentSchema,
-      },
+    },
+    adminController.createAssignment
+  );
+
+  fastify.patch(
+    '/assignments/:id',
+    {
+      preHandler: authenticateAdmin,
     },
     offerController.updateAssignment
   );
 
-  // Public GETs
   fastify.get(
-    '/api/admin/offers',
+    '/assignments',
     {
-      schema: {
-        querystring: listOffersQuerySchema,
-      },
+      preHandler: authenticateAdmin,
     },
+    adminController.listAssignments
+  );
+
+  fastify.get(
+    '/assignments/:id/tracking-url',
+    {
+      preHandler: authenticateAdmin,
+    },
+    adminController.getTrackingURL
+  );
+
+  fastify.get(
+    '/assignments/:id',
+    {
+      preHandler: authenticateAdmin,
+    },
+    adminController.getAssignment
+  );
+
+  fastify.delete(
+    '/assignments/:id',
+    {
+      preHandler: authenticateAdmin,
+    },
+    adminController.deleteAssignment
+  );
+
+  // --- Public GETs ---
+  fastify.get(
+    '/',
     offerController.listOffers
   );
 
   fastify.get(
-    '/api/admin/offers/search',
-    {
-      schema: {
-        querystring: searchOffersQuerySchema,
-      },
-    },
+    '/search',
     offerController.searchOffers
   );
 
   fastify.get(
-    '/api/admin/offers/:id',
-    {
-      schema: {
-        params: offerIdParamSchema,
-      },
-    },
+    '/:id',
     offerController.getOffer
   );
 
   fastify.get(
-    '/api/admin/offers/:id/stats',
-    {
-      schema: {
-        params: offerIdParamSchema,
-        querystring: offerStatsQuerySchema,
-      },
-    },
+    '/:id/stats',
     offerController.getStats
   );
 
   fastify.get(
-    '/api/admin/offers/:id/daily-stats',
-    {
-      schema: {
-        params: offerIdParamSchema,
-      },
-    },
+    '/:id/daily-stats',
     offerController.getDailyStats
   );
 
   fastify.get(
-    '/api/admin/offers/:id/assignments',
-    {
-      schema: {
-        params: offerIdParamSchema,
-      },
-    },
+    '/:id/assignments',
     offerController.getAssignments
   );
 
   fastify.get(
-    '/api/admin/offers/:id/recent-clicks',
-    {
-      schema: {
-        params: offerIdParamSchema,
-      },
-    },
+    '/:id/recent-clicks',
     offerController.getRecentClicks
   );
 
   fastify.get(
-    '/api/admin/offers/:id/recent-conversions',
-    {
-      schema: {
-        params: offerIdParamSchema,
-      },
-    },
+    '/:id/recent-conversions',
     offerController.getRecentConversions
   );
 
   fastify.get(
-    '/api/admin/offers/:id/publisher-stats',
-    {
-      schema: {
-        params: offerIdParamSchema,
-        querystring: offerStatsQuerySchema,
-      },
-    },
+    '/:id/publisher-stats',
     offerController.getPublisherStats
   );
 }

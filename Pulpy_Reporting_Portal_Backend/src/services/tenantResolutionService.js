@@ -1,13 +1,13 @@
 import redis from '../config/redis.js';
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+
 
 const TENANT_CACHE_TTL = 3600; // 1 hour
 
-class TenantResolutionService {
-    constructor() {
+export class TenantResolutionService {
+    constructor(tenantRepository) {
+        this.tenantRepository = tenantRepository;
         this.redis = redis;
-        this.pool = pool;
     }
 
     /**
@@ -44,18 +44,13 @@ class TenantResolutionService {
 
         // 2. Fallback to DB
         try {
-            const [rows] = await this.pool.query(
-                'SELECT id, name, slug, status, created_at FROM tenants WHERE slug = ? LIMIT 1',
-                [slug]
-            );
+            const tenant = await this.tenantRepository.findBySlug(slug);
 
-            if (!rows || rows.length === 0) {
+            if (!tenant) {
                 // Tenant not found in DB
                 // Per requirements: No negative caching
                 return null;
             }
-
-            const tenant = rows[0];
 
             // 3. Write back to Redis
             try {
@@ -91,4 +86,4 @@ class TenantResolutionService {
     }
 }
 
-export default new TenantResolutionService();
+// (no singleton export)

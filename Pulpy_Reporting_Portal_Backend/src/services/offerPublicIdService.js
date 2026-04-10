@@ -7,35 +7,26 @@
  * =====================================================
  */
 
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 
-class OfferPublicIdService {
-    /**
-     * Get public_offer_id by internal ID
-     */
+export class OfferPublicIdService {
+    constructor(publicIdRepository) {
+        this.publicIdRepository = publicIdRepository;
+    }
+
     async getPublicOfferId(internalOfferId, tenantId) {
         try {
-            const [rows] = await pool.query(
-                'SELECT public_offer_id FROM offers WHERE id = ? AND tenant_id = ? LIMIT 1',
-                [internalOfferId, tenantId]
-            );
-            return rows[0]?.public_offer_id || internalOfferId;
+            const publicOfferId = await this.publicIdRepository.getPublicId('offers', 'public_offer_id', 'id', internalOfferId, tenantId);
+            return publicOfferId || internalOfferId;
         } catch (error) {
             return internalOfferId;
         }
     }
 
-    /**
-     * Get public_publisher_id by internal ID
-     */
     async getPublicPublisherId(internalPublisherId, tenantId) {
         try {
-            const [rows] = await pool.query(
-                'SELECT public_publisher_id FROM publishers WHERE id = ? AND tenant_id = ? LIMIT 1',
-                [internalPublisherId, tenantId]
-            );
-            return rows[0]?.public_publisher_id || internalPublisherId;
+            const publicPublisherId = await this.publicIdRepository.getPublicId('publishers', 'public_publisher_id', 'id', internalPublisherId, tenantId);
+            return publicPublisherId || internalPublisherId;
         } catch (error) {
             return internalPublisherId;
         }
@@ -48,18 +39,8 @@ class OfferPublicIdService {
      */
     async generatePublicOfferId(tenantId) {
         try {
-            // Get the maximum public_offer_id for this tenant
-            const [rows] = await pool.query(
-                `SELECT COALESCE(MAX(public_offer_id), 0) + 1 AS next_id 
-         FROM offers 
-         WHERE tenant_id = ?`,
-                [tenantId]
-            );
-
-            const nextId = rows[0]?.next_id || 1;
-
+            const nextId = await this.publicIdRepository.generateNextPublicId('offers', 'public_offer_id', tenantId);
             logger.info(`Generated public_offer_id ${nextId} for tenant ${tenantId}`);
-
             return nextId;
         } catch (error) {
             logger.error('Error generating public_offer_id:', error);
@@ -74,14 +55,7 @@ class OfferPublicIdService {
      */
     async generatePublicAdvertiserId(tenantId) {
         try {
-            const [rows] = await pool.query(
-                `SELECT COALESCE(MAX(public_advertiser_id), 0) + 1 AS next_id 
-         FROM advertisers 
-         WHERE tenant_id = ?`,
-                [tenantId]
-            );
-
-            const nextId = rows[0]?.next_id || 1;
+            const nextId = await this.publicIdRepository.generateNextPublicId('advertisers', 'public_advertiser_id', tenantId);
             logger.info(`Generated public_advertiser_id ${nextId} for tenant ${tenantId}`);
             return nextId;
         } catch (error) {
@@ -97,14 +71,7 @@ class OfferPublicIdService {
      */
     async generatePublicPublisherId(tenantId) {
         try {
-            const [rows] = await pool.query(
-                `SELECT COALESCE(MAX(public_publisher_id), 0) + 1 AS next_id 
-         FROM publishers 
-         WHERE tenant_id = ?`,
-                [tenantId]
-            );
-
-            const nextId = rows[0]?.next_id || 1;
+            const nextId = await this.publicIdRepository.generateNextPublicId('publishers', 'public_publisher_id', tenantId);
             logger.info(`Generated public_publisher_id ${nextId} for tenant ${tenantId}`);
             return nextId;
         } catch (error) {
@@ -120,14 +87,7 @@ class OfferPublicIdService {
      */
     async generatePublicAssignmentId(tenantId) {
         try {
-            const [rows] = await pool.query(
-                `SELECT COALESCE(MAX(public_assignment_id), 0) + 1 AS next_id 
-         FROM publisher_offers 
-         WHERE tenant_id = ?`,
-                [tenantId]
-            );
-
-            const nextId = rows[0]?.next_id || 1;
+            const nextId = await this.publicIdRepository.generateNextPublicId('publisher_offers', 'public_assignment_id', tenantId);
             logger.info(`Generated public_assignment_id ${nextId} for tenant ${tenantId}`);
             return nextId;
         } catch (error) {
@@ -136,101 +96,32 @@ class OfferPublicIdService {
         }
     }
 
-    /**
-     * Get offer by public_offer_id and tenant
-     * @param {number} publicOfferId - Public offer ID
-     * @param {number} tenantId - Tenant ID
-     * @param {string} status - Optional status filter (default: 'live')
-     * @returns {Promise<Object|null>} - Offer object or null
-     */
     async getOfferByPublicId(publicOfferId, tenantId, status = 'live') {
         try {
-            // Use subquery to calculate display_id (sequential ID per tenant)
-            const query = `
-                SELECT * FROM (
-                    SELECT 
-                        o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
-                        (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
-                    FROM offers o 
-                    WHERE o.tenant_id = ?
-                ) t 
-                WHERE (t.public_offer_id = ? OR t.display_id = ?)
-                ${status ? ' AND t.status = ?' : ''}
-                LIMIT 1
-            `;
-            const params = [tenantId, publicOfferId, publicOfferId];
-            if (status) params.push(status);
-
-            const [rows] = await pool.query(query, params);
-            return rows[0] || null;
+            // Strictly use public_offer_id or display_id resolver
+            // No internal ID fallback as per architectural requirement
+            return await this.publicIdRepository.getOfferByPublicIdOrDisplayId(tenantId, publicOfferId, status);
         } catch (error) {
-            // ✅ BACKWARD COMPATIBILITY: If public_offer_id column is missing, fallback to internal ID
-            if (error.code === 'ER_BAD_FIELD_ERROR') {
-                logger.warn('⚠️ public_offer_id column request failed - falling back to internal ID lookup');
-
-                let fallbackQuery = `SELECT id, advertiser_id, tenant_id, public_offer_id, name, description, category, status, offer_visibility, offer_currency, country, advertiser_model, advertiser_amount, affiliate_model, affiliate_amount, offer_url, preview_url, token_type, macros_json, start_date, end_date, start_time, end_time, ip_action, ip_list, country_action, country_list, device_targeting_json, device_action, os_targeting_json, os_action, browser_targeting_json, browser_action, isp_targeting_json, carrier_targeting_json, city_targeting_json, capping_type, capping_duration, capping_action, fallback_type, daily_cap, monthly_cap, total_cap, conversion_cap, capping_conversions_duration, budget_cap, advertiser_capping_budget_duration, advertiser_capping_budget_amount, advertiser_over_capping, affiliate_over_capping, cap_action, fallback_enabled, fallback_url, fallback_offer_id, advertiser_postback_url, advertiser_postback_method, advertiser_postback_macros_json, system_postback_url, system_postback_method, system_postback_macros_json, created_at, updated_at FROM offers WHERE tenant_id = ? AND id = ?`;
-                const fallbackParams = [tenantId, publicOfferId]; // Assume publicOfferId matches internal ID for now
-
-                if (status) {
-                    fallbackQuery += ' AND status = ?';
-                    fallbackParams.push(status);
-                }
-
-                fallbackQuery += ' LIMIT 1';
-
-                const [rows] = await pool.query(fallbackQuery, fallbackParams);
-                return rows[0] || null;
-            }
-
             logger.error('Error fetching offer by public_offer_id:', error);
             throw error;
         }
     }
 
-    /**
-     * Get advertiser by public_advertiser_id and tenant
-     */
     async getAdvertiserByPublicId(publicAdvertiserId, tenantId) {
         try {
-            const [rows] = await pool.query(
-                'SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE tenant_id = ? AND public_advertiser_id = ? LIMIT 1',
-                [tenantId, publicAdvertiserId]
-            );
-            return rows[0] || null;
+            return await this.publicIdRepository.getEntityByPublicId('advertisers', 'public_advertiser_id', publicAdvertiserId, tenantId);
         } catch (error) {
             if (error.code === 'ER_BAD_FIELD_ERROR') return null;
             throw error;
         }
     }
 
-    /**
-     * Get publisher by public_publisher_id and tenant
-     */
     async getPublisherByPublicId(publicPublisherId, tenantId) {
         try {
-            // 1. Try by Public ID first
-            const [rows] = await pool.query(
-                'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
-                [tenantId, publicPublisherId]
-            );
-            if (rows[0]) return rows[0];
-
-            // 2. Fallback to Internal ID lookup (if integer provided)
-            const [internalRows] = await pool.query(
-                'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
-                [tenantId, publicPublisherId] // Using publicPublisherId as likely internal ID here
-            );
-            return internalRows[0] || null;
-
+            // Strictly use public_publisher_id
+            return await this.publicIdRepository.getEntityByPublicId('publishers', 'public_publisher_id', publicPublisherId, tenantId);
         } catch (error) {
-            // BACKWARD COMPAT: If column missing (unlikely now), try ID
-            if (error.code === 'ER_BAD_FIELD_ERROR') {
-                const [internalRows] = await pool.query(
-                    'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE tenant_id = ? AND id = ? LIMIT 1',
-                    [tenantId, publicPublisherId]
-                );
-                return internalRows[0] || null;
-            }
+            logger.error('Error fetching publisher by public_id:', error);
             return null;
         }
     }
@@ -243,14 +134,9 @@ class OfferPublicIdService {
      */
     async archiveOffer(offerId, tenantId) {
         try {
-            const [result] = await pool.query(
-                `UPDATE offers 
-         SET status = 'archived', updated_at = UTC_TIMESTAMP() 
-         WHERE id = ? AND tenant_id = ?`,
-                [offerId, tenantId]
-            );
+            const affectedRows = await this.publicIdRepository.archiveOffer(offerId, tenantId);
 
-            if (result.affectedRows > 0) {
+            if (affectedRows > 0) {
                 logger.info(`Archived offer ${offerId} for tenant ${tenantId}`);
                 return true;
             }
@@ -322,4 +208,5 @@ class OfferPublicIdService {
     }
 }
 
-export default new OfferPublicIdService();
+
+// (no singleton export)

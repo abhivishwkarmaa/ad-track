@@ -1,4 +1,3 @@
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
@@ -7,24 +6,31 @@ import { getLocationFromIP, getCountryFromHeaders } from '../utils/countryLookup
 import { getISP } from '../utils/ispLookup.js';
 import { extractDomain, appendClickParams, replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { generateOfferErrorPage } from '../utils/errorPage.js';
-import offerService from './offer.service.js';
-import publisherService from './publisherService.js';
-import assignmentService from './assignmentService.js';
+
+
+
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
 import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
-import cacheService, { PUBLISHER_OFFERS_TRACKING_COLUMNS } from './cacheService.js';
-import postbackService from './postbackService.js';
 
-const getIstDateString = () => {
-  const now = new Date();
-  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
-  return istTime.toISOString().split('T')[0];
+
+
+
+const getUtcDateString = () => {
+  return new Date().toISOString().split('T')[0];
 };
 
 export class TrackingService {
+  constructor(offerService, publisherService, assignmentService, cacheService, postbackService, trackingRepository) {
+    this.offerService = offerService;
+    this.publisherService = publisherService;
+    this.assignmentService = assignmentService;
+    this.cacheService = cacheService;
+    this.postbackService = postbackService;
+    this.trackingRepository = trackingRepository;
+  }
   async trackClick(query, request) {
     // 1. Fail early if system is overloaded (Backpressure)
     // if (isOverloaded()) ... (Redis handles this better, skip for now or keep)
@@ -102,13 +108,13 @@ export class TrackingService {
       // ============================================
       // STEP 2: RESOLVE — Public ID → Internal ID (sirf iske baad DB me internal id use karo)
       // ============================================
-      const internalOfferId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
+      const internalOfferId = await this.offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
       const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
       const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
       const internalPublisherId = publisher ? publisher.id : null;
 
       const offer = internalOfferId
-        ? await offerService.getOfferById(internalOfferId, tenantId, true)
+        ? await this.offerService.getOfferById(internalOfferId, tenantId, true)
         : null;
 
       // ============================================
@@ -197,12 +203,12 @@ export class TrackingService {
 
       // ✅ STEP 5: Verify tenant exists in database (for foreign key integrity)
       try {
-        const [tenantRows] = await pool.query('SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
-        if (tenantRows.length === 0) {
+        const tenant = await this.trackingRepository.findTenantById(tenantId);
+        if (!tenant) {
           logger.error(`❌ CRITICAL: Tenant ID ${tenantId} does not exist in tenants table!`);
           throw new Error(`Tenant ${tenantId} does not exist in database`);
         }
-        logger.debug(`✅ Tenant ${tenantId} verified: ${tenantRows[0].name}`);
+        logger.debug(`✅ Tenant ${tenantId} verified: ${tenant.name}`);
       } catch (err) {
         if (err.message.includes('does not exist')) {
           throw err; // Re-throw tenant not found error
@@ -213,21 +219,23 @@ export class TrackingService {
       // ============================================
       // STEP 4: Assignment nikalna — pehle internal ids, na mile to public publisher_id (legacy fallback)
       // ============================================
-      let assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
+      let assignment = await this.cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
       if (!assignment) {
-        let [assignmentRows] = await pool.query(
-          `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1`,
-          [internalPublisherId, offer.id, tenantId]
-        );
-        assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
+        assignment = await this.trackingRepository.findPublisherOfferAssignment({
+          selectColumns: PUBLISHER_OFFERS_TRACKING_COLUMNS,
+          publisherId: internalPublisherId,
+          offerId: offer.id,
+          tenantId,
+        });
 
         // Fallback: kuch purani rows me publisher_id column me public id store ho sakta hai
         if (!assignment && publicPublisherId !== internalPublisherId) {
-          const [fallbackRows] = await pool.query(
-            `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1`,
-            [publicPublisherId, offer.id, tenantId]
-          );
-          assignment = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
+          assignment = await this.trackingRepository.findPublisherOfferAssignment({
+            selectColumns: PUBLISHER_OFFERS_TRACKING_COLUMNS,
+            publisherId: publicPublisherId,
+            offerId: offer.id,
+            tenantId,
+          });
           if (assignment) {
             logger.warn('⚠️ Assignment found by public publisher_id (legacy row). Prefer storing internal publisher_id in publisher_offers.', {
               public_publisher_id: publicPublisherId,
@@ -302,7 +310,7 @@ export class TrackingService {
       let redirectUrl = '';
 
       // Validation
-      const offerValidation = offerService.checkOfferValidity(offer);
+      const offerValidation = this.offerService.checkOfferValidity(offer);
       if (!offerValidation.valid) {
         return {
           html: generateOfferErrorPage(offerValidation.message, offerValidation.error_type),
@@ -400,7 +408,7 @@ export class TrackingService {
       let isCapErr = false;
 
       // 4A. Check Offer Cap
-      const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, tenantId);
+      const offerCapStatus = await this.cacheService.getCapStatus('offer', offer.id, offer, tenantId);
       if (offerCapStatus.isHit) {
         logger.info(`[CAP] Offer Cap HIT`, {
           offer_id: offer.id,
@@ -437,7 +445,7 @@ export class TrackingService {
 
       // 4B. Check Publisher Cap
       // 4B. Check Publisher Cap
-      const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
+      const pubCapStatus = await this.cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
       if (pubCapStatus.isHit) {
         logger.info(`[CAP] Publisher Cap HIT`, {
           assignment_id: assignment.id,
@@ -828,7 +836,7 @@ export class TrackingService {
 
         try {
           // Fire postback and capture response
-          postbackResult = await postbackService.sendPublisherPostback(
+          postbackResult = await this.postbackService.sendPublisherPostback(
             callbackUrl,
             mockConversion,
             mockClick
@@ -926,14 +934,14 @@ export class TrackingService {
       // Offer Fallback
       if (offer.fallback_type === 'offer' && offer.fallback_offer_id) {
         // Validate fallback offer belongs to tenant
-        const fallbackOffer = await offerService.getOfferById(offer.fallback_offer_id, tenantId, true);
+        const fallbackOffer = await this.offerService.getOfferById(offer.fallback_offer_id, tenantId, true);
         if (!fallbackOffer) {
           logger.warn('[CAP] Fallback offer not found or invalid', { fallback_offer_id: offer.fallback_offer_id, tenant_id: tenantId });
           return { stop: true };
         }
 
         // Check if SAME publisher is assigned to fallback offer
-        const fallbackAssignment = await assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
+        const fallbackAssignment = await this.assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
         if (!fallbackAssignment || fallbackAssignment.status !== 'active') {
           logger.warn('[CAP] Fallback offer not assigned to publisher or inactive', {
             pub_id: assignment.publisher_id,
@@ -1002,7 +1010,7 @@ export class TrackingService {
       }
 
       if (assignment.fallback_type === 'offer' && assignment.fallback_offer_id) {
-        const fallbackOffer = await offerService.getOfferById(assignment.fallback_offer_id, tenantId, true);
+        const fallbackOffer = await this.offerService.getOfferById(assignment.fallback_offer_id, tenantId, true);
         if (!fallbackOffer) {
           logger.warn('[CAP] Publisher cap: fallback offer not found or invalid', {
             fallback_offer_id: assignment.fallback_offer_id,
@@ -1011,7 +1019,7 @@ export class TrackingService {
           return { stop: true };
         }
 
-        const fallbackAssignment = await assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
+        const fallbackAssignment = await this.assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
         if (!fallbackAssignment || fallbackAssignment.status !== 'active') {
           logger.warn('[CAP] Publisher cap: fallback offer not assigned to publisher or inactive', {
             pub_id: assignment.publisher_id,
@@ -1095,8 +1103,8 @@ export class TrackingService {
       // ✅ STEP 2: Fetch offer and publisher WITH tenant filtering
       // Business data is validated AFTER tenant resolution
       const [offer, publisher] = await Promise.all([
-        offerService.getOfferById(offerId, tenantId), // ✅ Filter by resolved tenant_id
-        publisherService.findById(publisherId, tenantId) // ✅ Filter by resolved tenant_id
+        this.offerService.getOfferById(offerId, tenantId), // ✅ Filter by resolved tenant_id
+        this.publisherService.findById(publisherId, tenantId) // ✅ Filter by resolved tenant_id
       ]);
 
       // ✅ STEP 3: Validate business data exists and belongs to resolved tenant
@@ -1139,16 +1147,12 @@ export class TrackingService {
       }
 
       // ✅ CRITICAL: Check assignment exists (with tenant_id if available)
-      let assignmentQuery = `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?`;
-      const assignmentParams = [publisherId, offerId, 'active'];
-
-      if (tenantId) {
-        assignmentQuery += ' AND tenant_id = ?';
-        assignmentParams.push(tenantId);
-      }
-
-      const [assignmentRows] = await pool.query(assignmentQuery, assignmentParams);
-      const assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
+      const assignment = await this.trackingRepository.findActiveAssignmentForImpression({
+        selectColumns: PUBLISHER_OFFERS_TRACKING_COLUMNS,
+        publisherId,
+        offerId,
+        tenantId,
+      });
 
       if (!assignment) {
         return { success: false, error: 'Assignment not found or inactive' };
@@ -1193,12 +1197,15 @@ export class TrackingService {
 
       // ✅ CRITICAL: Insert impression with resolved tenant_id
       const impUuid = uuidv4();
-      await pool.query(
-        `INSERT INTO impressions (
-          imp_uuid, offer_id, publisher_id, tenant_id, ip, user_agent, referrer, timestamp, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [impUuid, offerId, publisherId, finalTenantId, ip, userAgent, referrer]
-      );
+      await this.trackingRepository.insertImpression({
+        impUuid,
+        offerId,
+        publisherId,
+        tenantId: finalTenantId,
+        ip,
+        userAgent,
+        referrer,
+      });
 
       // Update daily stats
       await this.updateDailyStats(offerId, publisherId, 'impression', finalTenantId);
@@ -1219,30 +1226,24 @@ export class TrackingService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
     let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `DATE(created_at) = UTC_DATE() AND HOUR(created_at) = HOUR(UTC_TIMESTAMP())`;
     } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `DATE(created_at) = UTC_DATE()`;
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      dateCondition = `YEARWEEK(created_at, 1) = YEARWEEK(UTC_TIMESTAMP(), 1)`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `YEAR(created_at) = YEAR(UTC_TIMESTAMP()) AND MONTH(created_at) = MONTH(UTC_TIMESTAMP())`;
     } else {
       return false;
     }
 
-    const [rows] = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0) as total_revenue
-       FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`,
-      [offerId, publisherId]
-    );
-
-    const totalRevenue = parseFloat((Array.isArray(rows) ? rows[0] : rows).total_revenue || 0);
+    const totalRevenue = await this.trackingRepository.sumConversionAmountForAssignmentCap({
+      offerId,
+      publisherId,
+      duration,
+    });
     return totalRevenue >= capAmount;
   }
 
@@ -1255,85 +1256,58 @@ export class TrackingService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
     let dateCondition = '';
     if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `DATE(created_at) = UTC_DATE() AND HOUR(created_at) = HOUR(UTC_TIMESTAMP())`;
     } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `DATE(created_at) = UTC_DATE()`;
     } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
+      dateCondition = `YEARWEEK(created_at, 1) = YEARWEEK(UTC_TIMESTAMP(), 1)`;
     } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
+      dateCondition = `YEAR(created_at) = YEAR(UTC_TIMESTAMP()) AND MONTH(created_at) = MONTH(UTC_TIMESTAMP())`;
     } else {
       return false;
     }
 
-    const [rows] = await pool.query(
-      `SELECT COUNT(*) as conversion_count
-       FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`,
-      [offerId, publisherId]
-    );
-
-    const count = parseInt((Array.isArray(rows) ? rows[0] : rows).conversion_count || 0);
+    const count = await this.trackingRepository.countConversionsForAssignmentCap({
+      offerId,
+      publisherId,
+      duration,
+    });
     return count >= capCount;
   }
 
   async updateDailyStats(offerId, publisherId, type, tenantId = null) {
     try {
-      // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = getIstDateString();
+      const today = getUtcDateString();
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {
-        const [latestClickRows] = await pool.query(
-          `SELECT ip FROM clicks
-           WHERE offer_id = ? AND publisher_id = ?
-           ORDER BY created_at DESC LIMIT 1`,
-          [offerId, publisherId]
-        );
-
-        const latestClick = Array.isArray(latestClickRows) ? latestClickRows[0] : latestClickRows;
-        const clickIp = latestClick?.ip || null;
+        const clickIp = await this.trackingRepository.findLatestClickIp({ offerId, publisherId });
 
         let isUnique = true;
         if (clickIp) {
-          let countQuery = `SELECT COUNT(*) as cnt FROM clicks
-                 WHERE offer_id = ?
-                   AND ip = ?
-                   AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-          const countParams = [offerId, clickIp, today];
-          if (tenantId) {
-            countQuery += ' AND tenant_id = ?';
-            countParams.push(tenantId);
-          }
-          const [countRows] = await pool.query(countQuery, countParams);
-          const cnt = (Array.isArray(countRows) ? countRows[0] : countRows).cnt;
+          const cnt = await this.trackingRepository.countClicksForUniqueIpOnUtcDay({
+            offerId,
+            ip: clickIp,
+            utcDate: today,
+            tenantId,
+          });
           isUnique = (cnt === 1);
         }
 
-        await pool.query(
-          `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, clicks, unique_clicks)
-           VALUES (?, ?, ?, 1, ?)
-           ON DUPLICATE KEY UPDATE
-             clicks = daily_offer_stats.clicks + 1,
-             unique_clicks = daily_offer_stats.unique_clicks + (CASE WHEN ? = 1 THEN 1 ELSE 0 END),
-             updated_at = UTC_TIMESTAMP()`,
-          [offerId, tenantId, today, isUnique ? 1 : 0, isUnique ? 1 : 0]
-        );
+        await this.trackingRepository.upsertDailyOfferStatsClick({
+          offerId,
+          tenantId,
+          utcDate: today,
+          isUnique,
+        });
       } else if (type === 'impression') {
-        await pool.query(
-          `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, impressions)
-           VALUES (?, ?, ?, 1)
-           ON DUPLICATE KEY UPDATE
-             impressions = daily_offer_stats.impressions + 1,
-             updated_at = UTC_TIMESTAMP()`,
-          [offerId, tenantId, today]
-        );
+        await this.trackingRepository.upsertDailyOfferStatsImpression({
+          offerId,
+          tenantId,
+          utcDate: today,
+        });
       }
     } catch (error) {
       logger.error('TrackingService.updateDailyStats error:', error);
@@ -1341,5 +1315,4 @@ export class TrackingService {
   }
 }
 
-export default new TrackingService();
-
+// (no singleton export)

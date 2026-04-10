@@ -1,4 +1,3 @@
-import pool, { queryWithTimeout } from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
@@ -9,91 +8,9 @@ import http from 'http';
 import crypto from 'crypto';
 
 import redis from '../config/redis.js';
+import { AppError } from '../utils/AppError.js';
 
-// ---------- In-file lookups (no external findById/getOfferById) ----------
-/** Get offer by internal id only. Returns row or null. */
-async function getOfferByInternalId(offerId, tenantId) {
-  if (offerId == null) return null;
-  const id = parseInt(offerId, 10);
-  if (Number.isNaN(id) || id < 1) return null;
-  let query = 'SELECT o.* FROM offers o WHERE o.id = ?';
-  const params = [id];
-  if (tenantId != null) {
-    query += ' AND o.tenant_id = ?';
-    params.push(tenantId);
-  }
-  query += ' LIMIT 1';
-  const [rows] = await pool.query(query, params);
-  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-}
-
-/** Get assignment by internal id only. Returns shape: { internal_id, id, payout_override, callback_url, conversion_approval_percentage, tenant_id, ... }. */
-async function getAssignmentByInternalId(id, tenantId) {
-  if (id == null || id === '') return null;
-  const numericId = Number(String(id).trim());
-  if (Number.isNaN(numericId)) return null;
-  let query = `SELECT po.*, o.public_offer_id
-    FROM publisher_offers po
-    JOIN offers o ON po.offer_id = o.id
-    WHERE po.id = ?`;
-  const params = [numericId];
-  if (tenantId != null) {
-    query += ' AND po.tenant_id = ?';
-    params.push(tenantId);
-  }
-  query += ' LIMIT 1';
-  const [rows] = await pool.query(query, params);
-  const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-  if (!row) return null;
-  return {
-    id: row.public_assignment_id ?? row.id,
-    internal_id: row.id,
-    publisher_id: row.publisher_id,
-    offer_id: row.offer_id,
-    payout_override: row.payout_override,
-    conversion_approval_percentage: row.conversion_approval_percentage,
-    callback_url: row.callback_url,
-    tenant_id: row.tenant_id,
-  };
-}
-
-/** Get publisher by internal id only. Returns row or null. */
-async function getPublisherByInternalId(id, tenantId) {
-  if (id == null) return null;
-  const numericId = parseInt(id, 10);
-  if (Number.isNaN(numericId)) return null;
-  let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ?';
-  const params = [numericId];
-  if (tenantId != null) {
-    query += ' AND tenant_id = ?';
-    params.push(tenantId);
-  }
-  query += ' LIMIT 1';
-  const [rows] = await pool.query(query, params);
-  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-}
-
-/** Check if offer is valid for conversions (live, within dates). */
-function checkOfferValidity(offer) {
-  if (!offer) return { valid: false, message: 'Offer not found', error_type: 'offer_not_found' };
-  if (offer.status !== 'live') {
-    return { valid: false, message: `Offer is not live. Current status: ${offer.status}.`, error_type: 'offer_not_live' };
-  }
-  const now = new Date();
-  if (offer.end_date) {
-    const endDate = new Date(offer.end_date);
-    endDate.setHours(23, 59, 59, 999);
-    if (now > endDate) return { valid: false, message: `Offer has expired.`, error_type: 'offer_expired' };
-  }
-  if (offer.start_date) {
-    const startDate = new Date(offer.start_date);
-    startDate.setHours(0, 0, 0, 0);
-    if (now < startDate) return { valid: false, message: `Offer has not started yet.`, error_type: 'offer_not_started' };
-  }
-  return { valid: true, message: 'Offer is valid and active', error_type: null };
-}
-
-// ---------- End in-file lookups ----------
+// ---------- End module-level helpers (now class methods below) ----------
 
 const CLICK_EXPIRY_WINDOW_MS = 1 * 60 * 60 * 1000;
 const CLICK_EXPIRED_STATUS = 'click_expired';
@@ -230,7 +147,7 @@ const resolveExpiredRevenueAmount = async ({ amount, offerId, tenantId }) => {
   if (Number.isFinite(parsedAmount) && parsedAmount > 0) return parsedAmount;
 
   try {
-    const offer = await getOfferByInternalId(offerId, tenantId);
+    const offer = await this._getOfferByInternalId(offerId, tenantId);
     const advertiserAmount = Number(offer?.advertiser_amount);
     if (Number.isFinite(advertiserAmount) && advertiserAmount > 0) return advertiserAmount;
   } catch (error) {
@@ -321,6 +238,42 @@ const buildApprovalControlKeys = ({ tenantId, offerId, publisherId, assignmentId
 };
 
 export class PostbackService {
+  constructor(postbackRepository) {
+    this.postbackRepository = postbackRepository;
+  }
+
+  // ---------- Private helper methods ----------
+  async _getOfferByInternalId(offerId, tenantId) {
+    return await this.postbackRepository.getOfferByInternalId({ offerId, tenantId });
+  }
+
+  async _getAssignmentByInternalId(id, tenantId) {
+    return await this.postbackRepository.getAssignmentByInternalId({ id, tenantId });
+  }
+
+  async _getPublisherByInternalId(id, tenantId) {
+    return await this.postbackRepository.getPublisherByInternalId({ id, tenantId });
+  }
+
+  _this._checkOfferValidity(offer) {
+    if (!offer) return { valid: false, message: 'Offer not found', error_type: 'offer_not_found' };
+    if (offer.status !== 'live') {
+      return { valid: false, message: `Offer is not live. Current status: ${offer.status}.`, error_type: 'offer_not_live' };
+    }
+    const now = new Date();
+    if (offer.end_date) {
+      const endDate = new Date(offer.end_date);
+      endDate.setHours(23, 59, 59, 999);
+      if (now > endDate) return { valid: false, message: `Offer has expired.`, error_type: 'offer_expired' };
+    }
+    if (offer.start_date) {
+      const startDate = new Date(offer.start_date);
+      startDate.setHours(0, 0, 0, 0);
+      if (now < startDate) return { valid: false, message: `Offer has not started yet.`, error_type: 'offer_not_started' };
+    }
+    return { valid: true, message: 'Offer is valid and active', error_type: null };
+  }
+  // ---------- End private helpers ----------
   async determineDeterministicApprovalStatus({
     tenantId,
     offerId,
@@ -445,13 +398,8 @@ export class PostbackService {
         // ✅ FAST PATH: Use 2-second timeout for initial lookup to prevent blocking
         if (tenantId) {
           try {
-            const [dbRows] = await queryWithTimeout(
-              'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-              [click_id, tenantId],
-              2000  // ✅ 2-second timeout for fast response
-            );
-            if (dbRows && dbRows.length > 0) {
-              const dbClick = dbRows[0];
+            const dbClick = await this.postbackRepository.getClickByUuidOrTid({ clickId: click_id, tenantId });
+            if (dbClick) {
               // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
               redisKey = `click:${dbClick.tenant_id}:${dbClick.offer_id}:${dbClick.publisher_id}:${click_id}`;
               redisClick = await redis.hgetall(redisKey);
@@ -593,7 +541,7 @@ export class PostbackService {
           }
 
           // 2. Validate Offer / Fetch Payout (in-file lookup by internal id)
-          const offer = await getOfferByInternalId(clickData.offer_id, tenantId);
+          const offer = await this._getOfferByInternalId(clickData.offer_id, tenantId);
           if (!offer) throw new Error('Offer not found (Redis path)');
 
           // ✅ CRITICAL: Verify tenant ownership
@@ -601,7 +549,7 @@ export class PostbackService {
             throw new Error('Offer does not belong to this tenant');
           }
 
-          const offerValidation = checkOfferValidity(offer);
+          const offerValidation = this._checkOfferValidity(offer);
           if (!offerValidation.valid) {
             return { success: false, message: offerValidation.message, duplicate: false };
           }
@@ -609,11 +557,11 @@ export class PostbackService {
           // 3. Get Assignment & Payout (in-file lookup by internal id)
           let assignment = null;
           if (clickData.publisher_offer_id) {
-            assignment = await getAssignmentByInternalId(clickData.publisher_offer_id, tenantId);
+            assignment = await this._getAssignmentByInternalId(clickData.publisher_offer_id, tenantId);
           }
 
           // Fetch Publisher (in-file lookup by internal id)
-          const publisher = await getPublisherByInternalId(clickData.publisher_id, tenantId);
+          const publisher = await this._getPublisherByInternalId(clickData.publisher_id, tenantId);
           let offerPayout = parseFloat(offer.advertiser_amount);
           let payout = parseFloat(offer.affiliate_amount);
           if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
@@ -722,17 +670,8 @@ export class PostbackService {
         const retryDelay = 200; // 200ms between retries
 
         while (attempts < maxAttempts) {
-          // ✅ STRICT: Always filter by tenant_id (from subdomain)
-          // 🔥 UPDATED: Look up by click_uuid OR tid (affiliate click ID)
-          // ✅ Use ORDER BY id DESC LIMIT 1 so we get the same (latest) click as Strategy 1 and avoid wrong offer_id from duplicate rows
-          const query = 'SELECT id, offer_id, publisher_id, tenant_id, publisher_offer_id, ip, user_agent, referrer, click_uuid, country, region, city, isp, location, domain, device_type, browser, os, os_version, device_brand, device_model, source_id, device_id, google_id, android_id, rcid, tid, timestamp, created_at, extra_params FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ? ORDER BY id DESC LIMIT 1';
-          const params = [click_id, click_id, tenantId];
-
           try {
-            // ✅ QUERY TIMEOUT: 3 seconds max to prevent long waits (reduced from 5s)
-            const [clickRows] = await queryWithTimeout(query, params, 3000);
-            click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
-
+            click = await this.postbackRepository.getClickByUuidOrTid({ clickId: click_id, tenantId });
             if (click) {
               // ✅ Validate click belongs to resolved tenant
               if (click.tenant_id && parseInt(click.tenant_id) !== parseInt(tenantId)) {
@@ -741,20 +680,20 @@ export class PostbackService {
                   click_tenant_id: click.tenant_id,
                   resolved_tenant_id: tenantId
                 });
-                throw new Error(`Security violation: Click ${click_id} belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
+                throw new AppError(`Security violation: Click ${click_id} belongs to tenant ${click.tenant_id}, but request is for tenant ${tenantId}. Access denied.`, 403);
               }
               break; // Found it!
             }
           } catch (queryError) {
+            if (queryError instanceof AppError) throw queryError;
             // If query timeout or DB error, log and continue to retry
-            if (queryError.message.includes('timeout')) {
+            if (queryError.message.includes('timeout') || queryError.code === 'ETIMEDOUT') {
               logger.warn('Click lookup query timeout', {
                 click_id,
                 attempt: attempts + 1,
                 error: queryError.message
               });
             } else {
-              // Re-throw non-timeout errors (security violations, etc.)
               throw queryError;
             }
           }
@@ -826,16 +765,17 @@ export class PostbackService {
 
       // If rcid provided, check for existing conversion (dedupe)
       if (rcid) {
-        const [existingRows] = await pool.query(
-          'SELECT id, conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id, publisher_offer_id, rcid, status, amount, payout, ip, timestamp, postback_payload, created_at, updated_at, extra_params, is_test FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ?',
-          [rcid, click ? click.offer_id : null, tenantId]
-        );
+        const existingConversion = await this.postbackRepository.getConversionByRcid({
+          rcid,
+          offerId: click ? click.offer_id : null,
+          tenantId
+        });
 
-        if (existingRows && existingRows.length > 0) {
+        if (existingConversion) {
           return {
             success: true,
             message: 'Conversion already exists (deduplicated)',
-            conversion: existingRows[0],
+            conversion: existingConversion,
             duplicate: true,
           };
         }
@@ -858,31 +798,25 @@ export class PostbackService {
         const expiredConversionPayout = 0;
         const expiredConversionRcid = rcid || click?.rcid || uuidv4();
 
-        await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            expiredConversionUuid,
-            click.click_uuid,
-            expiredOfferId,
-            expiredPublisherId,
-            expiredPublisherOfferId,
-            tenantId,
-            expiredConversionRcid,
-            CLICK_EXPIRED_STATUS,
-            expiredConversionAmount,
-            expiredConversionPayout,
-            extractIP(request),
-            JSON.stringify({
-              query,
-              headers: request.headers,
-              timestamp: new Date().toISOString(),
-              rejection_reason: 'click_expired',
-            }),
-          ]
-        );
+        await this.postbackRepository.insertConversion({
+          conversion_uuid: expiredConversionUuid,
+          click_uuid: click.click_uuid,
+          offer_id: expiredOfferId,
+          publisher_id: expiredPublisherId,
+          publisher_offer_id: expiredPublisherOfferId,
+          tenant_id: tenantId,
+          rcid: expiredConversionRcid,
+          status: CLICK_EXPIRED_STATUS,
+          amount: expiredConversionAmount,
+          payout: expiredConversionPayout,
+          ip: extractIP(request),
+          postback_payload: {
+            query,
+            headers: request.headers,
+            timestamp: new Date().toISOString(),
+            rejection_reason: 'click_expired',
+          },
+        });
 
         try {
           const today = new Date().toISOString().split('T')[0];
@@ -925,20 +859,14 @@ export class PostbackService {
       // If no offerId from click, try to find it from rcid (check previous conversion or click)
       if (!offerId && rcid) {
         // Try to find from existing conversion (scoped by tenant)
-        const [convRows] = await pool.query(
-          'SELECT offer_id FROM conversions WHERE rcid = ? AND tenant_id = ? LIMIT 1',
-          [rcid, tenantId]
-        );
-        if (convRows && convRows.length > 0) {
-          offerId = convRows[0].offer_id;
+        const conv = await this.postbackRepository.getConversionByRcid({ rcid, offerId: null, tenantId });
+        if (conv) {
+          offerId = conv.offer_id;
         } else {
           // Try to find from click with this rcid (scoped by tenant)
-          const [clickRows] = await pool.query(
-            'SELECT offer_id FROM clicks WHERE rcid = ? AND tenant_id = ? LIMIT 1',
-            [rcid, tenantId]
-          );
-          if (clickRows && clickRows.length > 0) {
-            offerId = clickRows[0].offer_id;
+          const clickWithRcid = await this.postbackRepository.getClickByUuidOrTid({ clickId: rcid, tenantId });
+          if (clickWithRcid) {
+            offerId = clickWithRcid.offer_id;
           }
         }
       }
@@ -952,7 +880,7 @@ export class PostbackService {
       if (Number.isNaN(internalOfferId)) {
         throw new Error('Invalid offer ID from click');
       }
-      const offer = await getOfferByInternalId(internalOfferId, tenantId);
+      const offer = await this._getOfferByInternalId(internalOfferId, tenantId);
       if (!offer) {
         throw new Error('Offer not found or does not belong to this tenant');
       }
@@ -965,7 +893,7 @@ export class PostbackService {
       }
 
       // Validate offer is active and not expired (in-file check)
-      const offerValidation = checkOfferValidity(offer);
+      const offerValidation = this._checkOfferValidity(offer);
       if (!offerValidation.valid) {
         return {
           success: false,
@@ -982,7 +910,7 @@ export class PostbackService {
       // Get assignment by internal id (in-file lookup)
       let assignment = null;
       if (publisherOfferId) {
-        assignment = await getAssignmentByInternalId(publisherOfferId, tenantId);
+        assignment = await this._getAssignmentByInternalId(publisherOfferId, tenantId);
 
         // ✅ CRITICAL: Verify assignment belongs to tenant
         // if (assignment && assignment.tenant_id !== tenantId) {
@@ -1052,26 +980,20 @@ export class PostbackService {
         if (pubCapStatus.isHit) {
           const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
 
-          await pool.query(
-            `INSERT INTO conversions (
-              conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-              rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-            [
-              conversionUuid,
-              click ? click.click_uuid : null,
-              offerId,
-              publisherId,
-              publisherOfferId,
-              tenantId,
-              rcid || click?.rcid || uuidv4(),
-              'rejected_cap',
-              conversionAmount, // ✅ Record Amount (Revenue)
-              0,                // ❌ ZERO Payout
-              ip,
-              JSON.stringify(postbackPayload),
-            ]
-          );
+          await this.postbackRepository.insertConversion({
+            conversion_uuid: conversionUuid,
+            click_uuid: click ? click.click_uuid : null,
+            offer_id: offerId,
+            publisher_id: publisherId,
+            publisher_offer_id: publisherOfferId,
+            tenant_id: tenantId,
+            rcid: rcid || click?.rcid || uuidv4(),
+            status: 'rejected_cap',
+            amount: conversionAmount, // ✅ Record Amount (Revenue)
+            payout: 0,                // ❌ ZERO Payout
+            ip,
+            postback_payload,
+          });
 
           // Update Stats for "rejected_cap"
           try {
@@ -1106,26 +1028,20 @@ export class PostbackService {
       if (capExceeded) {
         const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
         // REJECTED_CAP: Record Revenue, 0 Payout
-        await pool.query(
-          `INSERT INTO conversions (
-             conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-             rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid,
-            click ? click.click_uuid : null,
-            offerId,
-            publisherId,
-            publisherOfferId,
-            tenantId,
-            rcid || click?.rcid || uuidv4(),
-            'rejected_cap',
-            conversionAmount, // ✅ Revenue
-            0,                // ❌ Payout
-            ip,
-            JSON.stringify(postbackPayload),
-          ]
-        );
+        await this.postbackRepository.insertConversion({
+          conversion_uuid: conversionUuid,
+          click_uuid: click ? click.click_uuid : null,
+          offer_id: offerId,
+          publisher_id: publisherId,
+          publisher_offer_id: publisherOfferId,
+          tenant_id: tenantId,
+          rcid: rcid || click?.rcid || uuidv4(),
+          status: 'rejected_cap',
+          amount: conversionAmount, // ✅ Revenue
+          payout: 0,                // ❌ Payout
+          ip,
+          postback_payload,
+        });
 
         // Update Stats
         try {
@@ -1152,31 +1068,24 @@ export class PostbackService {
 
       // Insert conversion
       const conversionUuid = generateConversionUuid(tenantId, offerId, publisherId);
-      const [insertResult] = await pool.query(
-        `INSERT INTO conversions (
-          conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-          rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [
-          conversionUuid,
-          click ? click.click_uuid : null,
-          offerId,
-          publisherId,
-          publisherOfferId,
-          tenantId,
-          rcid || click?.rcid || uuidv4(),
-          finalStatus,
-          finalAmount,
-          finalPayout,
-          ip,
-          JSON.stringify(postbackPayload),
-        ]
-      );
+      const insertResult = await this.postbackRepository.insertConversion({
+        conversion_uuid: conversionUuid,
+        click_uuid: click ? click.click_uuid : null,
+        offer_id: offerId,
+        publisher_id: publisherId,
+        publisher_offer_id: publisherOfferId,
+        tenant_id: tenantId,
+        rcid: rcid || click?.rcid || uuidv4(),
+        status: finalStatus,
+        amount: finalAmount,
+        payout: finalPayout,
+        ip,
+        postback_payload,
+      });
 
       const insertId = insertResult.insertId || insertResult[0]?.insertId;
       // ✅ CRITICAL: Fetch conversion with tenant_id filtering
-      const [convRows] = await pool.query('SELECT id, conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id, publisher_offer_id, rcid, status, amount, payout, ip, timestamp, postback_payload, created_at, updated_at, extra_params, is_test FROM conversions WHERE id = ? AND tenant_id = ?', [insertId, tenantId]);
-      const conversion = Array.isArray(convRows) ? convRows[0] : convRows;
+      const conversion = await this.postbackRepository.findConversionById({ id: insertId, tenantId });
 
       // Update stats via Redis (consistent pipeline with conversionWorker)
       try {
@@ -1238,7 +1147,7 @@ export class PostbackService {
       // Get publisher by internal id (in-file lookup)
       let publisher = null;
       if (publisherId) {
-        publisher = await getPublisherByInternalId(publisherId, tenantId);
+        publisher = await this._getPublisherByInternalId(publisherId, tenantId);
 
         // ✅ CRITICAL: Verify publisher belongs to tenant
         if (publisher && publisher.tenant_id !== tenantId) {
@@ -1261,10 +1170,11 @@ export class PostbackService {
         postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
         if (postbackResult && postbackResult.success) {
           try {
-            await pool.query(
-              'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
-              [conversion.id, tenantId]
-            );
+            await this.postbackRepository.updateConversionPostbackStatus({
+              id: conversion.id,
+              tenantId,
+              status: 1
+            });
             conversion.affiliate_postback_fired = 1;
           } catch (updateErr) {
             if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
@@ -1401,36 +1311,20 @@ export class PostbackService {
       const profit = finalRevenue - finalPayout;
 
       // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
+      // Use CONVERT_TZ(created_at, '+00:00', '+00:00') in queries for IST display
       const today = new Date().toISOString().split('T')[0];
 
-      await pool.query(
-        `INSERT INTO daily_offer_stats (
-          offer_id, day, conversions, approved_conversions, pending_conversions, rejected_conversions,
-          revenue, payout, profit, created_at, updated_at
-        )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-         ON DUPLICATE KEY UPDATE
-           conversions = daily_offer_stats.conversions + VALUES(conversions),
-           approved_conversions = daily_offer_stats.approved_conversions + VALUES(approved_conversions),
-           pending_conversions = daily_offer_stats.pending_conversions + VALUES(pending_conversions),
-           rejected_conversions = daily_offer_stats.rejected_conversions + VALUES(rejected_conversions),
-           revenue = daily_offer_stats.revenue + VALUES(revenue),
-           payout = daily_offer_stats.payout + VALUES(payout),
-           profit = daily_offer_stats.profit + VALUES(profit),
-           updated_at = UTC_TIMESTAMP()`,
-        [
-          offerId,
-          today,
-          conversionInc,
-          approvedConversionInc,
-          pendingConversionInc,
-          rejectedConversionInc,
-          finalRevenue,
-          finalPayout,
-          profit
-        ]
-      );
+      await this.postbackRepository.updateDailyOfferStats({
+        offerId,
+        day: today,
+        conversions: conversionInc,
+        approved_conversions: approvedConversionInc,
+        pending_conversions: pendingConversionInc,
+        rejected_conversions: rejectedConversionInc,
+        revenue: finalRevenue,
+        payout: finalPayout,
+        profit
+      });
     } catch (error) {
       logger.error('PostbackService.updateDailyStats error:', error);
     }
@@ -1445,8 +1339,8 @@ export class PostbackService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    // Use IST (UTC+00:00) for timezone conversions
+    const tz = '+00:00';
 
     let dateCondition = '';
     if (duration === 'hour') {
@@ -1463,19 +1357,13 @@ export class PostbackService {
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
     // ✅ CRITICAL: Exclude rejected conversions from cap
-    let query = `SELECT COALESCE(SUM(amount), 0) as total_revenue
-       FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
-    const params = [offerId, publisherId];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-
-    const totalRevenue = parseFloat((Array.isArray(rows) ? rows[0] : rows).total_revenue || 0);
+    const totalRevenue = await this.postbackRepository.getCapUsageSum({
+      offerId,
+      publisherId,
+      tenantId,
+      dateCondition,
+      clickExpiredStatus: CLICK_EXPIRED_STATUS
+    });
     return totalRevenue >= capAmount;
   }
 
@@ -1488,8 +1376,8 @@ export class PostbackService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
+    // Use IST (UTC+00:00) for timezone conversions
+    const tz = '+00:00';
 
     let dateCondition = '';
     if (duration === 'hour') {
@@ -1506,19 +1394,14 @@ export class PostbackService {
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
     // ✅ CRITICAL: Exclude rejected conversions from cap
-    let query = `SELECT COUNT(*) as conversion_count
-       FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
-    const params = [offerId, publisherId];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-
-    const count = parseInt((Array.isArray(rows) ? rows[0] : rows).conversion_count || 0);
+    const count = await this.postbackRepository.getCapUsageCount({
+      offerId,
+      publisherId,
+      tenantId,
+      dateCondition,
+      clickExpiredStatus: CLICK_EXPIRED_STATUS
+    });
+    return count >= capCount;
     return count >= capCount;
   }
   async sendPublisherPostback(callbackUrl, conversion, click) {
@@ -1696,23 +1579,7 @@ export class PostbackService {
 
   async logPostbackAttempt(data) {
     try {
-      await pool.query(
-        `INSERT INTO affiliate_postback_logs (
-          publisher_id, conversion_id, affiliate_click_id, fired_url, 
-          http_status, response_body, error_message, execution_time_ms, tenant_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          data.publisher_id || 0,
-          data.conversion_id || null,
-          data.affiliate_click_id || null,
-          data.fired_url || '',
-          data.http_status || 0,
-          data.response_body || null,
-          data.error_message || null,
-          data.execution_time_ms || 0,
-          data.tenant_id || 0
-        ]
-      );
+      await this.postbackRepository.logPostbackAttempt(data);
     } catch (err) {
       logger.error('Failed to write to affiliate_postback_logs:', err);
     }
@@ -1720,72 +1587,7 @@ export class PostbackService {
 
   async getPostbackLogs(filters = {}, tenantId = null) {
     try {
-      let query = `
-        SELECT l.*, p.email as publisher_email, p.company_name, p.tenant_id
-        FROM affiliate_postback_logs l
-        LEFT JOIN publishers p ON l.publisher_id = p.id
-      `;
-      const params = [];
-      const conditions = [];
-
-      // Tenant isolation
-      if (tenantId) {
-        conditions.push('p.tenant_id = ?');
-        params.push(tenantId);
-      }
-
-      if (filters.publisher_id) {
-        conditions.push('l.publisher_id = ?');
-        params.push(filters.publisher_id);
-      }
-
-      if (filters.conversion_id) {
-        conditions.push('l.conversion_id = ?');
-        params.push(filters.conversion_id);
-      }
-
-      if (filters.affiliate_click_id) {
-        conditions.push('l.affiliate_click_id = ?');
-        params.push(filters.affiliate_click_id);
-      }
-
-      if (conditions.length > 0) {
-        query += ' WHERE ' + conditions.join(' AND ');
-      }
-
-      query += ' ORDER BY l.id DESC';
-
-      // Count query for pagination
-      let countQuery = `
-        SELECT COUNT(*) as total
-        FROM affiliate_postback_logs l
-        LEFT JOIN publishers p ON l.publisher_id = p.id
-      `;
-      if (conditions.length > 0) {
-        countQuery += ' WHERE ' + conditions.join(' AND ');
-      }
-
-      const [countRows] = await pool.query(countQuery, params); // reusing params as conditions are same
-      const total = countRows[0].total;
-
-      if (filters.limit) {
-        query += ' LIMIT ?';
-        params.push(parseInt(filters.limit));
-      } else {
-        query += ' LIMIT 100';
-      }
-
-      if (filters.offset) {
-        query += ' OFFSET ?';
-        params.push(parseInt(filters.offset));
-      }
-
-      const [rows] = await pool.query(query, params);
-
-      return {
-        data: rows,
-        total: total
-      };
+      return await this.postbackRepository.getPostbackLogs(filters, tenantId);
     } catch (error) {
       logger.error('PostbackService.getPostbackLogs error:', error);
       throw error;
@@ -1810,7 +1612,7 @@ export class PostbackService {
     // UTC ENFORCEMENT: Business logic validation uses IST conversion for time-based checks
     // Storage remains UTC, only business rules convert to IST
     const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const istTime = new Date(now.getTime());
     const currentDate = istTime.toISOString().split('T')[0]; // YYYY-MM-DD in IST
     const currentTime = istTime.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS in IST
 
@@ -1890,16 +1692,10 @@ export class PostbackService {
 
     // ✅ 1. Legacy Total Cap Check
     if (offer.total_cap && offer.total_cap > 0) {
-      let query = 'SELECT COUNT(*) AS cnt FROM conversions WHERE offer_id = ?';
-      const params = [offer.id];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
-
-      const [rows] = await pool.query(query, params);
-      const totalCount = parseInt((Array.isArray(rows) ? rows[0] : rows).cnt || 0);
+      const totalCount = await this.postbackRepository.getTotalConversionCount({
+        offerId: offer.id,
+        tenantId
+      });
       if (totalCount >= offer.total_cap) return true;
     }
 
@@ -1929,29 +1725,25 @@ export class PostbackService {
   async manualApproveClick(clickUuid, tenantId) {
     try {
       if (!clickUuid || !tenantId) {
-        throw new Error('click_uuid and tenant_id are required');
+        throw new AppError('click_uuid and tenant_id are required', 400);
       }
 
       // 1. Fetch Click Data
-      const [clickRows] = await pool.query(
-        'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-        [clickUuid, tenantId]
-      );
-      const click = clickRows[0];
+      const click = await this.postbackRepository.getClickByUuidOrTid({ clickId: clickUuid, tenantId });
       if (!click) {
-        throw new Error('Click not found');
+        throw new AppError('Click not found', 404);
       }
 
       // 2. Fetch Offer and Assignment for Payout
-      const offer = await getOfferByInternalId(click.offer_id, tenantId);
-      if (!offer) throw new Error('Offer not found');
+      const offer = await this._getOfferByInternalId(click.offer_id, tenantId);
+      if (!offer) throw new AppError('Offer not found', 404);
 
       let assignment = null;
       if (click.publisher_offer_id) {
-        assignment = await getAssignmentByInternalId(click.publisher_offer_id, tenantId);
+        assignment = await this._getAssignmentByInternalId(click.publisher_offer_id, tenantId);
       }
 
-      const publisher = await getPublisherByInternalId(click.publisher_id, tenantId);
+      const publisher = await this._getPublisherByInternalId(click.publisher_id, tenantId);
 
       // Payout Calculation
       let advertiserAmount = parseFloat(offer.advertiser_amount || 0);
@@ -1959,11 +1751,11 @@ export class PostbackService {
       if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
 
       // 3. Check for existing conversion
-      const [convRows] = await pool.query(
-        'SELECT * FROM conversions WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-        [clickUuid, tenantId]
-      );
-      const existingConv = convRows[0];
+      const existingConv = await this.postbackRepository.getConversionByRcid({
+        rcid: click.rcid || clickUuid,
+        offerId: click.offer_id,
+        tenantId
+      });
 
       let finalConversionId = null;
       let isNew = !existingConv;
@@ -1979,99 +1771,70 @@ export class PostbackService {
         statusChanged = true;
 
         // Update existing conversion to approved
-        await pool.query(
-          `UPDATE conversions SET 
-            status = 'approved', 
-            payout = ?, 
-            amount = ?,
-            updated_at = UTC_TIMESTAMP()
-           WHERE id = ?`,
-          [payout, advertiserAmount, existingConv.id]
-        );
+        await this.postbackRepository.updateConversionToApproved({
+          id: existingConv.id,
+          tenantId,
+          payout,
+          amount: advertiserAmount
+        });
       } else {
         // Create new conversion as approved
         const conversionUuid = generateClickId(tenantId || 0, click.offer_id || 0, click.publisher_id || 0, 96);
-        const [result] = await pool.query(
-          `INSERT INTO conversions (
-            conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-            rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-          [
-            conversionUuid, clickUuid, click.offer_id, click.publisher_id, click.publisher_offer_id, tenantId,
-            click.rcid || uuidv4(), 'approved', advertiserAmount, payout, click.ip,
-            JSON.stringify({ manual: true, approved_at: new Date().toISOString() }),
-          ]
-        );
+        const result = await this.postbackRepository.insertConversion({
+          conversion_uuid: conversionUuid,
+          click_uuid: clickUuid,
+          offer_id: click.offer_id,
+          publisher_id: click.publisher_id,
+          publisher_offer_id: click.publisher_offer_id,
+          tenant_id: tenantId,
+          rcid: click.rcid || uuidv4(),
+          status: 'approved',
+          amount: advertiserAmount,
+          payout,
+          ip: click.ip,
+          postback_payload: { manual: true, approved_at: new Date().toISOString() },
+        });
         finalConversionId = result.insertId;
       }
 
       // 4. Update Daily Offer Stats
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
+      const todayIST = new Date().toISOString().split('T')[0];
       
       if (isNew) {
-        // Increment all metrics for a new approved conversion
-        await pool.query(
-          `INSERT INTO daily_offer_stats (
-            offer_id, tenant_id, day, 
-            conversions, approved_conversions, revenue, payout, profit,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, 1, 1, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-          ON DUPLICATE KEY UPDATE
-            conversions = conversions + 1,
-            approved_conversions = approved_conversions + 1,
-            revenue = revenue + ?,
-            payout = payout + ?,
-            profit = profit + ?,
-            updated_at = UTC_TIMESTAMP()`,
-          [
-            click.offer_id, tenantId, todayIST, 
-            advertiserAmount, payout, (advertiserAmount - payout),
-            advertiserAmount, payout, (advertiserAmount - payout)
-          ]
-        );
+        await this.postbackRepository.updateDailyStatsManualNew({
+          offerId: click.offer_id,
+          tenantId,
+          day: todayIST,
+          advertiserAmount,
+          payout,
+          profit: (advertiserAmount - payout)
+        });
       } else if (statusChanged) {
-        // Correct stats based on transition
         let pendingDelta = oldStatus === 'pending' ? -1 : 0;
         let rejectedDelta = (oldStatus === 'rejected' || oldStatus === 'rejected_cap' || oldStatus === CLICK_EXPIRED_STATUS) ? -1 : 0;
         
-        await pool.query(
-          `INSERT INTO daily_offer_stats (
-            offer_id, tenant_id, day, 
-            approved_conversions, pending_conversions, rejected_conversions,
-            payout, profit,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-          ON DUPLICATE KEY UPDATE
-            approved_conversions = approved_conversions + 1,
-            pending_conversions = pending_conversions + ?,
-            rejected_conversions = rejected_conversions + ?,
-            payout = payout + ?,
-            profit = profit - ?,
-            updated_at = UTC_TIMESTAMP()`,
-          [
-            click.offer_id, tenantId, todayIST,
-            pendingDelta, rejectedDelta, payout, payout,
-            pendingDelta, rejectedDelta, payout, payout
-          ]
-        );
+        await this.postbackRepository.updateDailyStatsManualStatusChange({
+          offerId: click.offer_id,
+          tenantId,
+          day: todayIST,
+          pendingDelta,
+          rejectedDelta,
+          payout
+        });
       }
 
       // 5. Fire Publisher Postback
-      const [updatedConvRows] = await pool.query('SELECT * FROM conversions WHERE id = ?', [finalConversionId]);
-      const updatedConv = updatedConvRows[0];
-      console.log('updatedConv', updatedConv);
+      const updatedConv = await this.postbackRepository.findConversionById({ id: finalConversionId, tenantId });
       const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
-      console.log('assignment', assignment);
-      console.log('publisher', publisher);
-      console.log('callbackUrl', callbackUrl);
       let postbackResult = { executed: false };
       if (callbackUrl) {
         postbackResult = await this.sendPublisherPostback(callbackUrl, updatedConv, click);
         if (postbackResult.success) {
-          await pool.query(
-            'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ?',
-            [finalConversionId]
-          );
+          await this.postbackRepository.updateConversionPostbackStatus({
+            id: finalConversionId,
+            tenantId,
+            status: 1
+          });
         }
       }
 
@@ -2089,5 +1852,4 @@ export class PostbackService {
   }
 }
 
-export default new PostbackService();
-
+// (no singleton export)

@@ -18,8 +18,8 @@ function getIstYesterday() {
 }
 
 function istDateToUtcRange(dateStr) {
-  const utcStart = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-  const utcEnd = new Date(`${dateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+  const utcStart = new Date(`${dateStr}T00:00:00+00:00`).toISOString().slice(0, 19).replace('T', ' ');
+  const utcEnd = new Date(`${dateStr}T23:59:59+00:00`).toISOString().slice(0, 19).replace('T', ' ');
   return { utcStart, utcEnd };
 }
 

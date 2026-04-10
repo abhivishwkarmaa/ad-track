@@ -382,7 +382,7 @@ export class AdminController {
         });
       }
 
-      const offer = await offerService.getOfferByIdWithDetails(request.params.id, '+05:30', tenantId);
+      const offer = await offerService.getOfferByIdWithDetails(request.params.id, '+00:00', tenantId);
       if (!offer) {
         return reply.code(404).send({
           success: false,

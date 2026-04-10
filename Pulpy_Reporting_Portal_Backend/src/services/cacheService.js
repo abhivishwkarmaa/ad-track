@@ -1,12 +1,9 @@
 import redis from '../config/redis.js';
-import offerService from './offer.service.js';
-import publisherService from './publisherService.js';
-import assignmentService from './assignmentService.js';
-import logger from '../utils/logger.js';
-import pool from '../db/connection.js';
 
-/** publisher_offers columns needed for tracking (capping + publisher fallback redirect) */
-export const PUBLISHER_OFFERS_TRACKING_COLUMNS = `id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_type, capping_duration, capping_action, fallback_type, fallback_url, fallback_offer_id, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes`;
+
+
+import logger from '../utils/logger.js';
+
 
 const TTL = {
     OFFER: 300,        // 5 Minutes (Reference data doesn't change often)
@@ -16,6 +13,12 @@ const TTL = {
 };
 
 export class CacheService {
+    constructor(offerService, publisherService, assignmentService, cacheRepository) {
+        this.offerService = offerService;
+        this.publisherService = publisherService;
+        this.assignmentService = assignmentService;
+        this.cacheRepository = cacheRepository;
+    }
 
     // --- Reference Data Lookups (Read-Through) ---
 
@@ -35,7 +38,7 @@ export class CacheService {
         }
 
         // ✅ CRITICAL: DB Fallback with tenant_id filtering
-        const offer = await offerService.getOfferById(offerId, tenantId);
+        const offer = await this.offerService.getOfferById(offerId, tenantId);
         if (offer) {
             // Async Cache Population (don't block response)
             this._cacheObject(key, offer, TTL.OFFER);
@@ -54,7 +57,7 @@ export class CacheService {
         } catch (e) { }
 
         // ✅ CRITICAL: DB Fallback with tenant_id filtering
-        const publisher = await publisherService.findById(publisherId, tenantId);
+        const publisher = await this.publisherService.findById(publisherId, tenantId);
         if (publisher) this._cacheObject(key, publisher, TTL.PUBLISHER);
         return publisher;
     }
@@ -69,17 +72,8 @@ export class CacheService {
             if (cached && cached.id) return this._deserialize(cached);
         } catch (e) { }
 
-        // ✅ CRITICAL: Add tenant_id filtering to query
-        let query = `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?`;
-        const params = [publisherId, offerId, 'active'];
-
-        if (tenantId) {
-            query += ' AND tenant_id = ?';
-            params.push(tenantId);
-        }
-
-        const [rows] = await pool.query(query, params);
-        const assignment = Array.isArray(rows) ? rows[0] : rows;
+        // ✅ CRITICAL: DB Fallback with tenant_id filtering via repository
+        const assignment = await this.cacheRepository.findAssignment(publisherId, offerId, tenantId);
 
         if (assignment) this._cacheObject(key, assignment, TTL.ASSIGNMENT);
         return assignment;
@@ -201,21 +195,20 @@ export class CacheService {
 
     _getCapKey(entityType, entityId, capType, duration, tenantId) {
         const now = new Date();
-        // Use IST (UTC+05:30)
-        const istTime = new Date(now.getTime() + (330 * 60 * 1000));
+        const currentTime = now; // Use pure server time (Standardized UTC)
 
         let period = '';
         if (duration === 'daily') {
-            period = istTime.toISOString().split('T')[0];
+            period = currentTime.toISOString().split('T')[0];
         } else if (duration === 'weekly') {
-            const d = new Date(Date.UTC(istTime.getFullYear(), istTime.getMonth(), istTime.getDate()));
+            const d = new Date(Date.UTC(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate()));
             const dayNum = d.getUTCDay() || 7;
             d.setUTCDate(d.getUTCDate() + 4 - dayNum);
             const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
             const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
             period = `${d.getUTCFullYear()}-W${weekNo}`;
         } else if (duration === 'monthly') {
-            period = istTime.toISOString().slice(0, 7); // YYYY-MM
+            period = currentTime.toISOString().slice(0, 7); // YYYY-MM
         }
 
         return `cap:${tenantId}:${entityType}:${entityId}:${capType}:${duration}:${period}`;
@@ -224,71 +217,38 @@ export class CacheService {
     async _hydrateCapFromDB(entityType, entityId, capType, duration, tenantId) {
         const now = new Date();
         // IST = UTC + 5:30
-        const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+        const istNow = new Date(now.getTime());
         let startUTC, endUTC;
 
         if (duration === 'daily') {
             const dateStr = istNow.toISOString().split('T')[0];
-            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-            endUTC = new Date(`${dateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            startUTC = `${dateStr} 00:00:00`;
+            endUTC = `${dateStr} 23:59:59`;
         } else if (duration === 'weekly') {
             // Get Monday of current week (IST)
             const day = istNow.getUTCDay(); // 0-6 (Sun-Sat)
             const diff = istNow.getUTCDate() - day + (day === 0 ? -6 : 1);
             const monday = new Date(istNow.setDate(diff));
             const dateStr = monday.toISOString().split('T')[0];
-            startUTC = new Date(`${dateStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            startUTC = `${dateStr} 00:00:00`;
 
             const sunday = new Date(monday.setDate(monday.getDate() + 6));
             const endDateStr = sunday.toISOString().split('T')[0];
-            endUTC = new Date(`${endDateStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            endUTC = `${endDateStr} 23:59:59`;
         } else if (duration === 'monthly') {
             const startOfMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth(), 1);
-            const startStr = startOfMonth.toISOString().slice(0, 10);
-            startUTC = new Date(`${startStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            startUTC = `${startOfMonth.toISOString().split('T')[0]} 00:00:00`;
 
             const nextMonth = new Date(istNow.getUTCFullYear(), istNow.getUTCMonth() + 1, 0);
-            const endStr = nextMonth.toISOString().slice(0, 10);
-            endUTC = new Date(`${endStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+            endUTC = `${nextMonth.toISOString().split('T')[0]} 23:59:59`;
         } else {
             return 0;
         }
 
-        const dateCond = 'created_at BETWEEN ? AND ?';
-        let query = '';
-        let params = [startUTC, endUTC];
-
-        // Count ONLY Approved + Pending. Exclude Rejected/RejectedCap.
-        const statusCond = "status IN ('approved', 'pending')";
-
-        if (entityType === 'offer') {
-            if (capType === 'budget') {
-                // Offer Budget = Revenue
-                query = `SELECT COALESCE(SUM(amount), 0) as val FROM conversions WHERE offer_id = ? AND ${dateCond} AND ${statusCond}`;
-            } else {
-                query = `SELECT COUNT(*) as val FROM conversions WHERE offer_id = ? AND ${dateCond} AND ${statusCond}`;
-            }
-            params.unshift(entityId);
-        } else {
-            // Publisher Budget = Payout
-            if (capType === 'budget') {
-                query = `SELECT COALESCE(SUM(payout), 0) as val FROM conversions WHERE publisher_offer_id = ? AND ${dateCond} AND ${statusCond}`;
-            } else {
-                query = `SELECT COUNT(*) as val FROM conversions WHERE publisher_offer_id = ? AND ${dateCond} AND ${statusCond}`;
-            }
-            params.unshift(entityId);
-        }
-
-        if (tenantId) {
-            query += ' AND tenant_id = ?';
-            params.push(tenantId);
-        }
-
         try {
-            const [rows] = await pool.query(query, params);
-            return parseFloat((Array.isArray(rows) ? rows[0] : rows).val || 0);
+            return await this.cacheRepository.getCapHydrationValue(entityType, entityId, capType, startUTC, endUTC, tenantId);
         } catch (e) {
-            logger.error(`Hydrate Cap DB Error: ${e.message}`, { query, params });
+            logger.error(`Hydrate Cap DB Error: ${e.message}`, { entityType, entityId, capType });
             return 0;
         }
     }
@@ -360,4 +320,4 @@ export class CacheService {
     }
 }
 
-export default new CacheService();
+// (no singleton export)

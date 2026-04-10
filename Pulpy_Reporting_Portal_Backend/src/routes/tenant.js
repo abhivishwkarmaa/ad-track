@@ -14,29 +14,29 @@ async function tenantRoutes(fastify, options) {
   fastify.addHook('onRequest', requireSuperAdmin);
 
   // Create tenant
-  fastify.post('/tenants', tenantController.createTenant);
+  fastify.post('/', tenantController.createTenant);
 
   // Get all tenants
-  fastify.get('/tenants', tenantController.getTenants);
+  fastify.get('/', tenantController.getTenants);
 
   // Get single tenant
-  fastify.get('/tenants/:id', tenantController.getTenant);
+  fastify.get('/:id', tenantController.getTenant);
 
   // Update tenant
-  fastify.patch('/tenants/:id', tenantController.updateTenant);
-  fastify.put('/tenants/:id', tenantController.updateTenant);
+  fastify.patch('/:id', tenantController.updateTenant);
+  fastify.put('/:id', tenantController.updateTenant);
 
   // Suspend tenant (blocks all access)
-  fastify.post('/tenants/:id/suspend', tenantController.suspendTenant);
+  fastify.post('/:id/suspend', tenantController.suspendTenant);
 
   // Resume tenant (restores access)
-  fastify.post('/tenants/:id/resume', tenantController.resumeTenant);
+  fastify.post('/:id/resume', tenantController.resumeTenant);
 
   // Get tenant metrics
-  fastify.get('/tenants/:id/metrics', tenantController.getTenantMetrics);
+  fastify.get('/:id/metrics', tenantController.getTenantMetrics);
 
   // Delete tenant (soft delete by default, hard delete with ?hardDelete=true)
-  fastify.delete('/tenants/:id', tenantController.deleteTenant);
+  fastify.delete('/:id', tenantController.deleteTenant);
 }
 
 export default tenantRoutes;

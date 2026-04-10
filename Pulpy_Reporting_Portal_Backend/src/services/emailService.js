@@ -6,7 +6,7 @@
 import nodemailer from 'nodemailer';
 import logger from '../utils/logger.js';
 
-class EmailService {
+export class EmailService {
   constructor() {
     this.transporter = null;
     this.initialized = false;
@@ -491,4 +491,4 @@ class EmailService {
   }
 }
 
-export default new EmailService();
+// (no singleton export)

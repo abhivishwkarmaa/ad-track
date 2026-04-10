@@ -1,13 +1,21 @@
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
-import publisherService from './publisherService.js';
-import offerService from './offer.service.js';
+
+
 import { generateTrackingURL, generateAlternativeTrackingURL, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
-import offerPublicIdService from './offerPublicIdService.js';
-import cacheService from './cacheService.js';
+
+
+
 
 export class AssignmentService {
+  constructor(publisherService, offerService, offerPublicIdService, cacheService, assignmentRepository) {
+    this.publisherService = publisherService;
+    this.offerService = offerService;
+    this.offerPublicIdService = offerPublicIdService;
+    this.cacheService = cacheService;
+    this.assignmentRepository = assignmentRepository;
+  }
+
   async create(data, tenantId = null) {
     try {
       // ✅ CRITICAL: Require tenant_id for assignment creation
@@ -38,7 +46,7 @@ export class AssignmentService {
     const errors = [];
 
     // ✅ CRITICAL: Verify offer exists and belongs to tenant
-    const offer = await offerService.getOfferById(offer_id, tenantId);
+    const offer = await this.offerService.getOfferById(offer_id, tenantId);
     if (!offer) {
       throw new Error(`Offer with id ${offer_id} not found or does not belong to this tenant`);
     }
@@ -49,7 +57,7 @@ export class AssignmentService {
 
       try {
         // ✅ CRITICAL: Verify publisher exists and belongs to tenant
-        const publisher = await publisherService.findById(pubData.publisher_id, tenantId);
+        const publisher = await this.publisherService.findById(pubData.publisher_id, tenantId);
         if (!publisher) {
           errors.push({
             index: i,
@@ -90,80 +98,43 @@ export class AssignmentService {
         const cappingConversionsDuration = capType === 'conversion' ? capDuration : null;
 
         // Generate stable public_assignment_id
-        const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
+        const publicAssignmentId = await this.offerPublicIdService.generatePublicAssignmentId(tenantId);
 
         // ✅ CRITICAL: Insert or update assignment with tenant_id
-        await pool.query(
-          `INSERT INTO publisher_offers (
-            publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, 
-            conversion_approval_percentage,
-            capping_type, capping_duration, capping_action,
-            fallback_type, fallback_url, fallback_offer_id,
-            capping_budget_duration, capping_budget_amount,
-            capping_conversions_duration, capping_conversions_amount,
-            callback_url, destination_url,
-            notes, status, assigned_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
-          ON DUPLICATE KEY UPDATE 
-            payout_override = VALUES(payout_override),
-            conversion_approval_percentage = VALUES(conversion_approval_percentage),
-            capping_type = VALUES(capping_type),
-            capping_duration = VALUES(capping_duration),
-            capping_action = VALUES(capping_action),
-            fallback_type = VALUES(fallback_type),
-            fallback_url = VALUES(fallback_url),
-            fallback_offer_id = VALUES(fallback_offer_id),
-            capping_budget_duration = VALUES(capping_budget_duration),
-            capping_budget_amount = VALUES(capping_budget_amount),
-            capping_conversions_duration = VALUES(capping_conversions_duration),
-            capping_conversions_amount = VALUES(capping_conversions_amount),
-            callback_url = VALUES(callback_url),
-            destination_url = VALUES(destination_url),
-            notes = VALUES(notes),
-            status = VALUES(status)`,
-          [
-            publisher.id, // 🔥 Use resolved internal ID
-            offer.id,     // 🔥 Use resolved internal ID
-            tenantId,
-            publicAssignmentId,
-            pubData.payout_override || null,
-            pubData.conversion_approval_percentage || null,
-            capType,
-            capDuration,
-            capAction,
-            fallbackType,
-            fallbackUrl,
-            fallbackOfferId,
-            cappingBudgetDuration,
-            budgetAmount,
-            cappingConversionsDuration,
-            convAmount,
-            callbackUrl,
-            destinationUrl,
-            pubData.notes || null,
-            pubData.status || 'active',
-          ]
-        );
+        await this.assignmentRepository.upsertPublisherOfferAssignment({
+          publisherId: publisher.id,
+          offerId: offer.id,
+          tenantId,
+          publicAssignmentId,
+          payoutOverride: pubData.payout_override,
+          conversionApprovalPercentage: pubData.conversion_approval_percentage,
+          cappingType: capType,
+          cappingDuration: capDuration,
+          cappingAction: capAction,
+          fallbackType,
+          fallbackUrl,
+          fallbackOfferId,
+          cappingBudgetDuration,
+          cappingBudgetAmount: budgetAmount,
+          cappingConversionsDuration,
+          cappingConversionsAmount: convAmount,
+          callbackUrl,
+          destinationUrl,
+          notes: pubData.notes,
+          status: pubData.status,
+        });
 
         // ✅ CRITICAL: Fetch the created/updated assignment with tenant_id filtering
-        const [rows] = await pool.query(
-          `SELECT po.*, 
-                  p.email as publisher_email, p.company_name as publisher_company,
-                  o.name as offer_name, o.category as offer_category
-           FROM publisher_offers po
-           JOIN publishers p ON po.publisher_id = p.id
-           JOIN offers o ON po.offer_id = o.id
-           WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
-           LIMIT 1`,
-          [publisher.id, offer.id, tenantId]
-        );
-
-        const assignment = Array.isArray(rows) ? rows[0] : rows;
+        const assignment = await this.assignmentRepository.findAssignmentWithJoinsMinimal({
+          publisherId: publisher.id,
+          offerId: offer.id,
+          tenantId,
+        });
 
         if (assignment) {
           createdAssignments.push(this.formatAssignment(assignment));
           // Invalidate cache
-          await cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
+          await this.cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
         }
       } catch (error) {
         let errorMessage = error.message || 'Failed to create assignment';
@@ -196,12 +167,12 @@ export class AssignmentService {
 
   async createSingle(data, tenantId) {
     // ✅ CRITICAL: Legacy single-publisher format support with tenant isolation
-    const publisher = await publisherService.findById(data.publisher_id, tenantId);
+    const publisher = await this.publisherService.findById(data.publisher_id, tenantId);
     if (!publisher) {
       throw new Error('Publisher not found or does not belong to this tenant');
     }
 
-    const offer = await offerService.getOfferById(data.offer_id, tenantId);
+    const offer = await this.offerService.getOfferById(data.offer_id, tenantId);
     if (!offer) {
       throw new Error('Offer not found or does not belong to this tenant');
     }
@@ -212,56 +183,34 @@ export class AssignmentService {
     const callbackUrl = data.callback_url || null; // Store only if explicitly provided (override)
     //https://url.promotrking.com/landing/subscribe?partner=Pulp&service=MadFunny-or&clickId=<CLICK_ID>
     // Generate stable public_assignment_id
-    const publicAssignmentId = await offerPublicIdService.generatePublicAssignmentId(tenantId);
+    const publicAssignmentId = await this.offerPublicIdService.generatePublicAssignmentId(tenantId);
 
     // ✅ CRITICAL: Insert with tenant_id
     // Prepare capping data (legacy createSingle usually receives explicit fields or old structure, assume old structure for now or map if needed)
     // If strict new structure, map it. If createSingle is legacy, keep as minimal.
     // For now, let's just make it work with explicit fields if present, or legacy.
 
-    await pool.query(
-      `INSERT INTO publisher_offers (
-        publisher_id, offer_id, tenant_id, public_assignment_id, payout_override, cap_override, 
-        callback_url, destination_url,
-        notes, status, assigned_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
-      ON DUPLICATE KEY UPDATE 
-        payout_override = VALUES(payout_override),
-        cap_override = VALUES(cap_override),
-        callback_url = VALUES(callback_url),
-        destination_url = VALUES(destination_url),
-        notes = VALUES(notes),
-        status = VALUES(status)`,
-      [
-        publisher.id,
-        offer.id,
-        tenantId,
-        publicAssignmentId,
-        data.payout_override || null,
-        data.cap_override || null,
-        callbackUrl,
-        destinationUrl,
-        data.notes || null,
-        data.status || 'active',
-      ]
-    );
+    await this.assignmentRepository.upsertLegacyAssignment({
+      publisherId: publisher.id,
+      offerId: offer.id,
+      tenantId,
+      publicAssignmentId,
+      payoutOverride: data.payout_override,
+      capOverride: data.cap_override,
+      callbackUrl,
+      destinationUrl,
+      notes: data.notes,
+      status: data.status,
+    });
 
     // ✅ CRITICAL: Fetch with tenant_id filtering
-    const [rows] = await pool.query(
-      `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-              o.name as offer_name, o.category as offer_category, o.public_offer_id
-       FROM publisher_offers po
-       JOIN publishers p ON po.publisher_id = p.id
-       JOIN offers o ON po.offer_id = o.id
-       WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
-       LIMIT 1`,
-      [publisher.id, offer.id, tenantId]
-    );
-
-    const assignment = Array.isArray(rows) ? rows[0] : rows;
+    const assignment = await this.assignmentRepository.findAssignmentWithJoins({
+      publisherId: publisher.id,
+      offerId: offer.id,
+      tenantId,
+    });
     if (assignment) {
-      await cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
+      await this.cacheService.invalidateAssignment(publisher.id, offer.id, tenantId);
     }
     return this.formatAssignment(assignment);
   }
@@ -323,11 +272,10 @@ export class AssignmentService {
   async getInternalAssignmentIdByPublicId(publicAssignmentId, tenantId) {
     if (publicAssignmentId == null || !tenantId) return null;
     try {
-      const [rows] = await pool.query(
-        'SELECT id FROM publisher_offers WHERE tenant_id = ? AND public_assignment_id = ? LIMIT 1',
-        [tenantId, publicAssignmentId]
-      );
-      return rows?.[0]?.id ?? null;
+      return await this.assignmentRepository.findInternalIdByPublicId({
+        tenantId,
+        publicAssignmentId,
+      });
     } catch (e) {
       if (e.code === 'ER_BAD_FIELD_ERROR') return null;
       throw e;
@@ -344,19 +292,12 @@ export class AssignmentService {
     // 1. Try Public ID first (unless strict internal lookup)
     if (tenantId && !internalOnly) {
       try {
-        const [publicRows] = await pool.query(
-          `SELECT po.*, 
-                  p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-                  o.name as offer_name, o.category as offer_category, o.public_offer_id,
-                  o.affiliate_amount as offer_affiliate_amount
-           FROM publisher_offers po
-           JOIN publishers p ON po.publisher_id = p.id
-           JOIN offers o ON po.offer_id = o.id
-           WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
-          [numericId, tenantId]
-        );
-        if (publicRows && publicRows.length > 0) {
-          return this.formatAssignment(publicRows[0]);
+        const assignment = await this.assignmentRepository.findAssignmentByPublicIdWithJoins({
+          tenantId,
+          publicAssignmentId: numericId,
+        });
+        if (assignment) {
+          return this.formatAssignment(assignment);
         }
       } catch (err) {
         if (err.code === 'ER_BAD_FIELD_ERROR') {
@@ -368,40 +309,19 @@ export class AssignmentService {
     }
 
     // 2. Fallback to internal ID (use numeric id for primary key lookup)
-    let query = `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-              o.name as offer_name, o.category as offer_category, o.public_offer_id,
-              o.affiliate_amount as offer_affiliate_amount
-       FROM publisher_offers po
-       JOIN publishers p ON po.publisher_id = p.id
-       JOIN offers o ON po.offer_id = o.id
-       WHERE po.id = ?`;
-    const params = [numericId];
-
-    if (tenantId) {
-      query += ' AND po.tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-    const assignment = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-    return assignment ? this.formatAssignment(assignment) : null;
+    const internalAssignment = await this.assignmentRepository.findAssignmentByInternalIdWithJoins({
+      id: numericId,
+      tenantId,
+    });
+    return internalAssignment ? this.formatAssignment(internalAssignment) : null;
   }
 
   async findByPublisherAndOffer(publisherId, offerId, tenantId) {
-    const [rows] = await pool.query(
-      `SELECT po.*, 
-              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-              o.name as offer_name, o.category as offer_category, o.public_offer_id,
-              o.affiliate_amount as offer_affiliate_amount
-       FROM publisher_offers po
-       JOIN publishers p ON po.publisher_id = p.id
-       JOIN offers o ON po.offer_id = o.id
-       WHERE po.publisher_id = ? AND po.offer_id = ? AND po.tenant_id = ?
-       LIMIT 1`,
-      [publisherId, offerId, tenantId]
-    );
-    const assignment = Array.isArray(rows) ? rows[0] : rows;
+    const assignment = await this.assignmentRepository.findAssignmentWithJoins({
+      publisherId,
+      offerId,
+      tenantId,
+    });
     return this.formatAssignment(assignment);
   }
 
@@ -413,36 +333,12 @@ export class AssignmentService {
       throw err;
     }
 
-    let query = `
-      SELECT po.*, 
-             p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
-             o.name as offer_name, o.category as offer_category, o.public_offer_id,
-             o.affiliate_amount as offer_affiliate_amount
-      FROM publisher_offers po
-      JOIN publishers p ON po.publisher_id = p.id
-      JOIN offers o ON po.offer_id = o.id
-      WHERE po.tenant_id = ?
-    `;
-    const params = [tenantId]; // ✅ CRITICAL: Always filter by tenant_id
-
-    if (filters.publisher_id) {
-      query += ` AND po.publisher_id = ?`;
-      params.push(filters.publisher_id);
-    }
-
-    if (filters.offer_id) {
-      query += ` AND po.offer_id = ?`;
-      params.push(filters.offer_id);
-    }
-
-    if (filters.status) {
-      query += ` AND po.status = ?`;
-      params.push(filters.status);
-    }
-
-    query += ' ORDER BY po.assigned_at DESC';
-
-    const [rows] = await pool.query(query, params);
+    const rows = await this.assignmentRepository.findAssignments({
+      tenantId,
+      publisherId: filters.publisher_id,
+      offerId: filters.offer_id,
+      status: filters.status,
+    });
     return rows.map(row => this.formatAssignment(row));
   }
 
@@ -459,7 +355,7 @@ export class AssignmentService {
     const internalPublisherId = assignment.internal_publisher_id ?? assignment.publisher_id;
 
     // 🔥 CRITICAL: Fetch offer strictly by Internal ID to avoid Public ID collision
-    const offer = await offerService.getOfferById(internalOfferId, tenantId, true);
+    const offer = await this.offerService.getOfferById(internalOfferId, tenantId, true);
     if (!offer) {
       logger.error('Offer not found for assignment', {
         assignment_id: assignmentId,
@@ -483,7 +379,7 @@ export class AssignmentService {
     }
 
     // 🔥 CRITICAL: Fetch publisher strictly by Internal ID
-    const publisher = await publisherService.findById(internalPublisherId, tenantId, true);
+    const publisher = await this.publisherService.findById(internalPublisherId, tenantId, true);
     const publicPublisherId = publisher ? (publisher.public_publisher_id || publisher.id) : assignment.publisher_id;
 
     if (format === 'alternative') {
@@ -524,7 +420,7 @@ export class AssignmentService {
       return parseFloat(assignment.payout_override);
     }
 
-    const offer = await offerService.getOfferById(assignment.offer_id, tenantId, true);
+    const offer = await this.offerService.getOfferById(assignment.offer_id, tenantId, true);
     return offer ? parseFloat(offer.affiliate_model_cost) : null;
   }
 
@@ -652,17 +548,16 @@ export class AssignmentService {
       const dbId = existing.internal_id ?? internalId;
       updateValues.push(dbId);
 
-      let updateQuery = `UPDATE publisher_offers SET ${updateFields.join(', ')} WHERE id = ?`;
-      if (tenantId) {
-        updateQuery += ' AND tenant_id = ?';
-        updateValues.push(tenantId);
-      }
-
-      await pool.query(updateQuery, updateValues);
+      await this.assignmentRepository.updateAssignmentById({
+        id: dbId,
+        tenantId,
+        updateFields,
+        updateValues,
+      });
 
       logger.info(`Updated assignment (public id ${id}, internal ${dbId})`);
 
-      await cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
+      await this.cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
 
       return await this.findById(dbId, tenantId, true);
     } catch (error) {
@@ -692,23 +587,15 @@ export class AssignmentService {
     }
 
     const dbId = existing.internal_id ?? internalId;
-    let query = `DELETE FROM publisher_offers WHERE id = ?`;
-    const params = [dbId];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [result] = await pool.query(query, params);
+    const result = await this.assignmentRepository.deleteAssignmentById({ id: dbId, tenantId });
     if (result.affectedRows === 0) {
       return null;
     }
-    await cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
+    await this.cacheService.invalidateAssignment(existing.internal_publisher_id || existing.publisher_id, existing.internal_offer_id || existing.offer_id, tenantId);
 
     return existing;
   }
 }
 
-export default new AssignmentService();
+// (no singleton export)
 

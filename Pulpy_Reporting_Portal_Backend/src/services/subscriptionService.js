@@ -1,5 +1,6 @@
-import pool from '../db/connection.js';
+
 import logger from '../utils/logger.js';
+
 
 /**
  * Subscription Service
@@ -27,7 +28,11 @@ const normalizeTenantState = (status) => {
     return String(status).toUpperCase();
 };
 
-class SubscriptionService {
+export class SubscriptionService {
+  constructor(subscriptionRepository, pool) {
+    this.subscriptionRepository = subscriptionRepository;
+    this.pool = pool;
+  }
     /**
      * Start trial on first login
      * Sets trial_start_at and trial_end_at (10 days from now)
@@ -38,21 +43,14 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async startTrial(tenantId, userId = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status, trial_start_at, trial_end_at, subscription_start_at FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
-
-            const tenant = rows[0];
 
             // Check if trial already started
             if (tenant.trial_start_at) {
@@ -71,31 +69,18 @@ class SubscriptionService {
             const trialEndAt = new Date(now.getTime() + (TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000));
 
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET trial_start_at = ?, 
-             trial_end_at = ?, 
-             status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [trialStartAt, trialEndAt, TENANT_STATES.TRIAL, tenantId]
-            );
+            await this.subscriptionRepository.updateTenantTrial(tenantId, trialStartAt, trialEndAt, TENANT_STATES.TRIAL, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, new_end_at, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'TRIAL_STARTED',
-                    tenant.status,
-                    TENANT_STATES.TRIAL,
-                    trialEndAt,
-                    userId,
-                    `Trial started on first login. Duration: ${TRIAL_DURATION_DAYS} days`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'TRIAL_STARTED',
+                previous_state: tenant.status,
+                new_state: TENANT_STATES.TRIAL,
+                new_end_at: trialEndAt,
+                admin_id: userId,
+                notes: `Trial started on first login. Duration: ${TRIAL_DURATION_DAYS} days`
+            }, connection);
 
             await connection.commit();
 
@@ -131,23 +116,18 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async activateSubscription(tenantId, endDate, plan = 'basic', adminId = null, startDate = null, billingEmail = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status, subscription_end_at FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
 
-            const tenant = rows[0];
             const now = new Date();
             const activationStart = startDate || now;
+            const newState = activationStart <= now ? TENANT_STATES.ACTIVE : TENANT_STATES.EXPIRED;
 
             // Validate end date
             if (endDate <= activationStart) {
@@ -175,21 +155,16 @@ class SubscriptionService {
             );
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, previous_end_at, new_end_at, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'SUBSCRIPTION_ACTIVATED',
-                    tenant.status,
-                    activationStart <= now ? TENANT_STATES.ACTIVE : TENANT_STATES.EXPIRED,
-                    tenant.subscription_end_at,
-                    endDate,
-                    adminId,
-                    `Subscription activated. Plan: ${plan}${startDate ? `, start: ${activationStart.toISOString()}` : ''}`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'SUBSCRIPTION_ACTIVATED',
+                previous_state: tenant.status,
+                new_state: newState,
+                previous_end_at: tenant.subscription_end_at,
+                new_end_at: endDate,
+                admin_id: adminId,
+                notes: `Subscription activated. Plan: ${plan}${startDate ? `, start: ${activationStart.toISOString()}` : ''}`
+            }, connection);
 
             await connection.commit();
 
@@ -221,21 +196,14 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async extendSubscription(tenantId, days, adminId = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status, subscription_end_at FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
-
-            const tenant = rows[0];
 
             if (!tenant.subscription_end_at) {
                 throw new Error('No active subscription to extend');
@@ -246,31 +214,25 @@ class SubscriptionService {
             const newEndDate = new Date(currentEndDate.getTime() + (days * 24 * 60 * 60 * 1000));
 
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET subscription_end_at = ?, 
-             status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [newEndDate, TENANT_STATES.ACTIVE, tenantId]
-            );
+            await this.subscriptionRepository.activateSubscription(tenantId, {
+                subscription_start_at: tenant.subscription_start_at,
+                subscription_end_at: newEndDate,
+                subscription_plan: tenant.subscription_plan,
+                billing_email: tenant.billing_email,
+                status: TENANT_STATES.ACTIVE
+            }, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, previous_end_at, new_end_at, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'SUBSCRIPTION_EXTENDED',
-                    tenant.status,
-                    TENANT_STATES.ACTIVE,
-                    tenant.subscription_end_at,
-                    newEndDate,
-                    adminId,
-                    `Subscription extended by ${days} days`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'SUBSCRIPTION_EXTENDED',
+                previous_state: tenant.status,
+                new_state: TENANT_STATES.ACTIVE,
+                previous_end_at: tenant.subscription_end_at,
+                new_end_at: newEndDate,
+                admin_id: adminId,
+                notes: `Subscription extended by ${days} days`
+            }, connection);
 
             await connection.commit();
 
@@ -302,21 +264,15 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async setSubscriptionEndDate(tenantId, endDate, adminId = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status, subscription_start_at, subscription_end_at FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
 
-            const tenant = rows[0];
             const now = new Date();
 
             // If no subscription_start_at, set it to now
@@ -326,32 +282,25 @@ class SubscriptionService {
             const newState = endDate > now ? TENANT_STATES.ACTIVE : TENANT_STATES.EXPIRED;
 
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET subscription_start_at = ?, 
-             subscription_end_at = ?, 
-             status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [subscriptionStartAt, endDate, newState, tenantId]
-            );
+            await this.subscriptionRepository.activateSubscription(tenantId, {
+                subscription_start_at: subscriptionStartAt,
+                subscription_end_at: endDate,
+                subscription_plan: tenant.subscription_plan,
+                billing_email: tenant.billing_email,
+                status: newState
+            }, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, previous_end_at, new_end_at, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'SUBSCRIPTION_EXTENDED',
-                    tenant.status,
-                    newState,
-                    tenant.subscription_end_at,
-                    endDate,
-                    adminId,
-                    `Custom subscription end date set`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'SUBSCRIPTION_EXTENDED',
+                previous_state: tenant.status,
+                new_state: newState,
+                previous_end_at: tenant.subscription_end_at,
+                new_end_at: endDate,
+                admin_id: adminId,
+                notes: `Custom subscription end date set`
+            }, connection);
 
             await connection.commit();
 
@@ -383,45 +332,27 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async suspendTenant(tenantId, adminId = null, reason = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
 
-            const tenant = rows[0];
-
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [TENANT_STATES.SUSPENDED, tenantId]
-            );
+            await this.subscriptionRepository.updateTenantState(tenantId, TENANT_STATES.SUSPENDED, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'TENANT_SUSPENDED',
-                    tenant.status,
-                    TENANT_STATES.SUSPENDED,
-                    adminId,
-                    reason || 'Tenant suspended by admin'
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'TENANT_SUSPENDED',
+                previous_state: tenant.status,
+                new_state: TENANT_STATES.SUSPENDED,
+                admin_id: adminId,
+                notes: reason || 'Tenant suspended by admin'
+            }, connection);
 
             await connection.commit();
 
@@ -452,22 +383,14 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async unsuspendTenant(tenantId, adminId = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                `SELECT id, slug, status, trial_end_at, subscription_start_at, subscription_end_at 
-         FROM tenants WHERE id = ? FOR UPDATE`,
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
-
-            const tenant = rows[0];
 
             if (tenant.status !== TENANT_STATES.SUSPENDED) {
                 throw new Error('Tenant is not suspended');
@@ -484,28 +407,17 @@ class SubscriptionService {
             }
 
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [newState, tenantId]
-            );
+            await this.subscriptionRepository.updateTenantState(tenantId, newState, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'TENANT_UNSUSPENDED',
-                    TENANT_STATES.SUSPENDED,
-                    newState,
-                    adminId,
-                    `Tenant unsuspended. Restored to ${newState} state.`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'TENANT_UNSUSPENDED',
+                previous_state: TENANT_STATES.SUSPENDED,
+                new_state: newState,
+                admin_id: adminId,
+                notes: `Tenant unsuspended. Restored to ${newState} state.`
+            }, connection);
 
             await connection.commit();
 
@@ -534,21 +446,14 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated tenant data
      */
     async resetTrial(tenantId, adminId = null) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                'SELECT id, slug, status FROM tenants WHERE id = ? FOR UPDATE',
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
-
-            const tenant = rows[0];
 
             // Calculate new trial dates
             const now = new Date();
@@ -556,31 +461,18 @@ class SubscriptionService {
             const trialEndAt = new Date(now.getTime() + (TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000));
 
             // Update tenant
-            await connection.query(
-                `UPDATE tenants 
-         SET trial_start_at = ?, 
-             trial_end_at = ?, 
-             status = ?,
-             updated_at = UTC_TIMESTAMP()
-         WHERE id = ?`,
-                [trialStartAt, trialEndAt, TENANT_STATES.TRIAL, tenantId]
-            );
+            await this.subscriptionRepository.updateTenantTrial(tenantId, trialStartAt, trialEndAt, TENANT_STATES.TRIAL, connection);
 
             // Log to subscription history
-            await connection.query(
-                `INSERT INTO subscription_history 
-         (tenant_id, action, previous_state, new_state, new_end_at, admin_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    tenantId,
-                    'TRIAL_RESET',
-                    tenant.status,
-                    TENANT_STATES.TRIAL,
-                    trialEndAt,
-                    adminId,
-                    `Trial reset by admin. New duration: ${TRIAL_DURATION_DAYS} days`
-                ]
-            );
+            await this.subscriptionRepository.addHistory({
+                tenant_id: tenantId,
+                action: 'TRIAL_RESET',
+                previous_state: tenant.status,
+                new_state: TENANT_STATES.TRIAL,
+                new_end_at: trialEndAt,
+                admin_id: adminId,
+                notes: `Trial reset by admin. New duration: ${TRIAL_DURATION_DAYS} days`
+            }, connection);
 
             await connection.commit();
 
@@ -610,20 +502,12 @@ class SubscriptionService {
      * @returns {Promise<Object>} Subscription status
      */
     async getTenantSubscriptionStatus(tenantId) {
-        const [rows] = await pool.query(
-            `SELECT id, name, slug, status, 
-              trial_start_at, trial_end_at, 
-              subscription_start_at, subscription_end_at, subscription_plan,
-              billing_email, created_at, updated_at
-       FROM tenants WHERE id = ?`,
-            [tenantId]
-        );
+        const tenant = await this.subscriptionRepository.getTenantSubscriptionDetails(tenantId);
 
-        if (!rows || rows.length === 0) {
+        if (!tenant) {
             throw new Error('Tenant not found');
         }
 
-        const tenant = rows[0];
         const storedState = normalizeTenantState(tenant.status);
         const now = new Date();
 
@@ -713,22 +597,15 @@ class SubscriptionService {
      * @returns {Promise<Object>} Updated subscription status
      */
     async updateTenantState(tenantId) {
-        const connection = await pool.getConnection();
+        const connection = await this.pool.getConnection();
         try {
             await connection.beginTransaction();
 
-            // Get current tenant state
-            const [rows] = await connection.query(
-                `SELECT id, slug, status, trial_end_at, subscription_end_at 
-         FROM tenants WHERE id = ? FOR UPDATE`,
-                [tenantId]
-            );
-
-            if (!rows || rows.length === 0) {
+            const tenant = await this.subscriptionRepository.getTenantForUpdate(tenantId, connection);
+            if (!tenant) {
                 throw new Error('Tenant not found');
             }
 
-            const tenant = rows[0];
             const currentState = normalizeTenantState(tenant.status);
             const now = new Date();
             let newState = currentState;
@@ -761,28 +638,17 @@ class SubscriptionService {
 
             // Update state if changed
             if (newState !== currentState) {
-                await connection.query(
-                    `UPDATE tenants 
-           SET status = ?,
-               updated_at = UTC_TIMESTAMP()
-           WHERE id = ?`,
-                    [newState, tenantId]
-                );
+                await this.subscriptionRepository.updateTenantState(tenantId, newState, connection);
 
                 // Log state change
                 const action = newState === TENANT_STATES.EXPIRED ? 'SUBSCRIPTION_EXPIRED' : 'SUBSCRIPTION_ACTIVATED';
-                await connection.query(
-                    `INSERT INTO subscription_history 
-           (tenant_id, action, previous_state, new_state, notes)
-           VALUES (?, ?, ?, ?, ?)`,
-                    [
-                        tenantId,
-                        action,
-                        currentState,
-                        newState,
-                        'State updated automatically based on expiry dates'
-                    ]
-                );
+                await this.subscriptionRepository.addHistory({
+                    tenant_id: tenantId,
+                    action,
+                    previous_state: currentState,
+                    new_state: newState,
+                    notes: 'State updated automatically based on expiry dates'
+                }, connection);
 
                 logger.info(`Tenant state updated: ${tenantId}`, {
                     tenantId,
@@ -811,18 +677,8 @@ class SubscriptionService {
      * @returns {Promise<Array>} Subscription history
      */
     async getSubscriptionHistory(tenantId, limit = 50) {
-        const [rows] = await pool.query(
-            `SELECT sh.*, au.name as admin_name, au.email as admin_email
-       FROM subscription_history sh
-       LEFT JOIN admin_users au ON sh.admin_id = au.id
-       WHERE sh.tenant_id = ?
-       ORDER BY sh.created_at DESC
-       LIMIT ?`,
-            [tenantId, limit]
-        );
-
-        return rows || [];
+        return await this.subscriptionRepository.getSubscriptionHistory(tenantId, limit);
     }
 }
 
-export default new SubscriptionService();
+// (no singleton export)

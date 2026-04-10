@@ -7,22 +7,6 @@ async function adminRoutes(fastify) {
   // Apply auth middleware to all admin routes
   fastify.addHook('onRequest', authenticateAdmin);
 
-  // Publisher routes
-  fastify.post('/publishers', adminController.createPublisher);
-  fastify.patch('/publishers/:id', adminController.updatePublisher);
-  fastify.delete('/publishers/:id', adminController.deletePublisher);
-
-  fastify.get('/publishers', adminController.listPublishers);
-  fastify.get('/publishers/:id', adminController.getPublisher);
-
-  // Assignment routes (more specific paths MUST come before /assignments/:id so :id doesn't capture "2/tracking-url")
-  fastify.post('/assignments', adminController.createAssignment);
-  fastify.patch('/assignments/:id', adminController.updateAssignment);
-  fastify.get('/assignments', adminController.listAssignments);
-  fastify.get('/assignments/:id/tracking-url', adminController.getTrackingURL);
-  fastify.get('/assignments/:id', adminController.getAssignment);
-  fastify.delete('/assignments/:id', adminController.deleteAssignment);
-
   // Test conversion
   fastify.post('/test-conversion', adminController.testConversion);
 

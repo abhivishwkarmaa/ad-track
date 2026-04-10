@@ -286,8 +286,8 @@ async function processBatch(buffer) {
 
                     // Count distinct IPs for this offer+tenant for today
                     const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
+                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+00:00')) = ?`
+                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+00:00')) = ?`;
                     const ipParams = tenantId ? [offerId, tenantId, today] : [offerId, today];
                     const [ipRows] = await pool.query(ipCountQuery, ipParams);
                     const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);

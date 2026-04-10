@@ -1,4 +1,4 @@
-import pool from '../db/connection.js';
+
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import {
@@ -8,6 +8,10 @@ import {
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 
 export class ReportService {
+  constructor(reportRepository) {
+    this.reportRepository = reportRepository;
+  }
+
   async getSummary(filters = {}, tenantId = null) {
     // FINANCIAL SEPARATION RULES:
     // 1. Revenue = SUM(amount)  — ALL conversions regardless of status
@@ -1666,5 +1670,5 @@ export class ReportService {
   }
 }
 
-export default new ReportService();
+// (no singleton export)
 

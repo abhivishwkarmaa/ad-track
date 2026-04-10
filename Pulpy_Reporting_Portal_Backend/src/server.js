@@ -17,13 +17,14 @@ import adminRoutes from './routes/admin.js';
 import tenantRoutes from './routes/tenant.js';
 import advertiserRoutes from './routes/advertiser.routes.js';
 import offerRoutes from './routes/offer.routes.js';
+import publisherRoutes from './routes/publisher.routes.js';
 import trackingRoutes from './routes/tracking.js';
 import postbackRoutes from './routes/postback.js';
 import reportRoutes from './routes/reports.js';
-import contactRoutes from './routes/contact.js';
-import testPostbackRoutes from './routes/testPostback.js';
-import subscriptionRoutes from './routes/subscription.js';
 import dashboardRoutes from './routes/dashboard.js';
+import testPostbackRoutes from './routes/testPostback.js';
+import contactRoutes from './routes/contact.js';
+import subscriptionRoutes from './routes/subscription.js';
 
 const fastify = Fastify({
   logger: logger,
@@ -100,13 +101,15 @@ async function initializeServer() {
   // Register routes
   await fastify.register(authRoutes, { prefix: '/api/auth' });
   await fastify.register(adminRoutes, { prefix: '/api/admin' });
-  await fastify.register(tenantRoutes, { prefix: '/api/admin' }); // Tenant management (admin subdomain only)
-  await fastify.register(advertiserRoutes);
-  await fastify.register(offerRoutes);
+  await fastify.register(tenantRoutes, { prefix: '/api/admin/tenants' }); // Tenant management
+  await fastify.register(advertiserRoutes, { prefix: '/api/admin/advertisers' });
+  await fastify.register(offerRoutes, { prefix: '/api/admin/offers' });
+  await fastify.register(publisherRoutes, { prefix: '/api/admin/publishers' });
+  
   await fastify.register(trackingRoutes);
   await fastify.register(postbackRoutes);
   await fastify.register(reportRoutes, { prefix: '/api/admin/reports' });
-  await fastify.register(dashboardRoutes, { prefix: '/api' });
+  await fastify.register(dashboardRoutes, { prefix: '/api/dashboard' });
   await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
   await fastify.register(contactRoutes, { prefix: '/api' }); // Contact form endpoint
   await fastify.register(subscriptionRoutes, { prefix: '/api' }); // Subscription management

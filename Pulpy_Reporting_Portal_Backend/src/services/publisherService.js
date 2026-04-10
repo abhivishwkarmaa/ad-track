@@ -1,11 +1,13 @@
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import bcrypt from 'bcrypt';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
-import offerPublicIdService from './offerPublicIdService.js';
-
 export class PublisherService {
+  constructor(publisherRepository, offerPublicIdService) {
+    this.publisherRepository = publisherRepository;
+    this.offerPublicIdService = offerPublicIdService;
+  }
+
   async create(data, tenantId = null) {
     try {
       // ✅ CRITICAL: Require tenant_id for publisher creation
@@ -31,32 +33,17 @@ export class PublisherService {
       }
 
       // Generate public_publisher_id
-      const publicPublisherId = await offerPublicIdService.generatePublicPublisherId(tenantId);
+      const publicPublisherId = await this.offerPublicIdService.generatePublicPublisherId(tenantId);
 
-      // ✅ CRITICAL: Include tenant_id in INSERT
-      const [result] = await pool.query(
-        `INSERT INTO publishers (
-          email, first_name, company_name, country, password_hash, global_postback_url, status, tenant_id, public_publisher_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [
-          data.email,
-          data.first_name || null,
-          data.company_name || null,
-          data.country || null,
-          passwordHash,
-          data.global_postback_url || null,
-          tenantId, // Add tenant_id
-          publicPublisherId
-        ]
-      );
+      const insertId = await this.publisherRepository.create({
+        ...data,
+        password_hash: passwordHash,
+        tenant_id: tenantId,
+        public_publisher_id: publicPublisherId
+      });
 
-      const insertId = result.insertId || result[0]?.insertId;
-      // ✅ CRITICAL: Fetch with tenant_id filtering (include tenant_id in SELECT)
-      const [rows] = await pool.query(
-        'SELECT id, email, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE id = ? AND tenant_id = ?',
-        [insertId, tenantId]
-      );
-      const publisher = Array.isArray(rows) ? rows[0] : rows;
+      const publisher = await this.publisherRepository.findById(insertId, tenantId);
+      
       // Remove password_hash from response
       if (publisher && publisher.password_hash) {
         delete publisher.password_hash;
@@ -75,62 +62,22 @@ export class PublisherService {
 
     // 1. Try Public ID first (unless strict internal lookup)
     if (tenantId && !internalOnly) {
-      const [publicRows] = await pool.query(
-        `SELECT ${fields} FROM publishers WHERE public_publisher_id = ? AND tenant_id = ? LIMIT 1`,
-        [id, tenantId]
-      );
-      if (publicRows && (Array.isArray(publicRows) ? publicRows[0] : publicRows)) {
-        return Array.isArray(publicRows) ? publicRows[0] : publicRows;
-      }
+      const publicRow = await this.publisherRepository.findByPublicId(id, tenantId);
+      if (publicRow) return publicRow;
     }
 
     // 2. Fallback to internal ID
-    let query = `SELECT ${fields} FROM publishers WHERE id = ?`;
-    const params = [id];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-    const publisher = Array.isArray(rows) ? rows[0] : rows;
-
-    // Verify publisher belongs to tenant
-    if (tenantId && publisher && publisher.tenant_id !== tenantId) {
-      return null;
-    }
-
-    return publisher;
+    return await this.publisherRepository.findById(id, tenantId);
   }
 
   async getInternalIdByPublicId(publicId, tenantId) {
     if (publicId == null || !tenantId) return null;
-    const [rows] = await pool.query(
-      'SELECT id FROM publishers WHERE tenant_id = ? AND public_publisher_id = ? LIMIT 1',
-      [tenantId, publicId]
-    );
-    return rows?.[0]?.id ?? null;
+    return await this.publisherRepository.getInternalIdByPublicId(publicId, tenantId);
   }
 
   async findByEmail(email, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation (prevents duplicate email conflicts across tenants)
-    let query = 'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at FROM publishers WHERE email = ?';
-    const params = [email];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-    const publisher = Array.isArray(rows) ? rows[0] : rows;
-
-    // Verify publisher belongs to tenant if tenant_id is set
-    if (tenantId && publisher && publisher.tenant_id !== tenantId) {
-      return null;
-    }
-
+    const publisher = await this.publisherRepository.findByEmail(email, tenantId);
+    
     // Remove password_hash from response if present
     if (publisher && publisher.password_hash) {
       delete publisher.password_hash;
@@ -138,27 +85,8 @@ export class PublisherService {
     return publisher;
   }
 
-  // Internal method to get publisher with password_hash (for authentication)
-  // ✅ CRITICAL: For authentication, we may need to check across tenants or specific tenant
   async findByEmailWithPassword(email, tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = 'SELECT id, public_publisher_id, email, password_hash, first_name, company_name, country, global_postback_url, status, tenant_id, created_at, updated_at FROM publishers WHERE email = ?';
-    const params = [email];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-    const publisher = Array.isArray(rows) ? rows[0] : rows;
-
-    // Verify publisher belongs to tenant if tenant_id is set
-    if (tenantId && publisher && publisher.tenant_id !== tenantId) {
-      return null;
-    }
-
-    return publisher;
+    return await this.publisherRepository.findByEmail(email, tenantId, true);
   }
 
   async findAll(filters = {}, tenantId = null) {
@@ -191,23 +119,7 @@ export class PublisherService {
     const limit = parseInt(filters.limit || 10, 10);
     const offset = (page - 1) * limit;
 
-    const dataQuery = `
-      SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, created_at, updated_at
-      FROM publishers
-      ${where}
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    const countQuery = `
-      SELECT COUNT(*) as count
-      FROM publishers
-      ${where}
-    `;
-
-    const [dataRows] = await pool.query(dataQuery, [...params, limit, offset]);
-    const [countRows] = await pool.query(countQuery, params);
-    const total = countRows[0]?.count || 0;
+    const { dataRows, total } = await this.publisherRepository.findAll({ where, params, limit, offset });
 
     return {
       data: dataRows,
@@ -260,38 +172,14 @@ export class PublisherService {
 
     fields.push(`updated_at = UTC_TIMESTAMP()`);
     const internalId = existing.id;
-    params.push(internalId);
 
-    // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-    let query = `UPDATE publishers SET ${fields.join(', ')} WHERE id = ?`;
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    await pool.query(query, params);
+    await this.publisherRepository.update(internalId, tenantId, fields, params);
     // Return publisher without password_hash
     return this.findById(id, tenantId);
   }
 
   async getStats(tenantId = null) {
-    // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
-    let query = `
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) as suspended
-      FROM publishers`;
-    const params = [];
-
-    if (tenantId) {
-      query += ' WHERE tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [rows] = await pool.query(query, params);
-    return Array.isArray(rows) ? rows[0] : rows;
+    return await this.publisherRepository.getStats(tenantId);
   }
 
   async getPerformanceStats(filters = {}, tenantId = null) {
@@ -321,102 +209,32 @@ export class PublisherService {
       let dateCondition = '';
       const statsParams = [];
       if (filters.date_from && filters.date_to) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcStart = `${filters.date_from} 00:00:00`;
+        const utcEnd = `${filters.date_to} 23:59:59`;
         dateCondition = ' AND conv.created_at BETWEEN ? AND ?';
         statsParams.push(utcStart, utcEnd);
       } else if (filters.date_from) {
-        const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcStart = `${filters.date_from} 00:00:00`;
         dateCondition = ' AND conv.created_at >= ?';
         statsParams.push(utcStart);
       } else if (filters.date_to) {
-        const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcEnd = `${filters.date_to} 23:59:59`;
         dateCondition = ' AND conv.created_at <= ?';
         statsParams.push(utcEnd);
       }
 
-      const query = `
-        SELECT 
-          p.id,
-          p.public_publisher_id,
-          p.company_name,
-          p.email,
-          p.status,
-          COALESCE(stats.clicks, 0) as clicks,
-          COALESCE(stats.conversions, 0) as conversions,
-          COALESCE(stats.radius_revenue, 0) as revenue, -- "Radius Revenue" usually means Advertiser Revenue
-          COALESCE(stats.payout, 0) as payout,
-          COALESCE(stats.profit, 0) as profit,
-          COALESCE(stats.pending_payout, 0) as pending_payout
-        FROM publishers p
-        LEFT JOIN (
-          SELECT 
-            c.publisher_id,
-            COUNT(DISTINCT c.id) as clicks,
-            COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired' THEN conv.id END) as conversions,
-            
-            -- Revenue: ALL (Advertiser Revenue - inc. Rejected)
-            COALESCE(SUM(conv.amount), 0) as radius_revenue,
-            
-            -- Payout: Approved Only (Publisher Earnings)
-            COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
-            
-            -- Profit: Revenue - Approved Payout
-            COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
-
-             -- Pending Payout (For reference only, also included in Total Payout now)
-            COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout
-
-          FROM clicks c
-          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid ${dateCondition.replace('conv.', '')}
-          WHERE c.tenant_id = ? 
-          /* Date condition for clicks also needs to be applied if we want accurate click counts in range */
-          ${dateCondition.replace('conv.', 'c.')}
-          GROUP BY c.publisher_id
-        ) stats ON stats.publisher_id = p.id
-        ${whereClause}
-        ORDER BY stats.radius_revenue DESC
-        LIMIT ? OFFSET ?
-      `;
-
-      // Params for stats subquery (conversions) + clicks subquery + main query
-      const finalParams = [
-        ...statsParams, // for conv JOIN
+      // ✅ ARCHITECTURE: SQL moved to this.publisherRepository.getPublisherSummaryReport
+      const rows = await this.publisherRepository.getPublisherSummaryReport({
         tenantId,
-        ...statsParams, // for clicks WHERE
-        ...params,      // for main WHERE
-        limit,
-        offset
-      ];
-
-      const countQuery = `SELECT COUNT(*) as total FROM publishers p ${whereClause}`;
-
-      const [dataRows] = await pool.query(query, finalParams);
-      const [countRows] = await pool.query(countQuery, params);
-      const total = countRows[0]?.total || 0;
-
-      // Calculate Total Summary (Grand Total for the filters)
-      const summaryQuery = `
-        SELECT 
-          COUNT(DISTINCT c.id) as total_clicks,
-          COUNT(DISTINCT CASE WHEN conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired' THEN conv.id END) as total_conversions,
-          COALESCE(SUM(conv.amount), 0) as total_revenue,
-          COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_payout,
-          COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_profit
-        FROM publishers p
-        LEFT JOIN clicks c ON c.publisher_id = p.id AND c.tenant_id = p.tenant_id
-        LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid 
-        ${dateCondition}
-        ${whereClause} 
-        /* Ensure we filter by date for clicks too in the summary if date range applies */
-        ${dateCondition.replace('conv.', 'c.')}
-      `;
-
-      // Params for summary (statsParams for conv, params for where, statsParams for clicks)
-      const summaryParams = [...statsParams, ...params, ...statsParams];
-
-      const [summaryRows] = await pool.query(summaryQuery, summaryParams);
-      const summaryData = summaryRows[0] || {};
+        whereClause,
+        params,
+        dateCondition,
+        statsParams
+      });
+        params,
+        summaryQuery,
+        summaryParams
+      });
 
       return {
         data: dataRows.map(row => ({
@@ -456,22 +274,10 @@ export class PublisherService {
     if (!existing) return null;
 
     const internalId = existing.id;
-    // ✅ CRITICAL: Add tenant_id to WHERE clause for tenant isolation
-    let query = `UPDATE publishers SET status = 'suspended', updated_at = UTC_TIMESTAMP() WHERE id = ?`;
-    const params = [internalId];
-
-    if (tenantId) {
-      query += ' AND tenant_id = ?';
-      params.push(tenantId);
-    }
-
-    const [result] = await pool.query(query, params);
-    if ((result.affectedRows || result.affectedRows === 0) && result.affectedRows === 0) {
-      return null;
-    }
+    await this.publisherRepository.softDelete(internalId, tenantId);
     return this.findById(id, tenantId);
   }
 }
 
-export default new PublisherService();
+// (no singleton export)
 

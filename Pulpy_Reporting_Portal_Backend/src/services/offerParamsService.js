@@ -7,10 +7,13 @@
  * =====================================================
  */
 
-import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 
-class OfferParamsService {
+
+export class OfferParamsService {
+    constructor(offerParamsRepository) {
+        this.offerParamsRepository = offerParamsRepository;
+    }
     /**
      * Create or update parameters for an offer
      * @param {number} offerId - Offer ID
@@ -19,42 +22,12 @@ class OfferParamsService {
      * @returns {Promise<void>}
      */
     async setOfferParams(offerId, tenantId, params = []) {
-        const connection = await pool.getConnection();
-
         try {
-            await connection.beginTransaction();
-
-            // Delete existing params for this offer
-            await connection.query(
-                'DELETE FROM offer_params WHERE offer_id = ? AND tenant_id = ?',
-                [offerId, tenantId]
-            );
-
-            // Insert new params
-            if (params && params.length > 0) {
-                const values = params.map(p => [
-                    offerId,
-                    tenantId,
-                    p.param_key,
-                    p.is_required || false,
-                    p.default_value || null
-                ]);
-
-                await connection.query(
-                    `INSERT INTO offer_params (offer_id, tenant_id, param_key, is_required, default_value) 
-           VALUES ?`,
-                    [values]
-                );
-            }
-
-            await connection.commit();
+            await this.offerParamsRepository.setOfferParams(offerId, tenantId, params);
             logger.info(`Set ${params.length} parameters for offer ${offerId}`);
         } catch (error) {
-            await connection.rollback();
             logger.error('Error setting offer params:', error);
             throw error;
-        } finally {
-            connection.release();
         }
     }
 
@@ -66,15 +39,7 @@ class OfferParamsService {
      */
     async getOfferParams(offerId, tenantId) {
         try {
-            const [rows] = await pool.query(
-                `SELECT param_key, is_required, default_value 
-         FROM offer_params 
-         WHERE offer_id = ? AND tenant_id = ?
-         ORDER BY param_key`,
-                [offerId, tenantId]
-            );
-
-            return rows;
+            return await this.offerParamsRepository.getOfferParams(offerId, tenantId);
         } catch (error) {
             logger.error('Error fetching offer params:', error);
             throw error;
@@ -162,4 +127,4 @@ class OfferParamsService {
     }
 }
 
-export default new OfferParamsService();
+// (no singleton export)
