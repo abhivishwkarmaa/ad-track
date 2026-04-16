@@ -711,17 +711,245 @@ export class ReportRepository {
         return rows;
     }
 
-    const topPublishersQuery = `
-      SELECT c.publisher_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
-      FROM clicks c
-      WHERE ${clickWhere}
-      GROUP BY c.publisher_id
-      ORDER BY clicks DESC, c.publisher_id ASC
-      LIMIT ? OFFSET ?
-    `;
-    const [rows] = await this.pool.query(topPublishersQuery, [...clickParams, limit, offset]);
-    return rows;
-  }
+    async getTopPublishersForPaged({ clickWhere, clickParams, limit, offset }) {
+        const sql = `
+          SELECT c.publisher_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
+          FROM clicks c
+          WHERE ${clickWhere}
+          GROUP BY c.publisher_id
+          ORDER BY clicks DESC, c.publisher_id ASC
+          LIMIT ? OFFSET ?
+        `;
+        const [rows] = await this.pool.query(sql, [...clickParams, limit, offset]);
+        return rows;
+    }
+
+    /**
+     * Generic query executor — used by service when SQL is built dynamically.
+     * All pool.query() calls belong in the repository layer.
+     * @param {string} sql
+     * @param {Array}  params
+     * @returns {Promise<Array>} rows
+     */
+    async execute(sql, params = []) {
+        return this.pool.query(sql, params);
+    }
+
+    /** Summary: rollup from pre-aggregated daily_click_stats table */
+    async getSummaryRollup({ rollupTable, where, params }) {
+        const sql = `
+          SELECT
+            COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN publisher_id END) AS affiliates,
+            COALESCE(SUM(total_clicks), 0)      AS unique_clicks,
+            COALESCE(SUM(total_conversions), 0) AS conversions,
+            COALESCE(SUM(revenue), 0)            AS revenue,
+            COALESCE(SUM(payout), 0)             AS payout,
+            COALESCE(SUM(profit), 0)             AS profit,
+            0 AS impressions
+          FROM ${rollupTable}
+          WHERE ${where}
+        `;
+        const [rows] = await this.pool.query(sql, params);
+        return rows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
+    }
+
+    /** Summary: scalar subquery method (live clicks/conversions tables) */
+    async getSummaryScalar({ clickWhere, convWhere, clickParams, convParams }) {
+        const sql = `
+          SELECT
+            (SELECT COUNT(DISTINCT publisher_id) FROM clicks      WHERE ${clickWhere}) AS affiliates,
+            (SELECT COUNT(*)                     FROM clicks      WHERE ${clickWhere}) AS unique_clicks,
+            (SELECT COUNT(*)                     FROM conversions WHERE ${convWhere})  AS conversions,
+            (SELECT COALESCE(SUM(amount), 0)     FROM conversions WHERE ${convWhere})  AS revenue,
+            (SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS payout,
+            (SELECT COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS profit,
+            0 AS impressions
+        `;
+        const allParams = [...clickParams, ...clickParams, ...convParams, ...convParams, ...convParams, ...convParams];
+        const [rows] = await this.pool.query(sql, allParams);
+        return rows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
+    }
+
+    /** Fetch publisher display meta for a list of publisher IDs */
+    async getPublisherMeta(publisherIds) {
+        if (!publisherIds || publisherIds.length === 0) return [];
+        const [rows] = await this.pool.query(
+            `SELECT p.id as publisher_id,
+                    COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
+                    COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
+             FROM publishers p
+             WHERE p.id IN (?)`,
+            [publisherIds]
+        );
+        return rows;
+    }
+
+    /** Fetch offer display meta for a list of internal offer IDs */
+    async getOfferMeta(offerIds) {
+        if (!offerIds || offerIds.length === 0) return [];
+        const [rows] = await this.pool.query(
+            `SELECT o.id as offer_internal_id,
+                    COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
+                    COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
+             FROM offers o
+             WHERE o.id IN (?)`,
+            [offerIds]
+        );
+        return rows;
+    }
+
+    /** Aggregate conversions grouped by publisher_id for a given tenant/date window */
+    async getConversionsByPublisherIds({ publisherIds, convWhere, convParams }) {
+        if (!publisherIds || publisherIds.length === 0) return [];
+        const [rows] = await this.pool.query(
+            `SELECT
+                conv.publisher_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+             FROM conversions conv
+             WHERE ${convWhere} AND conv.publisher_id IN (?)
+             GROUP BY conv.publisher_id`,
+            [...convParams, publisherIds]
+        );
+        return rows;
+    }
+
+    /** Aggregate conversions grouped by offer_id for a given tenant/date window */
+    async getConversionsByOfferIds({ offerIds, convWhere, convParams }) {
+        if (!offerIds || offerIds.length === 0) return [];
+        const [rows] = await this.pool.query(
+            `SELECT
+                conv.offer_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+             FROM conversions conv
+             WHERE ${convWhere} AND conv.offer_id IN (?)
+             GROUP BY conv.offer_id`,
+            [...convParams, offerIds]
+        );
+        return rows;
+    }
+
+    /**
+     * Aggregate conversions for specific (publisher_id, offer_id) pairs.
+     * @param {Array<{publisher_id, offer_id}>} pairs
+     */
+    async getConversionPairs({ pairs, convWhere, convParams }) {
+        if (!pairs || pairs.length === 0) return [];
+        const tuplePlaceholders = pairs.map(() => '(?, ?)').join(', ');
+        const tupleParams = pairs.flatMap(r => [r.publisher_id, r.offer_id]);
+        const [rows] = await this.pool.query(
+            `SELECT
+                conv.publisher_id,
+                conv.offer_id,
+                COUNT(*) as conversions,
+                SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+                SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+                SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) as rejected_conversions,
+                COALESCE(SUM(conv.amount), 0) as revenue,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout,
+                COALESCE(SUM(conv.amount), 0) - COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as profit,
+                COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout,
+                COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as approved_payout
+             FROM conversions conv
+             WHERE ${convWhere}
+               AND (conv.publisher_id, conv.offer_id) IN (${tuplePlaceholders})
+             GROUP BY conv.publisher_id, conv.offer_id`,
+            [...convParams, ...tupleParams]
+        );
+        return rows;
+    }
+
+    /** Full publisher conversion stats query (for getPublisherConversionStats) */
+    async getPublisherConversionStats({ tenantId, utcStart, utcEnd }) {
+        const pairsParams = [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd];
+        const sql = `
+          SELECT
+            p.id as publisher_id,
+            p.email as publisher_email,
+            p.company_name as publisher_company,
+            p.country as publisher_country,
+            o.id as offer_id,
+            o.public_offer_id,
+            o.name as offer_name,
+            o.category as offer_category,
+            COALESCE(click_stats.total_clicks, 0) as total_clicks,
+            COALESCE(conv_stats.total_conversions, 0) as total_conversions,
+            COALESCE(conv_stats.approved_conversions, 0) as approved_conversions,
+            COALESCE(conv_stats.pending_conversions, 0) as pending_conversions,
+            COALESCE(conv_stats.rejected_conversions, 0) as rejected_conversions,
+            COALESCE(conv_stats.rejected_cap_conversions, 0) as rejected_cap_conversions,
+            COALESCE(conv_stats.total_revenue, 0) as total_revenue,
+            COALESCE(conv_stats.approved_revenue, 0) as approved_revenue,
+            COALESCE(conv_stats.total_payout, 0) as total_payout,
+            COALESCE(conv_stats.approved_payout, 0) as approved_payout,
+            COALESCE(conv_stats.total_profit, 0) as total_profit,
+            COALESCE(conv_stats.approved_profit, 0) as approved_profit
+          FROM (
+            SELECT DISTINCT publisher_id, offer_id FROM clicks
+              WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+            UNION
+            SELECT DISTINCT publisher_id, offer_id FROM conversions
+              WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+          ) as pairs
+          JOIN publishers  p ON pairs.publisher_id = p.id
+          JOIN offers      o ON pairs.offer_id     = o.id
+          LEFT JOIN (
+            SELECT publisher_id, offer_id, COUNT(DISTINCT id) as total_clicks
+            FROM clicks
+            WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+            GROUP BY publisher_id, offer_id
+          ) click_stats ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
+          LEFT JOIN (
+            SELECT
+              publisher_id, offer_id,
+              COUNT(DISTINCT id)                                                                AS total_conversions,
+              COUNT(DISTINCT CASE WHEN status = 'approved'     THEN id END)                    AS approved_conversions,
+              COUNT(DISTINCT CASE WHEN status = 'pending'      THEN id END)                    AS pending_conversions,
+              COUNT(DISTINCT CASE WHEN status IN ('rejected','click_expired') THEN id END)     AS rejected_conversions,
+              COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END)                    AS rejected_cap_conversions,
+              COALESCE(SUM(amount), 0)                                                         AS total_revenue,
+              COALESCE(SUM(CASE WHEN status = 'approved' THEN payout  ELSE 0 END), 0)          AS total_payout,
+              COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit,
+              COALESCE(SUM(CASE WHEN status = 'approved' THEN amount   ELSE 0 END), 0)         AS approved_revenue,
+              COALESCE(SUM(CASE WHEN status = 'approved' THEN payout   ELSE 0 END), 0)         AS approved_payout,
+              COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0)  AS approved_profit
+            FROM conversions
+            WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+            GROUP BY publisher_id, offer_id
+          ) conv_stats ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
+          ORDER BY conv_stats.total_conversions DESC, conv_stats.approved_conversions DESC
+        `;
+        const finalParams = [
+            ...pairsParams,
+            tenantId, utcStart, utcEnd,
+            tenantId, utcStart, utcEnd,
+        ];
+        const [rows] = await this.pool.query(sql, finalParams);
+        return rows;
+    }
+
+    /** Conversions list with filtering and pagination */
+    async getConversions({ query, countQuery, params, limit, offset }) {
+        const [countRows] = await this.pool.query(countQuery, params);
+        const total = countRows[0]?.total || 0;
+        const [rows] = await this.pool.query(query, [...params, limit, offset]);
+        return { rows, total };
+    }
 }
 
 // (no singleton export)

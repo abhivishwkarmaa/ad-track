@@ -106,7 +106,7 @@ export class ReportService {
           FROM ${rt}
           WHERE ${dWhere}
         `;
-        const [dRows] = await pool.query(rollupSql, dParams);
+        const [dRows] = await this.reportRepository.execute(rollupSql, dParams);
         const summary = dRows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
         const conversionRate = summary.unique_clicks > 0
           ? (summary.conversions / summary.unique_clicks) * 100
@@ -128,7 +128,7 @@ export class ReportService {
 
       // Params: affiliates(c), unique_clicks(c), conversions(cv), revenue(cv), payout(cv), profit(cv)
       const allParams = [...clickParams, ...clickParams, ...convParams, ...convParams, ...convParams, ...convParams];
-      const [rows] = await pool.query(sql, allParams);
+      const [rows] = await this.reportRepository.execute(sql, allParams);
 
       const summary = rows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
       const conversionRate = summary.unique_clicks > 0
@@ -298,7 +298,7 @@ export class ReportService {
               ORDER BY clicks DESC, c.publisher_id ASC
             `;
             const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
-            const [exportRows] = await pool.query(exportQuery, exportParams);
+            const [exportRows] = await this.reportRepository.execute(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
 
@@ -312,8 +312,8 @@ export class ReportService {
             LIMIT ? OFFSET ?
           `;
           const [countResult, publisherResult] = await Promise.all([
-            pool.query(countQuery, clickParams),
-            pool.query(topPublishersQuery, [...clickParams, limit, offset])
+            this.reportRepository.execute(countQuery, clickParams),
+            this.reportRepository.execute(topPublishersQuery, [...clickParams, limit, offset])
           ]);
           const countRows = countResult[0];
           const publisherRows = publisherResult[0];
@@ -328,7 +328,7 @@ export class ReportService {
             };
           }
 
-          const publisherMetaPromise = pool.query(
+          const publisherMetaPromise = this.reportRepository.execute(
             `SELECT p.id as publisher_id,
                     COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
                     COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
@@ -338,7 +338,7 @@ export class ReportService {
           );
 
           const conversionPromise = needsConversionMetrics
-            ? pool.query(
+            ? this.reportRepository.execute(
               `
               SELECT
                 conv.publisher_id,
@@ -486,7 +486,7 @@ export class ReportService {
               ORDER BY clicks DESC, c.offer_id ASC
             `;
             const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
-            const [exportRows] = await pool.query(exportQuery, exportParams);
+            const [exportRows] = await this.reportRepository.execute(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
 
@@ -499,8 +499,8 @@ export class ReportService {
             LIMIT ? OFFSET ?
           `;
           const [countResult, offerResult] = await Promise.all([
-            pool.query(countQuery, clickParams),
-            pool.query(topOffersQuery, [...clickParams, limit, offset])
+            this.reportRepository.execute(countQuery, clickParams),
+            this.reportRepository.execute(topOffersQuery, [...clickParams, limit, offset])
           ]);
           const countRows = countResult[0];
           const offerRows = offerResult[0];
@@ -515,7 +515,7 @@ export class ReportService {
             };
           }
 
-          const offerMetaPromise = pool.query(
+          const offerMetaPromise = this.reportRepository.execute(
             `SELECT o.id as offer_internal_id,
                     COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
                     COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
@@ -524,7 +524,7 @@ export class ReportService {
             [offerIds]
           );
           const conversionPromise = needsConversionMetrics
-            ? pool.query(
+            ? this.reportRepository.execute(
               `
               SELECT
                 conv.offer_id,
@@ -688,7 +688,7 @@ export class ReportService {
               ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
             `;
             const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
-            const [exportRows] = await pool.query(exportQuery, exportParams);
+            const [exportRows] = await this.reportRepository.execute(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
 
@@ -701,8 +701,8 @@ export class ReportService {
             LIMIT ? OFFSET ?
           `;
           const [countResult, pairResult] = await Promise.all([
-            pool.query(countQuery, clickParams),
-            pool.query(topPairsQuery, [...clickParams, limit, offset])
+            this.reportRepository.execute(countQuery, clickParams),
+            this.reportRepository.execute(topPairsQuery, [...clickParams, limit, offset])
           ]);
           const countRows = countResult[0];
           const pairRows = pairResult[0];
@@ -718,7 +718,7 @@ export class ReportService {
           const publisherIds = [...new Set(pairRows.map(r => r.publisher_id).filter(Boolean))];
           const offerIds = [...new Set(pairRows.map(r => r.offer_id).filter(Boolean))];
 
-          const publisherMetaPromise = pool.query(
+          const publisherMetaPromise = this.reportRepository.execute(
             `SELECT p.id as publisher_id,
                     COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', p.id)) as publisher_name,
                     COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', p.id, '@unknown')) as publisher_email
@@ -726,7 +726,7 @@ export class ReportService {
              WHERE p.id IN (?)`,
             [publisherIds]
           );
-          const offerMetaPromise = pool.query(
+          const offerMetaPromise = this.reportRepository.execute(
             `SELECT o.id as offer_internal_id,
                     COALESCE(o.public_offer_id, CAST(o.id AS CHAR)) as offer_id,
                     COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', o.id)) as offer_name
@@ -760,7 +760,7 @@ export class ReportService {
                 AND (conv.publisher_id, conv.offer_id) IN (${tuplePlaceholders})
               GROUP BY conv.publisher_id, conv.offer_id
             `;
-            conversionPromise = pool.query(conversionsForPageQuery, [...convParams, ...tupleParams]);
+            conversionPromise = this.reportRepository.execute(conversionsForPageQuery, [...convParams, ...tupleParams]);
           }
 
           const [publisherMetaResult, offerMetaResult, conversionResult] = await Promise.all([
@@ -918,13 +918,13 @@ export class ReportService {
               const dataParamsDaily = [...dailyParams, tenantId, fromDate, toDate, tenantId, fromDate, toDate];
 
               if (filters.export === 'csv' || filters.export === 'true') {
-                const [exportRows] = await pool.query(dataQueryDaily, dataParamsDaily);
+                const [exportRows] = await this.reportRepository.execute(dataQueryDaily, dataParamsDaily);
                 exportRows.forEach(r => { delete r.__total; });
                 return { data: exportRows, isExport: true };
               }
 
               const pagedQueryDaily = `${dataQueryDaily} LIMIT ? OFFSET ?`;
-              const [rows] = await pool.query(pagedQueryDaily, [...dataParamsDaily, limit, offset]);
+              const [rows] = await this.reportRepository.execute(pagedQueryDaily, [...dataParamsDaily, limit, offset]);
               const total = rows.length > 0 ? Number(rows[0].__total || 0) : 0;
               rows.forEach(r => { delete r.__total; });
               return {
@@ -1032,13 +1032,13 @@ export class ReportService {
             // Export: reuse same query with large limit, no pagination count needed.
             if (filters.export === 'csv' || filters.export === 'true') {
               const exportQuery = dataQuery;
-              const [exportRows] = await pool.query(exportQuery, baseParams);
+              const [exportRows] = await this.reportRepository.execute(exportQuery, baseParams);
               exportRows.forEach(r => { delete r.__total; });
               return { data: exportRows, isExport: true };
             }
 
             const pagedQuery = `${dataQuery} LIMIT ? OFFSET ?`;
-            const [rows] = await pool.query(pagedQuery, [...baseParams, limit, offset]);
+            const [rows] = await this.reportRepository.execute(pagedQuery, [...baseParams, limit, offset]);
             const total = rows.length > 0 ? Number(rows[0].__total || 0) : 0;
             rows.forEach(r => { delete r.__total; });
 
@@ -1138,7 +1138,7 @@ export class ReportService {
 
         // --- EXPORT LOGIC ---
         if (filters.export === 'csv' || filters.export === 'true') {
-          const [exportRows] = await pool.query(query, filtersBuild.params);
+          const [exportRows] = await this.reportRepository.execute(query, filtersBuild.params);
           return { data: exportRows, isExport: true };
         }
 
@@ -1161,11 +1161,11 @@ export class ReportService {
         if (groups.length > 0) countBaseQuery += ` GROUP BY ${groups.join(', ')}`;
 
         const countQuery = `SELECT COUNT(*) as total FROM (${countBaseQuery}) as agg`;
-        const [countRows] = await pool.query(countQuery, filtersBuild.params);
+        const [countRows] = await this.reportRepository.execute(countQuery, filtersBuild.params);
         const total = countRows[0]?.total || 0;
 
         query += ` LIMIT ? OFFSET ?`;
-        const [rows] = await pool.query(query, [...filtersBuild.params, limit, offset]);
+        const [rows] = await this.reportRepository.execute(query, [...filtersBuild.params, limit, offset]);
 
         return {
           data: rows,
@@ -1248,15 +1248,15 @@ export class ReportService {
 
         // --- EXPORT LOGIC DETAILED ---
         if (filters.export === 'csv' || filters.export === 'true') {
-          const [exportRows] = await pool.query(query, filtersBuild.params);
+          const [exportRows] = await this.reportRepository.execute(query, filtersBuild.params);
           return { data: exportRows, isExport: true };
         }
 
         query += ' LIMIT ? OFFSET ?';
 
-        const [countRows] = await pool.query(countQuery + filtersBuild.clause, filtersBuild.params);
+        const [countRows] = await this.reportRepository.execute(countQuery + filtersBuild.clause, filtersBuild.params);
         const total = parseInt(countRows[0]?.total || 0);
-        const [rows] = await pool.query(query, [...filtersBuild.params, limit, offset]);
+        const [rows] = await this.reportRepository.execute(query, [...filtersBuild.params, limit, offset]);
 
         return {
           data: rows,
@@ -1484,7 +1484,7 @@ export class ReportService {
         tenantId, utcStart, utcEnd,  // conv_stats subquery
       ];
 
-      const [rows] = await pool.query(query, finalParams);
+      const [rows] = await this.reportRepository.execute(query, finalParams);
 
       const stats = rows.map(row => {
         const conversionRate = row.total_clicks > 0
@@ -1647,11 +1647,11 @@ export class ReportService {
 
       // Count query
       const countQuery = `SELECT COUNT(*) as total FROM conversions conv WHERE 1=1 ` + query.split('WHERE 1=1')[1];
-      const [countRows] = await pool.query(countQuery, params);
+      const [countRows] = await this.reportRepository.execute(countQuery, params);
       const total = countRows[0]?.total || 0;
 
       query += ' ORDER BY conv.created_at DESC LIMIT ? OFFSET ?';
-      const [rows] = await pool.query(query, [...params, limit, offset]);
+      const [rows] = await this.reportRepository.execute(query, [...params, limit, offset]);
 
       return {
         data: rows,
