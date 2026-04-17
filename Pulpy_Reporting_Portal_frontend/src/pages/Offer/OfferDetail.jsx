@@ -535,11 +535,13 @@ function OfferDetail() {
     const buildAssignmentShareText = (offerObj, assignmentObj) => {
         const conversionModel = offerObj?.advertiser_model || offerObj?.affiliate_model || '-';
         const country = offerObj?.country || '-';
+        const carrierName = offerObj?.carrier_name && String(offerObj.carrier_name).trim();
         const carrierJson = safeParseJson(offerObj?.carrier_targeting_json);
-        const carrier =
+        const carrierFromJson =
             (carrierJson?.carrier && Array.isArray(carrierJson.carrier) && carrierJson.carrier.length > 0)
                 ? carrierJson.carrier.join(', ')
-                : '-';
+                : null;
+        const carrier = carrierName || carrierFromJson || '-';
 
         const hasDeviceTargeting = !!(safeParseJson(offerObj?.device_targeting_json)?.device?.length);
         const hasOsTargeting = !!(safeParseJson(offerObj?.os_targeting_json)?.os?.length);
@@ -760,6 +762,10 @@ function OfferDetail() {
                             <span className="detail-value">{offer.billing_type || '-'}</span>
                         </div>
                         <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Carrier name:</span>
+                            <span className="detail-value">{offer.carrier_name || '-'}</span>
+                        </div>
+                        <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Start Date:</span>
                             <span className="detail-value">{formatDate(offer.start_date)}</span>
                         </div>
@@ -799,7 +805,7 @@ function OfferDetail() {
                             </span>
                         </div>
                         <div className="detail-item">
-                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview URL:</span>
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview offer URL:</span>
                             <span className="detail-value">
                                 {offer.preview_url ? (
                                     <a href={offer.preview_url} target="_blank" rel="noopener noreferrer" style={{ color: '#2196F3' }}>

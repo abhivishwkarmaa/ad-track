@@ -330,6 +330,7 @@ function EditOffer() {
         offer_visibility: 'PUBLIC',
         preview_url: '',
         billing_flow: '',
+        carrier_name: '',
         billing_type: '',
         token_type: '',
         start_date: '',
@@ -503,6 +504,7 @@ function EditOffer() {
                         offer_url: offer.offer_url || '',
                         preview_url: offer.preview_url || '',
                         billing_flow: offer.billing_flow || '',
+                        carrier_name: offer.carrier_name || '',
                         billing_type: offer.billing_type || '',
                         token_type: offer.token_type || '',
                         offer_visibility: offer.offer_visibility || 'PUBLIC',
@@ -598,14 +600,7 @@ function EditOffer() {
             const selectedValues = Array.from(e.target.selectedOptions, option => option.value);
             setFormData(prev => ({ ...prev, [name]: selectedValues }));
         } else {
-            setFormData(prev => {
-                const updated = { ...prev, [name]: value };
-                // When offer_url changes, copy it to preview_url initially
-                if (name === 'offer_url' && value) {
-                    updated.preview_url = value;
-                }
-                return updated;
-            });
+            setFormData(prev => ({ ...prev, [name]: value }));
             // Show token table when token type is selected
             if (name === 'token_type' && value) {
                 setShowTokenTable(true);
@@ -622,9 +617,6 @@ function EditOffer() {
                 }
             } else if (name === 'token_type' && !value) {
                 setShowTokenTable(false);
-                if (formData.offer_url) {
-                    setFormData(prev => ({ ...prev, preview_url: prev.offer_url }));
-                }
             }
         }
     };
@@ -660,66 +652,10 @@ function EditOffer() {
         console.warn('⚠️ generateTrackingUrl() is deprecated. Tracking URLs should be fetched from backend API.');
     };
 
-    // Function to build preview URL with tokens
-    const buildPreviewUrl = (baseUrl, mappings) => {
-        if (!baseUrl) return '';
-
-        try {
-            const hashIndex = baseUrl.indexOf('#');
-            const queryIndex = baseUrl.indexOf('?');
-
-            let basePart = baseUrl;
-            let hashPart = '';
-            let existingQuery = '';
-
-            if (hashIndex !== -1) {
-                basePart = baseUrl.substring(0, hashIndex);
-                const afterHash = baseUrl.substring(hashIndex + 1);
-                const queryInHash = afterHash.indexOf('?');
-                if (queryInHash !== -1) {
-                    hashPart = afterHash.substring(0, queryInHash);
-                    existingQuery = afterHash.substring(queryInHash + 1);
-                } else {
-                    hashPart = afterHash;
-                }
-            } else if (queryIndex !== -1) {
-                basePart = baseUrl.substring(0, queryIndex);
-                existingQuery = baseUrl.substring(queryIndex + 1);
-            }
-
-            const queryParams = [];
-            mappings
-                .filter(mapping => mapping.enabled)
-                .forEach(mapping => {
-                    queryParams.push(`${encodeURIComponent(mapping.advertiserParam)}=${mapping.platformToken}`);
-                });
-
-            const newQueryString = queryParams.join('&');
-            let result = basePart;
-            if (hashPart) {
-                result += `#${hashPart}`;
-            }
-            if (newQueryString) {
-                result += `?${newQueryString}`;
-            }
-
-            return result;
-        } catch (e) {
-            return baseUrl;
-        }
-    };
-
     const handleTokenMappingChange = (id, field, value) => {
-        setTokenMappings(prev => {
-            const updated = prev.map(item =>
-                item.id === id ? { ...item, [field]: value } : item
-            );
-            if (formData.offer_url && showTokenTable) {
-                const previewUrl = buildPreviewUrl(formData.offer_url, updated);
-                setFormData(formDataPrev => ({ ...formDataPrev, preview_url: previewUrl }));
-            }
-            return updated;
-        });
+        setTokenMappings(prev =>
+            prev.map(item => (item.id === id ? { ...item, [field]: value } : item))
+        );
     };
 
     const handleTestOfferLink = () => {
@@ -730,28 +666,6 @@ function EditOffer() {
             toast.error('Please enter an Offer URL first');
         }
     };
-
-    // Update preview URL when offer_url or token mappings change
-    useEffect(() => {
-        if (formData.offer_url) {
-            if (tokenMappings.length > 0 && showTokenTable) {
-                const previewUrl = buildPreviewUrl(formData.offer_url, tokenMappings);
-                setFormData(prev => {
-                    if (prev.preview_url !== previewUrl) {
-                        return { ...prev, preview_url: previewUrl };
-                    }
-                    return prev;
-                });
-            } else {
-                setFormData(prev => {
-                    if (prev.preview_url !== prev.offer_url) {
-                        return { ...prev, preview_url: prev.offer_url };
-                    }
-                    return prev;
-                });
-            }
-        }
-    }, [formData.offer_url, tokenMappings, showTokenTable]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -784,6 +698,7 @@ function EditOffer() {
                 offer_visibility: formData.offer_visibility,
                 preview_url: formData.preview_url || null,
                 billing_flow: formData.billing_flow || null,
+                carrier_name: (formData.carrier_name && String(formData.carrier_name).trim()) || null,
                 billing_type: formData.billing_type || null,
                 token_type: formData.token_type || null,
                 start_date: formData.start_date || null,
@@ -1083,6 +998,20 @@ function EditOffer() {
                                 </select>
                             </div>
                         </div>
+                        <div className="offer-form-row">
+                            <div className="form-group">
+                                <label className="form-label">Carrier name (optional)</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="carrier_name"
+                                    value={formData.carrier_name}
+                                    onChange={handleChange}
+                                    placeholder="e.g. Verizon, T-Mobile"
+                                    maxLength={255}
+                                />
+                            </div>
+                        </div>
 
                     </div>
 
@@ -1232,19 +1161,20 @@ function EditOffer() {
                             </div>
 
                         </div>
-                        {/* Offer URL Autocomplete */}
+                        {/* Preview offer URL — manual entry only (not auto-filled from Offer URL) */}
                         <div className="offer-form-row">
                             <div className="form-group">
-                                <label className="form-label">Offer URL Autocomplete (with tokens)</label>
+                                <label className="form-label">Preview offer URL (optional)</label>
                                 <input
-                                    type="url"
+                                    type="text"
                                     className="form-control"
                                     name="preview_url"
                                     value={formData.preview_url}
                                     onChange={handleChange}
-                                    placeholder="Autocomplete offer URL"
-                                    disabled
+                                    placeholder="https://"
+                                    autoComplete="off"
                                 />
+                               
                             </div>
                         </div>
                         {/* Tokens */}
