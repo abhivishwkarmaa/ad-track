@@ -555,9 +555,11 @@ function OfferDetail() {
             String(payoutOverride).trim() !== '';
         const payout = hasPayoutOverride ? payoutOverride : (offerObj?.affiliate_amount ?? '-');
         const description = offerObj?.description || '-';
-        const tags = offerObj?.tags || '-';
         const categories = offerObj?.category || '-';
         const trackingLink = assignmentObj?.tracking_url || '-';
+        const billingFlow = offerObj?.billing_flow || '-';
+        const billingType = offerObj?.billing_type || '-';
+        
 
         return [
             `Offer:  ${offerObj?.name || '-'}`,
@@ -566,8 +568,9 @@ function OfferDetail() {
             `Carrier:  ${carrier}`,
             `Platforms: ${platforms}`,
             `Payout: ${payout}`,
+            `Billing flow: ${billingFlow}`,
+            `Billing type: ${billingType}`,
             `Description: ${description}`,
-            `Tags: ${tags}`,
             `Categories: ${categories}`,
             `Tracking link: ${trackingLink}`,
         ].join('\n');
