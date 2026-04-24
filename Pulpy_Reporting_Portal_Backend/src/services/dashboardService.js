@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
 import reportService from './reportService.js';
@@ -62,29 +63,25 @@ export class DashboardService {
     return computed;
   }
 
-  getDateTimeRanges(filters = {}) {
-    const dates = this.getDateRanges(filters);
-    return {
-      currentRange: {
-        start: filters.datetime_from || `${dates.currentFrom} 00:00:00`,
-        end: filters.datetime_to || `${dates.currentTo} 23:59:59`,
-      },
-      previousRange: {
-        start: filters.previous_datetime_from || `${dates.previousFrom} 00:00:00`,
-        end: filters.previous_datetime_to || `${dates.previousTo} 23:59:59`,
-      }
-    };
+  /**
+   * When `range_start_utc` / `range_end_utc` are set (UTC MySQL `YYYY-MM-DD HH:mm:ss`),
+   * use them for `created_at BETWEEN` instead of deriving only from IST `date_from` / `date_to`.
+   */
+  resolveMysqlUtcRange(filters, getIstYmdSpan) {
+    const rs = normalizeMysqlUtcDatetime(filters.range_start_utc);
+    const re = normalizeMysqlUtcDatetime(filters.range_end_utc);
+    if (rs && re) return { start: rs, end: re };
+    const { from, to } = getIstYmdSpan();
+    return istYmdSpanToMysqlUtcRange(from, to);
   }
 
-  resolveDateTimeWindow(filters = {}, fallbackFrom, fallbackTo) {
-    const dateFrom = filters.date_from || fallbackFrom;
-    const dateTo = filters.date_to || fallbackTo || dateFrom;
-    return {
-      dateFrom,
-      dateTo,
-      start: filters.datetime_from || `${dateFrom} 00:00:00`,
-      end: filters.datetime_to || `${dateTo} 23:59:59`,
-    };
+  resolveMysqlUtcPreviousRange(filters, getIstYmdSpanPrevious) {
+    const rs = normalizeMysqlUtcDatetime(filters.previous_range_start_utc);
+    const re = normalizeMysqlUtcDatetime(filters.previous_range_end_utc);
+    if (rs && re) return { start: rs, end: re };
+    const { from, to } = getIstYmdSpanPrevious();
+    return istYmdSpanToMysqlUtcRange(from, to);
+  }
   }
 
   async getDashboardStats(filters = {}, tenantId) {
@@ -104,8 +101,15 @@ export class DashboardService {
       // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
       // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
       // 3. Profit = Revenue - Payout.
-      const currentRange = ranges.currentRange;
-      const previousRange = ranges.previousRange;
+      const currentRange = this.resolveMysqlUtcRange(filters, () => ({
+        from: dates.currentFrom,
+        to: dates.currentTo,
+      }));
+
+      const previousRange = this.resolveMysqlUtcPreviousRange(filters, () => ({
+        from: dates.previousFrom,
+        to: dates.previousTo,
+      }));
 
       const [conversionsCurrent] = await pool.query(
         `SELECT 
@@ -280,10 +284,9 @@ export class DashboardService {
       const params = [];
 
       if (dateFrom && dateTo) {
-        const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
-        const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
+        const span = this.resolveMysqlUtcRange(filters, () => ({ from: dateFrom, to: dateTo }));
         dateCondition = 'AND conv.created_at BETWEEN ? AND ?';
-        params.push(rangeStart, rangeEnd);
+        params.push(span.start, span.end);
       }
 
       const [rows] = await pool.query(
@@ -347,8 +350,10 @@ export class DashboardService {
 
       logger.info(`[PerformanceChart] Fetching for Tenant: ${tenantId}, Range: ${dateFrom} to ${dateTo}, GroupBy: ${groupBy}`);
 
-      const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
-      const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
+      const { start: rangeStart, end: rangeEnd } = this.resolveMysqlUtcRange(filters, () => ({
+        from: dateFrom,
+        to: dateTo,
+      }));
 
       // Get clicks by date
       const [clicksRows] = await pool.query(
@@ -404,7 +409,9 @@ export class DashboardService {
     try {
       const limit = parseInt(filters.limit || 5);
       const dateBoundaries = this.getDateBoundaries();
-      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
+      const dateFrom = filters.date_from || dateBoundaries.monthStart;
+      const dateTo = filters.date_to || dateBoundaries.todayStart;
+      const range = this.resolveMysqlUtcRange(filters, () => ({ from: dateFrom, to: dateTo }));
 
       // Get top affiliates
       const [rows] = await pool.query(
@@ -499,8 +506,10 @@ export class DashboardService {
       const dateFrom = filters.date_from || dateBoundaries.monthStart;
       const dateTo = filters.date_to || dateBoundaries.todayStart;
       const metric = filters.metric || 'conversions';
-      const rangeStart = filters.datetime_from || `${dateFrom} 00:00:00`;
-      const rangeEnd = filters.datetime_to || `${dateTo} 23:59:59`;
+      const { start: rangeStart, end: rangeEnd } = this.resolveMysqlUtcRange(filters, () => ({
+        from: dateFrom,
+        to: dateTo,
+      }));
 
       // Get country stats from clicks and conversions
       const [rows] = await pool.query(
@@ -628,15 +637,13 @@ export class DashboardService {
         const conditions = ['e.tenant_id = ?'];
         const params = [tenantId];
         if (!allTime) {
-          if (filters.date_from) {
-            const utcStart = new Date(`${filters.date_from}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-            conditions.push('e.created_at >= ?');
-            params.push(utcStart);
-          }
-          if (filters.date_to) {
-            const utcEnd = new Date(`${filters.date_to}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-            conditions.push('e.created_at <= ?');
-            params.push(utcEnd);
+          if (filters.date_from || filters.date_to) {
+            const span = this.resolveMysqlUtcRange(filters, () => ({
+              from: filters.date_from || '2024-01-01',
+              to: filters.date_to || '2024-12-31'
+            }));
+            conditions.push('e.created_at BETWEEN ? AND ?');
+            params.push(span.start, span.end);
           }
         }
 
@@ -733,7 +740,16 @@ export class DashboardService {
 
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const { currentRange, previousRange } = this.getDateTimeRanges(filters);
+      const dates = this.getDateRanges(filters);
+      const currentRange = this.resolveMysqlUtcRange(filters, () => ({
+        from: dates.currentFrom,
+        to: dates.currentTo,
+      }));
+
+      const previousRange = this.resolveMysqlUtcPreviousRange(filters, () => ({
+        from: dates.previousFrom,
+        to: dates.previousTo,
+      }));
 
       const currentAggregatedSql = `
         SELECT
@@ -925,7 +941,11 @@ export class DashboardService {
 
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      const { currentRange } = this.getDateTimeRanges(filters);
+      const dates = this.getDateRanges(filters);
+      const currentRange = this.resolveMysqlUtcRange(filters, () => ({
+        from: dates.currentFrom,
+        to: dates.currentTo,
+      }));
 
       const [clicksResult, conversionsResult] = await Promise.all([
         pool.query(
@@ -1046,7 +1066,9 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dateBoundaries = this.getDateBoundaries();
-      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
+      const dateFrom = filters.date_from || dateBoundaries.monthStart;
+      const dateTo = filters.date_to || dateBoundaries.todayStart;
+      const range = this.resolveMysqlUtcRange(filters, () => ({ from: dateFrom, to: dateTo }));
 
       const sortBy = filters.sort_by || 'clicks';
       const orderBy = filters.order_by || 'DESC';
@@ -1225,7 +1247,9 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const dateBoundaries = this.getDateBoundaries();
-      const range = this.resolveDateTimeWindow(filters, dateBoundaries.monthStart, dateBoundaries.todayStart);
+      const dateFrom = filters.date_from || dateBoundaries.monthStart;
+      const dateTo = filters.date_to || dateBoundaries.todayStart;
+      const range = this.resolveMysqlUtcRange(filters, () => ({ from: dateFrom, to: dateTo }));
 
       const sortBy = filters.sort_by || 'conversions';
       const orderBy = filters.order_by || 'DESC';
@@ -1320,23 +1344,27 @@ export class DashboardService {
         offer_sort_by,
         offer_order_by,
         pub_sort_by,
-        pub_order_by
+        pub_order_by,
+        range_start_utc,
+        range_end_utc,
+        previous_range_start_utc,
+        previous_range_end_utc,
       } = filters;
 
-      const summaryPromise = reportService.getSummary({ date_from, date_to, datetime_from, datetime_to }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
+      const summaryPromise = reportService.getSummary({ date_from, date_to, range_start_utc, range_end_utc }, tenantId).catch(err => { logger.error('Error fetching summary:', err); return {}; });
       const summaryPreviousPromise = (previous_from && previous_to)
         ? reportService.getSummary({
           date_from: previous_from,
           date_to: previous_to,
-          datetime_from: previous_datetime_from,
-          datetime_to: previous_datetime_to
+          range_start_utc: previous_range_start_utc,
+          range_end_utc: previous_range_end_utc,
         }, tenantId).catch(err => { logger.error('Error fetching summary_previous:', err); return null; })
         : Promise.resolve(null);
 
       const performanceComparisonPromise = (previous_from && previous_to)
         ? this.getPerformanceComparison(
-          { date_from, date_to, datetime_from, datetime_to, group_by },
-          { date_from: previous_from, date_to: previous_to, datetime_from: previous_datetime_from, datetime_to: previous_datetime_to, group_by },
+          { date_from, date_to, group_by, range_start_utc, range_end_utc },
+          { date_from: previous_from, date_to: previous_to, group_by, range_start_utc: previous_range_start_utc, range_end_utc: previous_range_end_utc },
           tenantId
         )
         : Promise.resolve([]);
@@ -1352,13 +1380,13 @@ export class DashboardService {
         offerStatistics,
         performanceComparison
       ] = await Promise.all([
-        this.getDashboardCards({ date_from, date_to, datetime_from, datetime_to }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
-        this.getPerformanceChart({ date_from, date_to, datetime_from, datetime_to, group_by }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
+        this.getDashboardCards({ date_from, date_to, range_start_utc, range_end_utc, previous_range_start_utc, previous_range_end_utc }, tenantId).catch(err => { logger.error('Error fetching cards:', err); return {}; }),
+        this.getPerformanceChart({ date_from, date_to, group_by, range_start_utc, range_end_utc }, tenantId).catch(err => { logger.error('Error fetching performance:', err); return []; }),
         summaryPromise,
         summaryPreviousPromise,
         this.getLiveOffers(5, tenantId).catch(err => { logger.error('Error fetching live offers:', err); return []; }),
-        this.getPublisherStatistics({ date_from, date_to, datetime_from, datetime_to, limit, sort_by: pub_sort_by, order_by: pub_order_by }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
-        this.getOfferStatistics({ date_from, date_to, datetime_from, datetime_to, limit, sort_by: offer_sort_by, order_by: offer_order_by }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
+        this.getPublisherStatistics({ date_from, date_to, limit, sort_by: pub_sort_by, order_by: pub_order_by, range_start_utc, range_end_utc }, tenantId).catch(err => { logger.error('Error fetching publisher stats:', err); return []; }),
+        this.getOfferStatistics({ date_from, date_to, limit, sort_by: offer_sort_by, order_by: offer_order_by, range_start_utc, range_end_utc }, tenantId).catch(err => { logger.error('Error fetching offer stats:', err); return []; }),
         performanceComparisonPromise
       ]);
 

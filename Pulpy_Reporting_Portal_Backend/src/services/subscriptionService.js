@@ -624,19 +624,43 @@ class SubscriptionService {
         }
 
         const tenant = rows[0];
-        const currentState = normalizeTenantState(tenant.status);
+        const storedState = normalizeTenantState(tenant.status);
         const now = new Date();
+
+        // Compute effective state from expiry timestamps (read-only).
+        // This avoids per-request DB locks/transactions that can stall report queries on prod.
+        let effectiveState = storedState;
+
+        // SUSPENDED stays suspended regardless of timestamps.
+        if (storedState === TENANT_STATES.SUSPENDED) {
+            effectiveState = TENANT_STATES.SUSPENDED;
+        } else if (tenant.subscription_end_at) {
+            const subscriptionStart = tenant.subscription_start_at ? new Date(tenant.subscription_start_at) : null;
+            if (subscriptionStart && subscriptionStart > now) {
+                effectiveState = TENANT_STATES.EXPIRED;
+            } else if (new Date(tenant.subscription_end_at) > now) {
+                effectiveState = TENANT_STATES.ACTIVE;
+            } else {
+                effectiveState = TENANT_STATES.EXPIRED;
+            }
+        } else if (tenant.trial_end_at) {
+            if (new Date(tenant.trial_end_at) > now) {
+                effectiveState = TENANT_STATES.TRIAL;
+            } else {
+                effectiveState = TENANT_STATES.EXPIRED;
+            }
+        }
 
         // Calculate days left
         let daysLeft = null;
         let endDate = null;
         let isWarning = false;
 
-        if (currentState === TENANT_STATES.ACTIVE && tenant.subscription_end_at) {
+        if (effectiveState === TENANT_STATES.ACTIVE && tenant.subscription_end_at) {
             endDate = new Date(tenant.subscription_end_at);
             daysLeft = Math.ceil((endDate - now) / (24 * 60 * 60 * 1000));
             isWarning = daysLeft <= 3 && daysLeft > 0;
-        } else if (currentState === TENANT_STATES.TRIAL && tenant.trial_end_at) {
+        } else if (effectiveState === TENANT_STATES.TRIAL && tenant.trial_end_at) {
             endDate = new Date(tenant.trial_end_at);
             daysLeft = Math.ceil((endDate - now) / (24 * 60 * 60 * 1000));
             isWarning = daysLeft <= 3 && daysLeft > 0;
@@ -644,11 +668,11 @@ class SubscriptionService {
 
         // Determine access level
         let accessLevel = 'none';
-        if (currentState === TENANT_STATES.ACTIVE || currentState === TENANT_STATES.TRIAL) {
+        if (effectiveState === TENANT_STATES.ACTIVE || effectiveState === TENANT_STATES.TRIAL) {
             accessLevel = 'full';
-        } else if (currentState === TENANT_STATES.EXPIRED) {
+        } else if (effectiveState === TENANT_STATES.EXPIRED) {
             accessLevel = 'read_only';
-        } else if (currentState === TENANT_STATES.SUSPENDED) {
+        } else if (effectiveState === TENANT_STATES.SUSPENDED) {
             accessLevel = 'blocked';
         }
 
@@ -657,7 +681,7 @@ class SubscriptionService {
                 id: tenant.id,
                 name: tenant.name,
                 slug: tenant.slug,
-                status: currentState || tenant.status,
+                status: effectiveState || tenant.status,
                 trial_start_at: tenant.trial_start_at,
                 trial_end_at: tenant.trial_end_at,
                 subscription_start_at: tenant.subscription_start_at,
@@ -668,15 +692,15 @@ class SubscriptionService {
                 updated_at: tenant.updated_at
             },
             subscription: {
-                state: currentState || tenant.status,
+                state: effectiveState || tenant.status,
                 access_level: accessLevel,
                 days_left: daysLeft,
                 end_date: endDate,
                 is_warning: isWarning,
-                is_trial: currentState === TENANT_STATES.TRIAL,
-                is_active: currentState === TENANT_STATES.ACTIVE,
-                is_expired: currentState === TENANT_STATES.EXPIRED,
-                is_suspended: currentState === TENANT_STATES.SUSPENDED
+                is_trial: effectiveState === TENANT_STATES.TRIAL,
+                is_active: effectiveState === TENANT_STATES.ACTIVE,
+                is_expired: effectiveState === TENANT_STATES.EXPIRED,
+                is_suspended: effectiveState === TENANT_STATES.SUSPENDED
             }
         };
     }

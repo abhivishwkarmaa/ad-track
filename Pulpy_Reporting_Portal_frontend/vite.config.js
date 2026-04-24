@@ -1,27 +1,29 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+/** CI: set VITE_APP_RELEASE to git SHA so each deploy bumps client migration + storage cleanup */
+const appRelease = process.env.VITE_APP_RELEASE || pkg.version || '0.0.0'
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_RELEASE__: JSON.stringify(appRelease),
+  },
   plugins: [react()],
   server: {
     port: 5173,
-    host: true, // Allow external access for subdomain testing
-    // 🔒 STRICT SUBDOMAIN-BASED MULTI-TENANCY
-    // ✅ CRITICAL: Proxy API requests to backend while preserving Host header
-    // changeOrigin: false ensures the original Host header (with tenant subdomain) is forwarded
-    // This allows backend to resolve tenant from subdomain (e.g., tenant1.localhost:5173)
+    host: true,
     proxy: {
       '/api': {
         target: 'http://localhost:5001',
-        changeOrigin: false, // ✅ Preserves Host header (tenant1.localhost) - REQUIRED for tenant resolution
+        changeOrigin: false,
         secure: false,
-        // Don't rewrite the path - keep /api as-is
       },
-      // Proxy tracking endpoints to backend
       '/click': {
         target: 'http://localhost:5001',
-        changeOrigin: false, // ✅ Preserves Host header
+        changeOrigin: false,
         secure: false,
       },
       '/event': {
@@ -31,12 +33,12 @@ export default defineConfig({
       },
       '/postback': {
         target: 'http://localhost:5001',
-        changeOrigin: false, // ✅ Preserves Host header
+        changeOrigin: false,
         secure: false,
       },
       '/imp': {
         target: 'http://localhost:5001',
-        changeOrigin: false, // ✅ Preserves Host header
+        changeOrigin: false,
         secure: false,
       },
       '/health': {

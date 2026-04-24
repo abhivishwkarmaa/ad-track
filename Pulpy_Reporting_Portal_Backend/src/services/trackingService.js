@@ -15,7 +15,7 @@ import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
 
-import cacheService from './cacheService.js';
+import cacheService, { PUBLISHER_OFFERS_TRACKING_COLUMNS } from './cacheService.js';
 import postbackService from './postbackService.js';
 import dailyAggregateService from './dailyAggregateService.js';
 
@@ -239,7 +239,7 @@ export class TrackingService {
       let assignment = await cacheService.getAssignment(internalPublisherId, offer.id, tenantId);
       if (!assignment) {
         let [assignmentRows] = await pool.query(
-          'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+          `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1`,
           [internalPublisherId, offer.id, tenantId]
         );
         assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows;
@@ -247,7 +247,7 @@ export class TrackingService {
         // Fallback: kuch purani rows me publisher_id column me public id store ho sakta hai
         if (!assignment && publicPublisherId !== internalPublisherId) {
           const [fallbackRows] = await pool.query(
-            'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1',
+            `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND tenant_id = ? LIMIT 1`,
             [publicPublisherId, offer.id, tenantId]
           );
           assignment = Array.isArray(fallbackRows) ? fallbackRows[0] : fallbackRows;
@@ -468,13 +468,20 @@ export class TrackingService {
           action: assignment.capping_action
         });
 
-        const actionResult = await this.applyPublisherCapAction(assignment);
+        const actionResult = await this.applyPublisherCapAction(assignment, request, tenantId);
         if (actionResult.stop) {
           const detail = assignment.capping_type === 'budget'
             ? `Daily Budget: ${offer.offer_currency || '$'}${pubCapStatus.limit}`
             : `Daily Conversions: ${pubCapStatus.limit}`;
           return {
             html: generateOfferErrorPage(`Publisher Cap Hit (${detail}) - Traffic Stopped`, 'publisher_cap_hit'),
+            clickId: null
+          };
+        }
+
+        if (actionResult.redirect) {
+          return {
+            redirect: actionResult.redirect,
             clickId: null
           };
         }
@@ -1650,10 +1657,74 @@ export class TrackingService {
     return { stop: true }; // Default safe
   }
 
-  async applyPublisherCapAction(assignment) {
+  async applyPublisherCapAction(assignment, request, tenantId) {
     const action = assignment.capping_action || 'stop';
-    if (action === 'stop') return { stop: true };
-    if (action === 'reject') return { stop: false, reject_conversion: true };
+
+    if (action === 'stop') {
+      return { stop: true };
+    }
+
+    if (action === 'reject') {
+      return { stop: false, reject_conversion: true };
+    }
+
+    if (action === 'fallback') {
+      if (assignment.fallback_type === 'custom' && assignment.fallback_url) {
+        return { stop: false, redirect: assignment.fallback_url };
+      }
+
+      if (assignment.fallback_type === 'offer' && assignment.fallback_offer_id) {
+        const fallbackOffer = await offerService.getOfferById(assignment.fallback_offer_id, tenantId, true);
+        if (!fallbackOffer) {
+          logger.warn('[CAP] Publisher cap: fallback offer not found or invalid', {
+            fallback_offer_id: assignment.fallback_offer_id,
+            tenant_id: tenantId
+          });
+          return { stop: true };
+        }
+
+        const fallbackAssignment = await assignmentService.findByPublisherAndOffer(assignment.publisher_id, fallbackOffer.id, tenantId);
+        if (!fallbackAssignment || fallbackAssignment.status !== 'active') {
+          logger.warn('[CAP] Publisher cap: fallback offer not assigned to publisher or inactive', {
+            pub_id: assignment.publisher_id,
+            fallback_offer: fallbackOffer.id
+          });
+          return { stop: true };
+        }
+
+        const publicOfferId = fallbackOffer.public_offer_id || fallbackOffer.display_id || fallbackOffer.id;
+
+        const publicPublisherId = assignment.public_publisher_id ||
+          request.query.pub_id ||
+          request.query.a ||
+          (await (await import('./offerPublicIdService.js')).default.getPublicPublisherId(assignment.publisher_id, tenantId));
+
+        const protocol = request.headers['x-forwarded-proto'] || 'http';
+        const host = request.headers.host;
+        const originalUrl = request.url;
+        const queryPart = originalUrl.includes('?') ? originalUrl.split('?')[1] : '';
+
+        const validParams = new URLSearchParams(queryPart);
+        validParams.delete('offer_id');
+        validParams.delete('oid');
+        validParams.delete('pub_id');
+        validParams.delete('a');
+
+        const cleanQuery = validParams.toString();
+        const newUrl = `${protocol}://${host}/click?offer_id=${publicOfferId}&pub_id=${publicPublisherId}${cleanQuery ? '&' + cleanQuery : ''}`;
+
+        logger.info('[CAP] Publisher cap: redirecting to fallback offer', {
+          assignment_id: assignment.id,
+          fallback_offer: fallbackOffer.id,
+          fallback_url: newUrl
+        });
+
+        return { stop: false, redirect: newUrl };
+      }
+
+      return { stop: true };
+    }
+
     return { stop: true };
   }
 
@@ -1743,7 +1814,7 @@ export class TrackingService {
       }
 
       // ✅ CRITICAL: Check assignment exists (with tenant_id if available)
-      let assignmentQuery = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
+      let assignmentQuery = `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?`;
       const assignmentParams = [internalPublisherId, internalOfferId, 'active'];
 
       if (tenantId) {

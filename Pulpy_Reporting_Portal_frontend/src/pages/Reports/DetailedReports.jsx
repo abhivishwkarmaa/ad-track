@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DateTime } from 'luxon';
 import { useToast } from '../../context/ToastContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { useAuth } from '../../context/AuthContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
@@ -12,7 +13,8 @@ import {
     formatHourSlotIST,
     formatISTDateTimeNumeric,
 } from '../../utils/dateTime';
-import { getUserTimezone } from '../../utils/userTimezone';
+import { getDetailedReportsPresetRange } from '../../utils/timelineRange';
+import { userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import './Reports.css';
 
 // Icons
@@ -113,40 +115,12 @@ const DATE_PRESET_OPTIONS = [
     { id: 'custom', label: 'Custom Range' },
 ];
 
-const toYmd = (dt) => dt.toISODate();
-
-const getPresetDateRange = (preset) => {
-    const zone = getUserTimezone();
-    const today = DateTime.now().setZone(zone).startOf('day');
-
-    if (preset === 'today') return { from: toYmd(today), to: toYmd(today), allDates: false };
-    if (preset === 'yesterday') {
-        const y = today.minus({ days: 1 });
-        return { from: toYmd(y), to: toYmd(y), allDates: false };
-    }
-    if (preset === 'this_week') {
-        const start = today.startOf('week');
-        return { from: toYmd(start), to: toYmd(today), allDates: false };
-    }
-    if (preset === 'this_month') {
-        const start = today.startOf('month');
-        return { from: toYmd(start), to: toYmd(today), allDates: false };
-    }
-    if (preset === 'last_month') {
-        const start = today.minus({ months: 1 }).startOf('month');
-        const end = today.minus({ months: 1 }).endOf('month');
-        return { from: toYmd(start), to: toYmd(end), allDates: false };
-    }
-    if (preset === 'all') return { from: '', to: '', allDates: true };
-
-    return { from: '', to: '', allDates: false };
-};
-
 function DetailedReports() {
     const { user } = useAuth();
     const toast = useToast();
     const navigate = useNavigate();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [reports, setReports] = useState([]);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
@@ -198,8 +172,9 @@ function DetailedReports() {
     const [pendingMetrics, setPendingMetrics] = useState(initialMetrics);
 
     const [showFilters, setShowFilters] = useState(true);
-    const [exportMode, setExportMode] = useState('frontend'); // frontend | backend
-    const [showExportMenu, setShowExportMenu] = useState(false);
+    const exportMode = 'backend'; // Server export only (full dataset)
+    const [isExporting, setIsExporting] = useState(false);
+    const [exportJustFinished, setExportJustFinished] = useState(false);
     const [eventSummary, setEventSummary] = useState([]);
     const [loadingEventSummary, setLoadingEventSummary] = useState(false);
 
@@ -228,10 +203,10 @@ function DetailedReports() {
 
     useEffect(() => {
         if (datePreset === 'custom') return;
-        const range = getPresetDateRange(datePreset);
+        const range = getDetailedReportsPresetRange(datePreset, reportTimezone);
         setDateFrom(range.from);
         setDateTo(range.to);
-    }, [datePreset, user?.timezone]);
+    }, [datePreset, reportTimezone]);
 
     const fetchReports = async (activeDims = selectedDims, activeMetrics = selectedMetrics, opts = {}) => {
         try {
@@ -248,13 +223,18 @@ function DetailedReports() {
 
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
-                : getPresetDateRange(datePreset);
+                : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
             if (resolvedRange.allDates) {
                 params.all_dates = 'true';
             } else {
-                if (resolvedRange.from) params.date_from = resolvedRange.from;
-                if (resolvedRange.to) params.date_to = resolvedRange.to;
+                const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                    resolvedRange.from,
+                    resolvedRange.to,
+                    reportTimezone
+                );
+                if (date_from) params.date_from = date_from;
+                if (date_to) params.date_to = date_to;
             }
             if (offerFilter !== 'all') params.offer_id = offerFilter;
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
@@ -356,16 +336,16 @@ function DetailedReports() {
 
     // Load / pagination / global refresh / Apply — filters refetch via applyFetchKey (not a second fetchReports in handleApply).
     useEffect(() => {
-        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${user?.timezone || ''}`;
+        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${reportTimezone}|${timezoneRevision}`;
         const now = Date.now();
         if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
             return;
         }
         lastFetchDedupRef.current = { key, at: now };
         fetchReports();
-        // Intentionally only re-fetch when page, limit, global refreshKey, or applyFetchKey changes; dim/metric state is read inside fetchReports.
+        // Intentionally only re-fetch when page, limit, global refreshKey, applyFetchKey, or timezone changes; dim/metric state is read inside fetchReports.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey, user?.timezone]);
+    }, [pagination.page, pagination.limit, refreshKey, applyFetchKey, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         const fetchEventSummary = async () => {
@@ -373,12 +353,17 @@ function DetailedReports() {
                 setLoadingEventSummary(true);
                 const resolvedRange = datePreset === 'custom'
                     ? { from: dateFrom, to: dateTo, allDates: false }
-                    : getPresetDateRange(datePreset);
+                    : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
                 const params = {};
                 if (!resolvedRange.allDates) {
-                    if (resolvedRange.from) params.date_from = resolvedRange.from;
-                    if (resolvedRange.to) params.date_to = resolvedRange.to;
+                    const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                        resolvedRange.from,
+                        resolvedRange.to,
+                        reportTimezone
+                    );
+                    if (date_from) params.date_from = date_from;
+                    if (date_to) params.date_to = date_to;
                 }
                 if (offerFilter !== 'all') params.offer_id = offerFilter;
                 if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
@@ -398,7 +383,7 @@ function DetailedReports() {
         };
 
         fetchEventSummary();
-    }, [datePreset, dateFrom, dateTo, offerFilter, publisherFilter, refreshKey]);
+    }, [datePreset, dateFrom, dateTo, offerFilter, publisherFilter, refreshKey, reportTimezone, timezoneRevision]);
 
     const handleApply = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
@@ -493,88 +478,28 @@ function DetailedReports() {
         setPagination(prev => ({ ...prev, page: newPage }));
     };
 
-    const handleExport = async (modeOverride = null) => {
-        const mode = modeOverride || exportMode;
+    const handleExport = async () => {
         try {
-            if (mode === 'frontend') {
-                if (!reports || reports.length === 0) {
-                    toast.error('No loaded data to export');
-                    return;
-                }
+            if (isExporting) return;
+            setIsExporting(true);
+            setExportJustFinished(false);
 
-                toast.info('Preparing CSV from loaded data...');
-
-                const csvEscape = (value) => {
-                    if (value === null || value === undefined) return '';
-                    const str = String(value);
-                    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-                        return `"${str.replace(/"/g, '""')}"`;
-                    }
-                    return str;
-                };
-
-                const formatStatusForCsv = (status) => {
-                    if (!status) return '';
-                    const normalizedStatus = String(status).toLowerCase();
-                    if (normalizedStatus === 'click_expired') return 'Rejected (Click Expired)';
-                    if (normalizedStatus === 'rejected_cap') return 'Rejected (Cap Hit)';
-                    return String(status).replace(/_/g, ' ');
-                };
-
-                const getCsvCellValue = (row, colId) => {
-                    const val = row[colId];
-                    if (colId === 'offer_id') {
-                        return row.offer_name ? `${row.offer_id} - ${row.offer_name}` : (row.offer_id || '');
-                    }
-                    if (colId === 'publisher_id') {
-                        return row.publisher_name || row.publisher_company
-                            ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
-                            : (row.publisher_id || '');
-                    }
-                    if (colId === 'conversion_status') return formatStatusForCsv(val);
-                    if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(colId)) {
-                        return val === null || val === undefined ? '' : Number(val).toFixed(2);
-                    }
-                    if (colId === 'timestamp_bucket') return formatAggregatedTimestampCell(row) || '';
-                    if (colId === 'timestamp') return getDetailTimestampCsv(row);
-                    if (colId === 'date_group') return formatDate(val, 'date') || '';
-                    if (colId === 'hour_group') return formatDate(val, 'hour') || '';
-                    if (colId === 'referrer' || colId === 'referer') return val ? String(val).trim() : 'Direct';
-                    return val ?? '';
-                };
-
-                const headers = tableColumns.map((c) => c.label);
-                const lines = [headers.map(csvEscape).join(',')];
-                reports.forEach((row) => {
-                    const line = tableColumns.map((col) => csvEscape(getCsvCellValue(row, col.id))).join(',');
-                    lines.push(line);
-                });
-
-                const csvContent = lines.join('\n');
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `report-loaded-${new Date().toISOString().split('T')[0]}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                window.URL.revokeObjectURL(url);
-                toast.success('Export downloaded!');
-                return;
-            }
-
-            toast.info('Preparing full export from server...');
+            toast.info('Preparing full export ...');
             const params = new URLSearchParams();
             const resolvedRange = datePreset === 'custom'
                 ? { from: dateFrom, to: dateTo, allDates: false }
-                : getPresetDateRange(datePreset);
+                : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
             if (resolvedRange.allDates) {
                 params.set('all_dates', 'true');
             } else {
-                if (resolvedRange.from) params.set('date_from', resolvedRange.from);
-                if (resolvedRange.to) params.set('date_to', resolvedRange.to);
+                const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                    resolvedRange.from,
+                    resolvedRange.to,
+                    reportTimezone
+                );
+                if (date_from) params.set('date_from', date_from);
+                if (date_to) params.set('date_to', date_to);
             }
             if (offerFilter !== 'all') params.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
@@ -601,10 +526,15 @@ function DetailedReports() {
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
-            toast.success('Full export downloaded!');
+            setExportJustFinished(true);
+            toast.success('Downloaded successfully');
+            // Auto-hide the inline success state
+            setTimeout(() => setExportJustFinished(false), 4000);
         } catch (error) {
             console.error('Export error:', error);
             toast.error(error.message || 'Failed to export data');
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -674,48 +604,33 @@ function DetailedReports() {
                     <button className="btn btn-outline" onClick={() => setShowFilters(!showFilters)}>
                         <FilterIcon /> {showFilters ? 'Hide Filters' : 'Show Filters'}
                     </button>
-                    <div className="reports-export-dropdown">
-                        <button
-                            className="btn btn-primary"
-                            onClick={() => handleExport()}
-                            type="button"
-                            title={`Export using ${exportMode === 'frontend' ? 'Fast Export (Loaded)' : 'Full Export (Server)'}`}
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleExport}
+                        type="button"
+                        title="Export full dataset from server"
+                        disabled={isExporting}
+                    >
+                        <DownloadIcon /> {isExporting ? 'Exporting…' : 'Export CSV'}
+                    </button>
+                    {exportJustFinished && (
+                        <div
+                            style={{
+                                marginLeft: '10px',
+                                fontSize: '12px',
+                                padding: '6px 10px',
+                                borderRadius: '999px',
+                                border: '1px solid rgba(34, 197, 94, 0.35)',
+                                background: 'rgba(34, 197, 94, 0.10)',
+                                color: '#166534',
+                                whiteSpace: 'nowrap',
+                            }}
+                            role="status"
+                            aria-live="polite"
                         >
-                            <DownloadIcon /> Export CSV
-                        </button>
-                        <button
-                            className="btn btn-outline reports-export-toggle"
-                            type="button"
-                            onClick={() => setShowExportMenu(prev => !prev)}
-                            title="Choose export mode"
-                        >
-                            <ChevronDownIcon />
-                        </button>
-                        {showExportMenu && (
-                            <div className="reports-export-menu">
-                                <button
-                                    type="button"
-                                    className={`reports-export-menu-item ${exportMode === 'frontend' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setExportMode('frontend');
-                                        setShowExportMenu(false);
-                                    }}
-                                >
-                                    Fast Export (Loaded)
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`reports-export-menu-item ${exportMode === 'backend' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setExportMode('backend');
-                                        setShowExportMenu(false);
-                                    }}
-                                >
-                                    Full Export (Server)
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                            Downloaded successfully
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -953,6 +868,7 @@ function DetailedReports() {
                                         if (['revenue', 'payout', 'profit', 'conversion_amount', 'conversion_payout', 'pending_payout', 'approved_payout'].includes(col.id)) return <td key={col.id}>{formatCurrency(val)}</td>;
                                         if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
                                         if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
+                                        if (col.id === 'advertiser_id') return <td key={col.id}>{row.advertiser_name ? `${row.advertiser_id} - ${row.advertiser_name}` : row.advertiser_id}</td>;
                                         if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
                                         if (col.id === 'timestamp') {
                                             const clickT = formatDate(getClickTimeRaw(row), 'datetime');
@@ -1030,6 +946,8 @@ function DetailedReports() {
                                         displayValue = row.publisher_name || row.publisher_company
                                             ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}`
                                             : row.publisher_id;
+                                    } else if (col.id === 'advertiser_id') {
+                                        displayValue = row.advertiser_name ? `${row.advertiser_id} - ${row.advertiser_name}` : row.advertiser_id;
                                     } else if (col.id === 'timestamp') {
                                         displayValue = getDetailTimestampCsv(row) || '-';
                                     } else if (col.id === 'timestamp_bucket') {

@@ -142,6 +142,24 @@ const osList = [
 // Token types - matching HTML (hasoffers, affise shown, but including API ones)
 const tokenTypes = ['hasoffers', 'affise'];
 
+const billingFlows = [
+    'Preview Link',
+    'Billing Flow: Give Option',
+    '1click',
+    '2click',
+    '3 click',
+    'OTP',
+    'HE+OTP',
+    'Captcha',
+    'SMS',
+    'DOI'
+];
+
+const billingTypes = [
+    'Billable',
+    'Non billable'
+];
+
 // Advertiser Parameters - matching HTML
 const advertiserParameters = [
     'aff_sub',
@@ -245,6 +263,9 @@ function NewOffer() {
         status: 'live',
         offer_visibility: 'PUBLIC',
         preview_url: '',
+        billing_flow: '',
+        carrier_name: '',
+        billing_type: '',
         token_type: '',
         start_date: defaultDates.startDate,
         start_time: defaultDates.startTime,
@@ -312,90 +333,6 @@ function NewOffer() {
         fetchOffers();
     }, [toast, refreshKey]);
 
-    // Function to build preview URL with tokens
-    const buildPreviewUrl = (baseUrl, mappings) => {
-        if (!baseUrl) return '';
-
-        try {
-            // Split URL into parts: base, hash fragment, and existing query
-            const hashIndex = baseUrl.indexOf('#');
-            const queryIndex = baseUrl.indexOf('?');
-
-            let basePart = baseUrl;
-            let hashPart = '';
-            let existingQuery = '';
-
-            // Extract hash fragment if present
-            if (hashIndex !== -1) {
-                basePart = baseUrl.substring(0, hashIndex);
-                const afterHash = baseUrl.substring(hashIndex + 1);
-
-                // Check if there's a query string after the hash
-                const queryInHash = afterHash.indexOf('?');
-                if (queryInHash !== -1) {
-                    hashPart = afterHash.substring(0, queryInHash);
-                    existingQuery = afterHash.substring(queryInHash + 1);
-                } else {
-                    hashPart = afterHash;
-                }
-            } else if (queryIndex !== -1) {
-                // No hash, but has query string
-                basePart = baseUrl.substring(0, queryIndex);
-                existingQuery = baseUrl.substring(queryIndex + 1);
-            }
-
-            // Build query string from enabled mappings (without URL encoding the tokens)
-            const queryParams = [];
-            mappings
-                .filter(mapping => mapping.enabled)
-                .forEach(mapping => {
-                    // Don't URL encode the token values - keep them as {token}
-                    queryParams.push(`${encodeURIComponent(mapping.advertiserParam)}=${mapping.platformToken}`);
-                });
-
-            const newQueryString = queryParams.join('&');
-
-            // Combine: base + hash + query
-            let result = basePart;
-            if (hashPart) {
-                result += `#${hashPart}`;
-            }
-            if (newQueryString) {
-                result += `?${newQueryString}`;
-            }
-
-            return result;
-        } catch (e) {
-            // If URL is invalid, just return base URL
-            return baseUrl;
-        }
-    };
-
-    // Update preview URL when offer_url or token mappings change
-    useEffect(() => {
-        if (formData.offer_url) {
-            if (tokenMappings.length > 0 && showTokenTable) {
-                // Build URL with token mappings
-                const previewUrl = buildPreviewUrl(formData.offer_url, tokenMappings);
-                setFormData(prev => {
-                    if (prev.preview_url !== previewUrl) {
-                        return { ...prev, preview_url: previewUrl };
-                    }
-                    return prev;
-                });
-            } else {
-                // If no token mappings, just use the base URL
-                setFormData(prev => {
-                    if (prev.preview_url !== prev.offer_url) {
-                        return { ...prev, preview_url: prev.offer_url };
-                    }
-                    return prev;
-                });
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [formData.offer_url, tokenMappings, showTokenTable]);
-
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
         if (type === 'checkbox') {
@@ -404,14 +341,7 @@ function NewOffer() {
             const selectedValues = Array.from(e.target.selectedOptions, option => option.value);
             setFormData(prev => ({ ...prev, [name]: selectedValues }));
         } else {
-            setFormData(prev => {
-                const updated = { ...prev, [name]: value };
-                // When offer_url changes, copy it to preview_url initially
-                if (name === 'offer_url' && value) {
-                    updated.preview_url = value;
-                }
-                return updated;
-            });
+            setFormData(prev => ({ ...prev, [name]: value }));
             // Show token table when token type is selected
             if (name === 'token_type' && value) {
                 setShowTokenTable(true);
@@ -425,30 +355,17 @@ function NewOffer() {
                         { id: 4, enabled: false, advertiserParam: 'aff_sub5', platformToken: '{row-useragent}' }
                     ];
                     setTokenMappings(defaultMappings);
-                    // Preview URL will remain as base URL since all mappings are disabled
                 }
             } else if (name === 'token_type' && !value) {
                 setShowTokenTable(false);
-                // Reset preview URL to base offer URL when token type is cleared
-                if (formData.offer_url) {
-                    setFormData(prev => ({ ...prev, preview_url: prev.offer_url }));
-                }
             }
         }
     };
 
     const handleTokenMappingChange = (id, field, value) => {
-        setTokenMappings(prev => {
-            const updated = prev.map(item =>
-                item.id === id ? { ...item, [field]: value } : item
-            );
-            // Immediately update preview URL when mappings change
-            if (formData.offer_url && showTokenTable) {
-                const previewUrl = buildPreviewUrl(formData.offer_url, updated);
-                setFormData(formDataPrev => ({ ...formDataPrev, preview_url: previewUrl }));
-            }
-            return updated;
-        });
+        setTokenMappings(prev =>
+            prev.map(item => (item.id === id ? { ...item, [field]: value } : item))
+        );
     };
 
     const handleTestOfferLink = () => {
@@ -507,6 +424,9 @@ function NewOffer() {
                 status: formData.status.toLowerCase(), // LIVE -> live, PAUSE -> paused
                 offer_visibility: formData.offer_visibility,
                 preview_url: formData.preview_url || null,
+                billing_flow: formData.billing_flow || null,
+                carrier_name: (formData.carrier_name && String(formData.carrier_name).trim()) || null,
+                billing_type: formData.billing_type || null,
                 token_type: formData.token_type || null,
                 start_date: formData.start_date || null,
                 end_date: formData.end_date || null,
@@ -758,6 +678,51 @@ function NewOffer() {
                                 </select>
                             </div>
                         </div>
+
+                        <div className="offer-form-row two-col">
+                            <div className="form-group">
+                                <label className="form-label">Billing Flow</label>
+                                <select
+                                    className="form-control"
+                                    name="billing_flow"
+                                    value={formData.billing_flow}
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Billing Flow</option>
+                                    {billingFlows.map(flow => (
+                                        <option key={flow} value={flow}>{flow}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Billing Type</label>
+                                <select
+                                    className="form-control"
+                                    name="billing_type"
+                                    value={formData.billing_type}
+                                    onChange={handleChange}
+                                >
+                                    <option value="">Select Billing Type</option>
+                                    {billingTypes.map(type => (
+                                        <option key={type} value={type}>{type}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="offer-form-row">
+                            <div className="form-group">
+                                <label className="form-label">Carrier name (optional)</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="carrier_name"
+                                    value={formData.carrier_name}
+                                    onChange={handleChange}
+                                    placeholder="e.g. Verizon, T-Mobile"
+                                    maxLength={255}
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Pricing Information */}
@@ -950,19 +915,20 @@ function NewOffer() {
                                 🔗 Test Offer Link
                             </button>
                         </div>
-                        {/* Offer URL Autocomplete */}
+                        {/* Preview offer URL — manual entry only (not auto-filled from Offer URL) */}
                         <div className="offer-form-row">
                             <div className="form-group">
-                                <label className="form-label">Offer URL Autocomplete (with tokens)</label>
+                                <label className="form-label">Preview offer URL (optional)</label>
                                 <input
-                                    type="url"
+                                    type="text"
                                     className="form-control"
                                     name="preview_url"
                                     value={formData.preview_url}
                                     onChange={handleChange}
-                                    placeholder="Autocomplete offer URL"
-                                    disabled
+                                    placeholder="https://"
+                                    autoComplete="off"
                                 />
+                                
                             </div>
                         </div>
                         {/* Tokens */}

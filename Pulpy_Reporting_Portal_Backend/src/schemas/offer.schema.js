@@ -48,12 +48,9 @@ export const offerStatsQuerySchema = {
   properties: {
     date_from: { type: 'string', format: 'date' },
     date_to: { type: 'string', format: 'date' },
-    previous_from: { type: 'string', format: 'date' },
-    previous_to: { type: 'string', format: 'date' },
-    datetime_from: { type: 'string' },
-    datetime_to: { type: 'string' },
-    previous_datetime_from: { type: 'string' },
-    previous_datetime_to: { type: 'string' },
+    range_start_utc: { type: 'string', maxLength: 32 },
+    range_end_utc: { type: 'string', maxLength: 32 },
+    report_timezone: { type: 'string', maxLength: 64 },
   },
 };
 
@@ -90,6 +87,9 @@ export const createOfferSchema = {
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
+    billing_flow: { type: ['string', 'null'], maxLength: 50 },
+    carrier_name: { type: ['string', 'null'], maxLength: 255 },
+    billing_type: { type: ['string', 'null'], maxLength: 50 },
     token_type: { type: ['string', 'null'], maxLength: 100 },
     macros_json: { type: ['object', 'null'] },
 
@@ -169,6 +169,9 @@ export const updateOfferSchema = {
 
     offer_url: { type: 'string', maxLength: 500 },
     preview_url: { type: ['string', 'null'], maxLength: 500 },
+    billing_flow: { type: ['string', 'null'], maxLength: 50 },
+    carrier_name: { type: ['string', 'null'], maxLength: 255 },
+    billing_type: { type: ['string', 'null'], maxLength: 50 },
     token_type: { type: ['string', 'null'], maxLength: 100 },
     macros_json: { type: ['object', 'null'] },
 

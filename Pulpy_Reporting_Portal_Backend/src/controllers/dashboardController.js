@@ -63,6 +63,10 @@ export class DashboardController {
         limit: request.query.limit,
         group_by: request.query.group_by,
         metric: request.query.metric,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
+        previous_range_start_utc: request.query.previous_range_start_utc,
+        previous_range_end_utc: request.query.previous_range_end_utc,
       };
 
       // ✅ Use Aggregated Service for single-roundtrip performance
@@ -93,8 +97,8 @@ export class DashboardController {
         limit: request.query.limit,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
-        datetime_from: request.query.datetime_from,
-        datetime_to: request.query.datetime_to,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getTopOffers(filters, tenantId);
@@ -125,6 +129,8 @@ export class DashboardController {
         datetime_from: request.query.datetime_from,
         datetime_to: request.query.datetime_to,
         group_by: request.query.group_by,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getPerformanceChart(filters, tenantId);
@@ -153,8 +159,8 @@ export class DashboardController {
         limit: request.query.limit,
         date_from: request.query.date_from,
         date_to: request.query.date_to,
-        datetime_from: request.query.datetime_from,
-        datetime_to: request.query.datetime_to,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const result = await dashboardService.getTopAffiliates(filters, tenantId);
@@ -208,6 +214,8 @@ export class DashboardController {
         datetime_from: request.query.datetime_from,
         datetime_to: request.query.datetime_to,
         metric: request.query.metric,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getTopCountries(filters, tenantId);
@@ -235,8 +243,10 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
-        datetime_from: request.query.datetime_from,
-        datetime_to: request.query.datetime_to,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
+        previous_range_start_utc: request.query.previous_range_start_utc,
+        previous_range_end_utc: request.query.previous_range_end_utc,
       };
 
       const data = await dashboardService.getDashboardCards(filters, tenantId);
@@ -265,6 +275,8 @@ export class DashboardController {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
         limit: request.query.limit,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getTopEvents(filters, tenantId);
@@ -292,8 +304,8 @@ export class DashboardController {
       const filters = {
         date_from: request.query.date_from,
         date_to: request.query.date_to,
-        datetime_from: request.query.datetime_from,
-        datetime_to: request.query.datetime_to,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getPerformanceSummary(filters, tenantId);
@@ -373,6 +385,8 @@ export class DashboardController {
         datetime_to: request.query.datetime_to,
         sort_by: request.query.sort_by,
         order_by: request.query.order_by,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getOfferStatistics(filters, tenantId);
@@ -406,6 +420,8 @@ export class DashboardController {
         datetime_to: request.query.datetime_to,
         sort_by: request.query.sort_by,
         order_by: request.query.order_by,
+        range_start_utc: request.query.range_start_utc,
+        range_end_utc: request.query.range_end_utc,
       };
 
       const data = await dashboardService.getPublisherStatistics(filters, tenantId);
@@ -440,6 +456,10 @@ export class DashboardController {
         previous_datetime_from,
         previous_datetime_to,
         group_by = 'day',
+        range_start_utc,
+        range_end_utc,
+        previous_range_start_utc,
+        previous_range_end_utc,
       } = request.query;
 
       if (!previous_from || !previous_to) {
@@ -449,13 +469,19 @@ export class DashboardController {
         });
       }
 
-      const currentFilters = { date_from, date_to, datetime_from, datetime_to, group_by };
+      const currentFilters = {
+        date_from,
+        date_to,
+        group_by,
+        range_start_utc,
+        range_end_utc,
+      };
       const previousFilters = {
         date_from: previous_from,
         date_to: previous_to,
-        datetime_from: previous_datetime_from,
-        datetime_to: previous_datetime_to,
-        group_by
+        group_by,
+        range_start_utc: previous_range_start_utc,
+        range_end_utc: previous_range_end_utc,
       };
 
       const data = await dashboardService.getPerformanceComparison(currentFilters, previousFilters, tenantId);

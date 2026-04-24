@@ -1,5 +1,6 @@
 /**
- * Stats Aggregation Worker
+ * Legacy stats aggregation — writes `daily_click_stats`.
+ * For reporting, use `reportingStatsAggregationWorker.js` + `daily_reporting_rollup`.
  *
  * Populates daily_click_stats from raw clicks + conversions tables.
  * Runs:
@@ -60,7 +61,7 @@ async function aggregateDay(istDate) {
 
     try {
         // ─────────────────────────────────────────
-        // Step 1: Aggregate clicks for the day
+        // Step 1: Aggregate clicks for the day (ALL clicks — matches reportService / getSummary)
         // One row per (tenant_id, publisher_id, offer_id)
         // Uses (tenant_id, created_at) index — no function on indexed column
         // ─────────────────────────────────────────
@@ -73,14 +74,8 @@ async function aggregateDay(istDate) {
         COUNT(DISTINCT ip) AS unique_ips
       FROM clicks
       WHERE created_at BETWEEN ? AND ?
-        AND referrer IS NOT NULL AND referrer <> ''
       GROUP BY tenant_id, publisher_id, offer_id
     `, [utcStart, utcEnd]);
-
-        if (clickRows.length === 0) {
-            logger.info(`[StatsAgg] No click data for ${istDate} — skipping`);
-            return;
-        }
 
         // ─────────────────────────────────────────
         // Step 2: Aggregate conversions for the day
@@ -120,8 +115,10 @@ async function aggregateDay(istDate) {
         // ─────────────────────────────────────────
         // Step 4: Build upsert payload
         // ─────────────────────────────────────────
-        const values = clickRows.map(c => {
+        const clickKeySet = new Set();
+        const values = clickRows.map((c) => {
             const key = `${c.tenant_id}:${c.publisher_id}:${c.offer_id}`;
+            clickKeySet.add(key);
             const conv = convMap.get(key) || {};
 
             const revenue = parseFloat(conv.revenue || 0);
@@ -146,6 +143,36 @@ async function aggregateDay(istDate) {
                 profit,
             ];
         });
+
+        for (const row of convRows) {
+            const key = `${row.tenant_id}:${row.publisher_id}:${row.offer_id}`;
+            if (clickKeySet.has(key)) continue;
+            const revenue = parseFloat(row.revenue || 0);
+            const payout = parseFloat(row.payout || 0);
+            const pendingPayout = parseFloat(row.pending_payout || 0);
+            const profit = parseFloat((revenue - payout).toFixed(4));
+            values.push([
+                row.tenant_id,
+                istDate,
+                row.publisher_id,
+                row.offer_id,
+                0,
+                0,
+                parseInt(row.total_conversions || 0),
+                parseInt(row.approved_conversions || 0),
+                parseInt(row.pending_conversions || 0),
+                parseInt(row.rejected_conversions || 0),
+                revenue,
+                payout,
+                pendingPayout,
+                profit,
+            ]);
+        }
+
+        if (values.length === 0) {
+            logger.info(`[StatsAgg] No click or conversion data for ${istDate} — skipping`);
+            return;
+        }
 
         // ─────────────────────────────────────────
         // Step 5: Upsert — fully idempotent

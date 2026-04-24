@@ -110,7 +110,7 @@ export class AuthController {
       } catch (error) {
         // If tenant_id column doesn't exist, fall back to insert without it
         if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
-          logger.warn('tenant_id column not found in admin_users table. Please run migration.');
+          logger.warn('tenant_id column not found in admin_users table. Database schema update required.');
           insertQuery = 'INSERT INTO admin_users (email, name, password_hash, role) VALUES (?, ?, ?, ?)';
           insertParams = [email, name, passwordHash, role];
           const [result] = await pool.query(insertQuery, insertParams);
@@ -211,22 +211,36 @@ export class AuthController {
       // ✅ STEP 2: Find admin user (include tenant_id)
       // Note: tenant_id column may not exist if migration hasn't been run yet
       let [rows] = [];
+      // ⚠️ Schema drift tolerant queries:
+      // Some deployments may not yet have: tenant_id, must_change_password, company_name, phone
+      // Login must not 500 because of missing optional columns.
       try {
-        // Try query with tenant_id first
         [rows] = await pool.query(
           'SELECT id, email, name, password_hash, role, tenant_id, must_change_password, company_name, phone FROM admin_users WHERE email = ?',
           [email]
         );
       } catch (error) {
-        // If tenant_id column doesn't exist, fall back to query without it
-        if (error.code === 'ER_BAD_FIELD_ERROR' && (error.message.includes('tenant_id') || error.message.includes('must_change_password'))) {
-          logger.warn('tenant_id or must_change_password column not found in admin_users table. Please run migration.');
-          [rows] = await pool.query(
-            'SELECT id, email, name, password_hash, role FROM admin_users WHERE email = ?',
-            [email]
-          );
+        if (error.code === 'ER_BAD_FIELD_ERROR') {
+          logger.warn('Optional admin_users columns missing; falling back to minimal login query. Database schema update required.', {
+            message: error.message,
+          });
+          try {
+            // Keep tenant_id if present (needed for tenant-scoped auth decisions)
+            [rows] = await pool.query(
+              'SELECT id, email, name, password_hash, role, tenant_id FROM admin_users WHERE email = ?',
+              [email]
+            );
+          } catch (error2) {
+            if (error2.code === 'ER_BAD_FIELD_ERROR') {
+              [rows] = await pool.query(
+                'SELECT id, email, name, password_hash, role FROM admin_users WHERE email = ?',
+                [email]
+              );
+            } else {
+              throw error2;
+            }
+          }
         } else {
-          // Re-throw if it's a different error
           throw error;
         }
       }
@@ -446,8 +460,7 @@ export class AuthController {
         },
       });
     } catch (error) {
-      logger.error('AuthController.login error:', error);
-      logger.error('Error stack:', error.stack);
+      logger.error({ err: error }, 'AuthController.login error');
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }
@@ -456,9 +469,21 @@ export class AuthController {
   async getProfile(request, reply) {
     try {
       // Admin info is already attached by auth middleware
+      const hostUsed =
+        request.headers['x-forwarded-host'] ||
+        request.headers.host ||
+        '';
       return reply.send({
         success: true,
-        data: request.admin,
+        data: {
+          ...request.admin,
+          // Support debugging "works on my PC, not on client" — confirms subdomain → tenant resolution on the server
+          ...(request.tenant && {
+            tenant_slug: request.tenant.slug,
+            tenant_name: request.tenant.name,
+          }),
+          request_host: hostUsed,
+        },
       });
     } catch (error) {
       logger.error('AuthController.getProfile error:', error);
@@ -503,10 +528,23 @@ export class AuthController {
       );
 
       // Fetch updated user
-      const [rows] = await pool.query(
-        'SELECT id, email, name, role, tenant_id, company_name, phone FROM admin_users WHERE id = ?',
-        [id]
-      );
+      let [rows] = [];
+      try {
+        [rows] = await pool.query(
+          'SELECT id, email, name, role, tenant_id, company_name, phone FROM admin_users WHERE id = ?',
+          [id]
+        );
+      } catch (error) {
+        if (error.code === 'ER_BAD_FIELD_ERROR') {
+          // Backward compatible response for older schemas
+          [rows] = await pool.query(
+            'SELECT id, email, name, role, tenant_id FROM admin_users WHERE id = ?',
+            [id]
+          );
+        } else {
+          throw error;
+        }
+      }
 
       return reply.send({
         success: true,
@@ -575,12 +613,25 @@ export class AuthController {
           [session.user_id]
         );
       } catch (error) {
-        if (error.code === 'ER_BAD_FIELD_ERROR' && error.message.includes('tenant_id')) {
-          logger.warn('tenant_id column not found in admin_users table. Please run migration.');
-          [rows] = await pool.query(
-            'SELECT id, email, name, role FROM admin_users WHERE id = ?',
-            [session.user_id]
-          );
+        if (error.code === 'ER_BAD_FIELD_ERROR') {
+          logger.warn('Optional admin_users columns missing; falling back to minimal refresh query. Database schema update required.', {
+            message: error.message,
+          });
+          try {
+            [rows] = await pool.query(
+              'SELECT id, email, name, role, tenant_id FROM admin_users WHERE id = ?',
+              [session.user_id]
+            );
+          } catch (error2) {
+            if (error2.code === 'ER_BAD_FIELD_ERROR') {
+              [rows] = await pool.query(
+                'SELECT id, email, name, role FROM admin_users WHERE id = ?',
+                [session.user_id]
+              );
+            } else {
+              throw error2;
+            }
+          }
         } else {
           throw error;
         }
@@ -685,7 +736,7 @@ export class AuthController {
         },
       });
     } catch (error) {
-      logger.error('AuthController.refresh error:', error);
+      logger.error({ err: error }, 'AuthController.refresh error');
       return reply.code(500).send(createErrorResponse(error, 500));
     }
   }

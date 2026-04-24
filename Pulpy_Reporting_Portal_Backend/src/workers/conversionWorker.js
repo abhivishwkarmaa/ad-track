@@ -589,7 +589,7 @@ async function fireAffiliatePostbacks(items) {
                 );
             } catch (updateErr) {
                 if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
-                    logger.warn('affiliate_postback_fired column missing - run migration add_affiliate_postback_fired.sql');
+                    logger.warn('affiliate_postback_fired column missing - database schema update required');
                 } else throw updateErr;
             }
             logger.info(`✅ Affiliate Postback Fired: ${c.callback_url}`);

@@ -15,6 +15,10 @@ function NewAssignment() {
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublishers, setSelectedPublishers] = useState([]);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
+    /** publisher_id -> list of internal offer_ids that publisher already has an active assignment for */
+    const [assignedOffersByPublisher, setAssignedOffersByPublisher] = useState({});
+
+    const publisherIdsKey = publisherAssignments.map(a => a.publisher_id).sort((a, b) => a - b).join(',');
 
     useEffect(() => {
         const fetchData = async () => {
@@ -31,8 +35,35 @@ function NewAssignment() {
             }
         };
         fetchData();
-        fetchData();
     }, [toast, refreshKey]);
+
+    useEffect(() => {
+        const loadAssignedOffers = async () => {
+            const ids = [...new Set(publisherAssignments.map(a => a.publisher_id))];
+            if (ids.length === 0) {
+                setAssignedOffersByPublisher({});
+                return;
+            }
+            const next = {};
+            await Promise.all(
+                ids.map(async (pid) => {
+                    try {
+                        const res = await assignmentsAPI.getAssignments({ publisher_id: pid, status: 'active' });
+                        if (res.success && Array.isArray(res.data)) {
+                            next[pid] = res.data.map(a => String(a.offer_id));
+                        } else {
+                            next[pid] = [];
+                        }
+                    } catch (err) {
+                        console.error('Error loading assignments for publisher', pid, err);
+                        next[pid] = [];
+                    }
+                })
+            );
+            setAssignedOffersByPublisher(next);
+        };
+        loadAssignedOffers();
+    }, [publisherIdsKey, refreshKey]);
 
     const handleAddPublisher = (publisherId) => {
         if (!publisherId) return;
@@ -46,6 +77,9 @@ function NewAssignment() {
                 capping_duration: 'daily',
                 capping_amount: '',
                 capping_action: 'stop',
+                fallback_type: 'offer',
+                fallback_url: '',
+                fallback_offer_id: '',
                 callback_url: '',
                 offer_url: '',
                 notes: '',
@@ -89,6 +123,11 @@ function NewAssignment() {
                     capping_duration: assignment.capping_duration,
                     capping_action: assignment.capping_action,
                     capping_amount: assignment.capping_type !== 'none' && assignment.capping_amount ? parseFloat(assignment.capping_amount) : null,
+                    fallback_type: assignment.capping_action === 'fallback' ? assignment.fallback_type : null,
+                    fallback_url: assignment.capping_action === 'fallback' && assignment.fallback_type === 'custom' ? (assignment.fallback_url || null) : null,
+                    fallback_offer_id: assignment.capping_action === 'fallback' && assignment.fallback_type === 'offer' && assignment.fallback_offer_id
+                        ? parseInt(assignment.fallback_offer_id, 10)
+                        : null,
 
                     callback_url: assignment.callback_url || null,
                     offer_url: assignment.offer_url || null,
@@ -264,11 +303,70 @@ function NewAssignment() {
                                                                 >
                                                                     <option value="stop">Stop Traffic</option>
                                                                     <option value="reject">Reject Conversions</option>
+                                                                    <option value="fallback">Fallback (redirect)</option>
                                                                 </select>
                                                             </div>
                                                         </>
                                                     )}
                                                 </div>
+
+                                                {assignment.capping_type !== 'none' && assignment.capping_action === 'fallback' && (
+                                                    <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e0e0e0' }}>
+                                                        <h5 style={{ margin: '0 0 10px' }}>Publisher cap — fallback</h5>
+                                                        <div className="assignment-form-row two-col">
+                                                            <div className="form-group">
+                                                                <label className="form-label">Fallback type</label>
+                                                                <select
+                                                                    className="form-control"
+                                                                    value={assignment.fallback_type}
+                                                                    onChange={(e) => handlePublisherChange(index, 'fallback_type', e.target.value)}
+                                                                >
+                                                                    <option value="offer">Redirect to another offer</option>
+                                                                    <option value="custom">Custom URL</option>
+                                                                </select>
+                                                            </div>
+                                                            {assignment.fallback_type === 'custom' ? (
+                                                                <div className="form-group">
+                                                                    <label className="form-label required">Custom URL</label>
+                                                                    <input
+                                                                        type="url"
+                                                                        className="form-control"
+                                                                        value={assignment.fallback_url}
+                                                                        onChange={(e) => handlePublisherChange(index, 'fallback_url', e.target.value)}
+                                                                        placeholder="https://..."
+                                                                        required
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <div className="form-group">
+                                                                    <label className="form-label required">Fallback offer</label>
+                                                                    <select
+                                                                        className="form-control"
+                                                                        value={assignment.fallback_offer_id}
+                                                                        onChange={(e) => handlePublisherChange(index, 'fallback_offer_id', e.target.value)}
+                                                                        required
+                                                                    >
+                                                                        <option value="">Select offer…</option>
+                                                                        {(offers.filter(o => {
+                                                                            const id = String(o.id);
+                                                                            const assignedIds = assignedOffersByPublisher[assignment.publisher_id] || [];
+                                                                            if (id === String(assignment.fallback_offer_id)) return true;
+                                                                            if (id === String(selectedOffer)) return false;
+                                                                            return assignedIds.includes(id);
+                                                                        })).map(offer => (
+                                                                                <option key={offer.id} value={offer.id}>
+                                                                                    #{offer.public_offer_id ?? offer.id} — {offer.name}
+                                                                                </option>
+                                                                            ))}
+                                                                    </select>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <p style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
+                                                            Only offers this publisher is already assigned to (excluding the offer above). If the list is empty, assign them to the fallback offer first, then return here. Clicks after redirect are counted on the fallback offer only.
+                                                        </p>
+                                                    </div>
+                                                )}
 
                                                 <div className="form-group">
                                                     <label className="form-label">Callback URL</label>

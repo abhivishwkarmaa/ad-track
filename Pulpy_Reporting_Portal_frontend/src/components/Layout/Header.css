@@ -152,23 +152,6 @@
     transform: scale(0.95);
 }
 
-.theme-toggle-btn {
-    color: var(--text-secondary) !important;
-}
-
-.theme-toggle-btn:hover {
-    color: var(--primary-color) !important;
-    background: var(--bg-primary) !important;
-}
-
-.theme-toggle-btn svg {
-    transition: transform var(--transition-fast);
-}
-
-.theme-toggle-btn:active svg {
-    transform: rotate(180deg);
-}
-
 .header-icon-btn svg {
     width: 22px;
     height: 22px;

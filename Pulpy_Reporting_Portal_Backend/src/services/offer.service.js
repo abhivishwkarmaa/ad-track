@@ -1,5 +1,6 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { normalizeMysqlUtcDatetime } from '../utils/mysqlUtcRange.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
@@ -182,7 +183,7 @@ class OfferService {
           offer_currency, country,
           advertiser_model, advertiser_amount,
           affiliate_model, affiliate_amount,
-          offer_url, preview_url, token_type, macros_json,
+          offer_url, preview_url, billing_flow, carrier_name, billing_type, token_type, macros_json,
           start_date, end_date, start_time, end_time,
           ip_action, ip_list, country_action, country_list,
           device_targeting_json, device_action,
@@ -201,7 +202,7 @@ class OfferService {
           ?, ?, ?, ?, ?,
           ?, ?,
           ?, ?, ?, ?,
-          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?,
           ?, ?,
           ?, ?,
@@ -235,6 +236,9 @@ class OfferService {
         data.affiliate_amount,
         data.offer_url,
         data.preview_url || null,
+        data.billing_flow || null,
+        data.carrier_name || null,
+        data.billing_type || null,
         data.token_type || null,
         toJsonOrNull(data.macros_json),
         data.start_date || null,
@@ -394,6 +398,9 @@ class OfferService {
         'affiliate_amount',
         'offer_url',
         'preview_url',
+        'billing_flow',
+        'carrier_name',
+        'billing_type',
         'token_type',
         'macros_json',
         'start_date',
@@ -536,7 +543,7 @@ class OfferService {
       const publicQuery = `
         SELECT * FROM (
           SELECT 
-            o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
+            o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.billing_flow, o.carrier_name, o.billing_type, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
             (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
           FROM offers o 
           WHERE o.tenant_id = ?
@@ -554,7 +561,7 @@ class OfferService {
     const lookupId = internalOnly ? internalId : id;
     let query = `
       SELECT 
-        o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
+        o.id, o.advertiser_id, o.tenant_id, o.public_offer_id, o.name, o.description, o.category, o.status, o.offer_visibility, o.offer_currency, o.country, o.advertiser_model, o.advertiser_amount, o.affiliate_model, o.affiliate_amount, o.offer_url, o.preview_url, o.billing_flow, o.carrier_name, o.billing_type, o.token_type, o.macros_json, o.start_date, o.end_date, o.start_time, o.end_time, o.ip_action, o.ip_list, o.country_action, o.country_list, o.device_targeting_json, o.device_action, o.os_targeting_json, o.os_action, o.browser_targeting_json, o.browser_action, o.isp_targeting_json, o.carrier_targeting_json, o.city_targeting_json, o.capping_type, o.capping_duration, o.capping_action, o.fallback_type, o.daily_cap, o.monthly_cap, o.total_cap, o.conversion_cap, o.capping_conversions_duration, o.budget_cap, o.advertiser_capping_budget_duration, o.advertiser_capping_budget_amount, o.advertiser_over_capping, o.affiliate_over_capping, o.cap_action, o.fallback_enabled, o.fallback_url, o.fallback_offer_id, o.advertiser_postback_url, o.advertiser_postback_method, o.advertiser_postback_macros_json, o.system_postback_url, o.system_postback_method, o.system_postback_macros_json, o.created_at, o.updated_at,
         (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id
       FROM offers o WHERE o.id = ?
     `;
@@ -738,8 +745,19 @@ class OfferService {
 
       const dateFrom = filters?.date_from || null;
       const dateTo = filters?.date_to || null;
-      const rangeStart = filters?.datetime_from || (dateFrom ? `${dateFrom} 00:00:00` : null);
-      const rangeEndExclusive = filters?.datetime_to || (dateTo ? `${dateTo} 23:59:59` : null);
+      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rs = normalizeMysqlUtcDatetime(filters?.range_start_utc);
+      const re = normalizeMysqlUtcDatetime(filters?.range_end_utc);
+      let rangeStart;
+      let rangeEndExclusive;
+      if (rs && re) {
+        rangeStart = rs;
+        rangeEndExclusive = re;
+      } else {
+        rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+        rangeEndExclusive = dateTo ? toUtcIstEnd(dateTo) : null;
+      }
 
       const buildTimeFilteredWhere = (tableAlias = '') => {
         const prefix = tableAlias ? `${tableAlias}.` : '';
@@ -949,8 +967,19 @@ class OfferService {
 
       const dateFrom = filters?.date_from || null;
       const dateTo = filters?.date_to || null;
-      const rangeStart = filters?.datetime_from || (dateFrom ? `${dateFrom} 00:00:00` : null);
-      const rangeEnd = filters?.datetime_to || (dateTo ? `${dateTo} 23:59:59` : null);
+      const toUtcIstStart = (ymd) => new Date(`${ymd}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const toUtcIstEnd = (ymd) => new Date(`${ymd}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rs = normalizeMysqlUtcDatetime(filters?.range_start_utc);
+      const re = normalizeMysqlUtcDatetime(filters?.range_end_utc);
+      let rangeStart;
+      let rangeEnd;
+      if (rs && re) {
+        rangeStart = rs;
+        rangeEnd = re;
+      } else {
+        rangeStart = dateFrom ? toUtcIstStart(dateFrom) : null;
+        rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
+      }
 
       // Assigned publishers for this offer + offer-scoped performance metrics (dashboard-style)
       let query = `SELECT 

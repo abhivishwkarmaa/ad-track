@@ -10,7 +10,7 @@ const DEFAULT_LOCALE = 'en-IN';
  * DB stores IST wall time; DATETIME strings like "2026-03-22 14:35:24" are interpreted as Asia/Kolkata.
  * Browsers often parse space-separated datetimes incorrectly — normalize to UTC ISO.
  */
-function parseDate(value) {
+export function parseDate(value) {
     if (value === null || value === undefined || value === '') return null;
     if (value instanceof Date) {
         return Number.isNaN(value.getTime()) ? null : value;
@@ -239,4 +239,33 @@ export function formatExactHourBucketIST(dateGroupValue, hour) {
     const b = formatISTDateTimeNumeric(end);
     if (!a || !b) return null;
     return `${a} → ${b}`;
+}
+
+/** Long-form calendar date in any IANA zone (e.g. report timezone header). */
+export function formatDateInTimeZone(value, timeZone, options = {}, locale = DEFAULT_LOCALE) {
+    const date = value instanceof Date ? value : parseDate(value);
+    if (!date) return '';
+    return date.toLocaleDateString(locale, {
+        timeZone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        ...options,
+    });
+}
+
+export function formatDateTimeInTimeZone(value, timeZone, options = {}, locale = DEFAULT_LOCALE) {
+    const date = value instanceof Date ? value : parseDate(value);
+    if (!date) return '';
+    return date.toLocaleString(locale, {
+        timeZone,
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        ...options,
+    });
 }

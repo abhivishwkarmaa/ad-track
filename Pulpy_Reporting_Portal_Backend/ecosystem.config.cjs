@@ -3,7 +3,7 @@ module.exports = {
     {
       name: 'Pulpy',
       script: 'src/server.js',
-      instances: 'max',
+      instances: 2,
       exec_mode: 'cluster',
 
       env: {
@@ -77,6 +77,31 @@ module.exports = {
 
       out_file: 'logs/stats-worker-out.log',
       error_file: 'logs/stats-worker-error.log',
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
+    },
+
+    {
+      name: 'reporting-stats-worker',
+      script: 'reporting-stats-worker.js',
+      instances: 1,
+      exec_mode: 'fork',
+
+      env: {
+        NODE_ENV: 'production',
+        PROCESS_TYPE: 'worker'
+      },
+      env_development: {
+        NODE_ENV: 'development',
+        PROCESS_TYPE: 'worker'
+      },
+
+      max_memory_restart: '300M',
+      max_restarts: 5,
+      min_uptime: '30s',
+
+      out_file: 'logs/reporting-stats-worker-out.log',
+      error_file: 'logs/reporting-stats-worker-error.log',
       merge_logs: true,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
     },

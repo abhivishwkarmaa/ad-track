@@ -32,6 +32,8 @@ function EditAssignment() {
     const [assignment, setAssignment] = useState(null);
     const [offers, setOffers] = useState([]);
     const [publishers, setPublishers] = useState([]);
+    /** Internal offer_ids this publisher already has an active assignment for (for fallback-offer picker). */
+    const [publisherAssignedOfferIds, setPublisherAssignedOfferIds] = useState([]);
     const [formData, setFormData] = useState({
         offer_id: '',
         publisher_id: '',
@@ -41,6 +43,9 @@ function EditAssignment() {
         capping_duration: 'daily',
         capping_amount: '',
         capping_action: 'stop',
+        fallback_type: 'offer',
+        fallback_url: '',
+        fallback_offer_id: '',
         callback_url: '',
         offer_url: '',
         notes: '',
@@ -65,6 +70,28 @@ function EditAssignment() {
     }, [refreshKey]);
 
     useEffect(() => {
+        const loadPublisherAssignments = async () => {
+            const pubId = formData.publisher_id;
+            if (!pubId) {
+                setPublisherAssignedOfferIds([]);
+                return;
+            }
+            try {
+                const res = await assignmentsAPI.getAssignments({ publisher_id: pubId, status: 'active' });
+                if (res.success && Array.isArray(res.data)) {
+                    setPublisherAssignedOfferIds(res.data.map(a => String(a.offer_id)));
+                } else {
+                    setPublisherAssignedOfferIds([]);
+                }
+            } catch (err) {
+                console.error('Error loading publisher assignments for fallback offers:', err);
+                setPublisherAssignedOfferIds([]);
+            }
+        };
+        loadPublisherAssignments();
+    }, [formData.publisher_id, refreshKey]);
+
+    useEffect(() => {
         const fetchAssignment = async () => {
             try {
                 setLoadingAssignment(true);
@@ -80,6 +107,9 @@ function EditAssignment() {
                         capping_type: data.capping_type || 'none',
                         capping_duration: data.capping_duration || 'daily',
                         capping_action: data.capping_action || 'stop',
+                        fallback_type: data.fallback_type || 'offer',
+                        fallback_url: data.fallback_url || '',
+                        fallback_offer_id: data.fallback_offer_id?.toString() || '',
                         capping_amount: data.capping_type !== 'none' ? data.capping_amount : '',
                         callback_url: data.callback_url || '',
                         offer_url: data.offer_url || '',
@@ -132,6 +162,11 @@ function EditAssignment() {
                 capping_duration: formData.capping_duration,
                 capping_action: formData.capping_action,
                 capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+                fallback_type: formData.capping_action === 'fallback' ? formData.fallback_type : null,
+                fallback_url: formData.capping_action === 'fallback' && formData.fallback_type === 'custom' ? (formData.fallback_url || null) : null,
+                fallback_offer_id: formData.capping_action === 'fallback' && formData.fallback_type === 'offer' && formData.fallback_offer_id
+                    ? parseInt(formData.fallback_offer_id, 10)
+                    : null,
 
                 callback_url: formData.callback_url || null,
                 offer_url: formData.offer_url || null, // Will be mapped to destination_url in backend
@@ -161,6 +196,13 @@ function EditAssignment() {
             </div>
         );
     }
+
+    const fallbackOfferOptions = offers.filter(offer => {
+        const id = String(offer.id);
+        if (id === String(formData.fallback_offer_id)) return true;
+        if (id === String(formData.offer_id)) return false;
+        return publisherAssignedOfferIds.includes(id);
+    });
 
     return (
         <div className="assignment-page">
@@ -286,11 +328,64 @@ function EditAssignment() {
                                         >
                                             <option value="stop">Stop Traffic</option>
                                             <option value="reject">Reject Conversions</option>
+                                            <option value="fallback">Fallback (redirect)</option>
                                         </select>
                                     </div>
                                 </>
                             )}
                         </div>
+
+                        {formData.capping_type !== 'none' && formData.capping_action === 'fallback' && (
+                            <div className="assignment-form-section" style={{ marginTop: '16px' }}>
+                                <h3 className="assignment-form-section-title">Publisher cap — fallback</h3>
+                                <div className="assignment-form-row two-col">
+                                    <div className="form-group">
+                                        <label className="form-label">Fallback type</label>
+                                        <select
+                                            className="form-control"
+                                            value={formData.fallback_type}
+                                            onChange={(e) => handleChange('fallback_type', e.target.value)}
+                                        >
+                                            <option value="offer">Redirect to another offer</option>
+                                            <option value="custom">Custom URL</option>
+                                        </select>
+                                    </div>
+                                    {formData.fallback_type === 'custom' ? (
+                                        <div className="form-group">
+                                            <label className="form-label required">Custom URL</label>
+                                            <input
+                                                type="url"
+                                                className="form-control"
+                                                value={formData.fallback_url}
+                                                onChange={(e) => handleChange('fallback_url', e.target.value)}
+                                                placeholder="https://..."
+                                                required
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="form-group">
+                                            <label className="form-label required">Fallback offer</label>
+                                            <select
+                                                className="form-control"
+                                                value={formData.fallback_offer_id}
+                                                onChange={(e) => handleChange('fallback_offer_id', e.target.value)}
+                                                required
+                                            >
+                                                <option value="">Select offer…</option>
+                                                {fallbackOfferOptions.map(offer => (
+                                                    <option key={offer.id} value={offer.id}>
+                                                        #{offer.public_offer_id ?? offer.id} — {offer.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="form-hint" style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
+                                    Only offers this publisher is already assigned to (active) are listed. Clicks after redirect are counted on the fallback offer only — not on this offer.
+                                </p>
+                            </div>
+                        )}
 
                         <div className="form-group">
                             <label className="form-label">Callback URL</label>

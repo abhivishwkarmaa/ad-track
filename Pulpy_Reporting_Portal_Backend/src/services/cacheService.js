@@ -5,6 +5,9 @@ import assignmentService from './assignmentService.js';
 import logger from '../utils/logger.js';
 import pool from '../db/connection.js';
 
+/** publisher_offers columns needed for tracking (capping + publisher fallback redirect) */
+export const PUBLISHER_OFFERS_TRACKING_COLUMNS = `id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_type, capping_duration, capping_action, fallback_type, fallback_url, fallback_offer_id, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes`;
+
 const TTL = {
     OFFER: 300,        // 5 Minutes (Reference data doesn't change often)
     PUBLISHER: 300,
@@ -67,7 +70,7 @@ export class CacheService {
         } catch (e) { }
 
         // ✅ CRITICAL: Add tenant_id filtering to query
-        let query = 'SELECT id, public_assignment_id, publisher_id, offer_id, tenant_id, payout_override, cap_override, conversion_approval_percentage, capping_budget_duration, capping_budget_amount, capping_conversions_duration, capping_conversions_amount, callback_url, destination_url, status, assigned_at, updated_at, notes FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?';
+        let query = `SELECT ${PUBLISHER_OFFERS_TRACKING_COLUMNS} FROM publisher_offers WHERE publisher_id = ? AND offer_id = ? AND status = ?`;
         const params = [publisherId, offerId, 'active'];
 
         if (tenantId) {
@@ -83,25 +86,64 @@ export class CacheService {
     }
 
     // --- Capping Logic (Redis Counters) ---
+    // Keys: cap:{tenantId}:{offer|publisher}:{entityId}:{budget|conversion}:{daily|weekly|monthly}:{period}
+    // Offer and publisher (assignment) share the same Redis counter pattern + DB hydrate + incr.
+
+    /**
+     * Publisher rows may use legacy split columns (capping_budget_* / capping_conversions_*).
+     * Redis HGETALL returns strings — normalize so cap checks match offer-style behaviour.
+     */
+    _normalizeCapEntity(entityType, obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        if (entityType !== 'publisher') return obj;
+
+        const o = { ...obj };
+        const ct = o.capping_type;
+        if (!o.capping_duration) {
+            if (ct === 'budget' && o.capping_budget_duration) {
+                o.capping_duration = o.capping_budget_duration;
+            } else if (ct === 'conversion' && o.capping_conversions_duration) {
+                o.capping_duration = o.capping_conversions_duration;
+            }
+        }
+        if (ct === 'budget') {
+            if (o.capping_amount == null || o.capping_amount === '') {
+                const v = o.capping_budget_amount;
+                if (v != null && v !== '') o.capping_amount = parseFloat(v);
+            }
+        } else if (ct === 'conversion') {
+            if (o.capping_amount == null || o.capping_amount === '') {
+                const v = o.capping_conversions_amount;
+                if (v != null && v !== '') o.capping_amount = parseInt(v, 10);
+            }
+        }
+        return o;
+    }
+
+    _capKeyTTL(duration) {
+        if (duration === 'weekly') return 604800;
+        if (duration === 'monthly') return 2678400;
+        return 86400;
+    }
 
     async getCapStatus(entityType, entityId, obj, tenantId) {
-        // entityType: 'offer' or 'publisher'
+        // entityType: 'offer' or 'publisher' (publisher = publisher_offers.id / assignment id)
         // capType: 'budget' or 'conversion'
         // duration: 'daily', 'weekly', 'monthly'
 
-        const capType = obj.capping_type;
-        const duration = obj.capping_duration;
+        const o = this._normalizeCapEntity(entityType, obj);
+        const capType = o.capping_type;
+        const duration = o.capping_duration;
 
         let limit = 0;
         if (entityType === 'offer') {
-            if (capType === 'budget') limit = parseFloat(obj.budget_cap || 0);
-            else if (capType === 'conversion') limit = parseInt(obj.conversion_cap || 0);
+            if (capType === 'budget') limit = parseFloat(o.budget_cap || 0);
+            else if (capType === 'conversion') limit = parseInt(o.conversion_cap || 0);
         } else {
-            // Publisher Assignment (Support both raw DB rows and formatted objects)
             if (capType === 'budget') {
-                limit = parseFloat(obj.capping_amount ?? obj.capping_budget_amount ?? 0);
+                limit = parseFloat(o.capping_amount ?? o.capping_budget_amount ?? 0);
             } else if (capType === 'conversion') {
-                limit = parseInt(obj.capping_amount ?? obj.capping_conversions_amount ?? 0);
+                limit = parseInt(o.capping_amount ?? o.capping_conversions_amount ?? 0, 10);
             }
         }
 
@@ -114,11 +156,8 @@ export class CacheService {
 
         if (current === null) {
             current = await this._hydrateCapFromDB(entityType, entityId, capType, duration, tenantId);
-            // Set TTL based on duration
-            let ttl = 86400; // default 1 day
-            if (duration === 'weekly') ttl = 604800;
-            if (duration === 'monthly') ttl = 2678400;
-            await redis.setex(key, ttl, current);
+            const ttl = this._capKeyTTL(duration);
+            await redis.setex(key, ttl, String(current));
         }
 
         return {
@@ -129,8 +168,9 @@ export class CacheService {
     }
 
     async incrementCap(entityType, entityId, obj, amount, tenantId) {
-        const capType = obj.capping_type;
-        const duration = obj.capping_duration;
+        const o = this._normalizeCapEntity(entityType, obj);
+        const capType = o.capping_type;
+        const duration = o.capping_duration;
 
         if (!capType || capType === 'none' || !duration) return;
 
@@ -149,13 +189,11 @@ export class CacheService {
         if (incrementValue <= 0) return;
 
         const key = this._getCapKey(entityType, entityId, capType, duration, tenantId);
+        const ttl = this._capKeyTTL(duration);
 
-        // Update Redis
         try {
             await redis.incrbyfloat(key, incrementValue);
-            // Ensure TTL is refreshed or set if key was missing (concurrently created?)
-            // Usually we rely on init. If we incr a non-existent key, it starts at 0+inc.
-            // We should ensure extensive TTL if new. Not critical if short overlap.
+            await redis.expire(key, ttl);
         } catch (e) {
             logger.warn(`Redis incr cap error: ${e.message}`);
         }

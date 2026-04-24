@@ -143,7 +143,7 @@ export async function authenticateAdmin(request, reply) {
     } catch (error) {
       // If tenant_id column doesn't exist, fall back to query without it
       if (error.code === 'ER_BAD_FIELD_ERROR' && (error.message.includes('tenant_id') || error.message.includes('must_change_password'))) {
-        logger.warn('tenant_id or must_change_password column not found in admin_users table. Please run migration.');
+        logger.warn('tenant_id or must_change_password column not found in admin_users table. Database schema update required.');
         [rows] = await pool.query(
           'SELECT id, email, name, role FROM admin_users WHERE id = ? AND email = ?',
           [decoded.id, decoded.email]

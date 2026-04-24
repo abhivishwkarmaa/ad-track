@@ -63,49 +63,6 @@
   --radius-xl: 16px;
 }
 
-/* Dark Theme - Pure black nahi, accents bright */
-[data-theme="dark"] {
-  /* Primary Colors - Same as light mode for brand consistency */
-  --primary-color: #1BB6B8;
-  --primary-dark: #159a9c;
-  --primary-light: #2dd4d6;
-  --primary-gradient: linear-gradient(135deg, #1BB6B8 0%, #2dd4d6 100%);
-
-  /* Secondary Colors */
-  --secondary-color: #9BA3AC;
-  --secondary-dark: #7a828b;
-  --secondary-light: #bcc4cd;
-
-  /* Accent Colors */
-  --success-color: #1BB6B8;
-  --warning-color: #E9A248;
-  --danger-color: #A85D5D;
-  --info-color: #1BB6B8;
-
-  /* Background Colors - Dark Mode */
-  --bg-primary: #000000;
-  --bg-secondary: #121212;
-  --bg-sidebar: #000000;
-  --bg-sidebar-hover: #1a1a1a;
-  --bg-sidebar-active: #222222;
-
-  /* Text Colors - Dark Mode */
-  --text-primary: #ffffff;
-  --text-secondary: #b0b3b8;
-  --text-muted: #65676b;
-  --text-white: #ffffff;
-  --text-sidebar: #ffffff;
-
-  /* Border Colors - Dark Mode - Subtle separators */
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-light: rgba(255, 255, 255, 0.05);
-
-  /* Shadow */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
-}
-
 * {
   margin: 0;
   padding: 0;
@@ -128,11 +85,6 @@ body {
 
 /* Ensure body updates when theme changes */
 [data-theme="light"] body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-[data-theme="dark"] body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
 }

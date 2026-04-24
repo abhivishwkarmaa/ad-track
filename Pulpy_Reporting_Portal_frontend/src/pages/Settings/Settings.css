@@ -57,6 +57,14 @@
     border-bottom: 1px solid var(--border-light);
 }
 
+.settings-app-help {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 16px;
+    max-width: 640px;
+}
+
 .settings-form-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

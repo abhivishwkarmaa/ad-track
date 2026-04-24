@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { authAPI } from '../../services/api';
 import { SUPPORTED_TIMEZONES, getUserTimezone } from '../../utils/userTimezone';
+import { REPORT_TIMEZONE_OPTIONS } from '../../utils/reportTimezone';
+import { resetAppClientData } from '../../utils/appClientLifecycle.js';
 import './Settings.css';
 
 function UpdateProfile() {
     const { user, updateProfile } = useAuth();
     const toast = useToast();
+    const { reportTimezone, setReportTimezone } = useReportTimezone();
     const [loading, setLoading] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -37,7 +41,7 @@ function UpdateProfile() {
         try {
             await updateProfile(formData);
             toast.success('Profile updated successfully!');
-        } catch (error) {
+        } catch {
             toast.error('Failed to update profile');
         } finally {
             setLoading(false);
@@ -177,6 +181,32 @@ function UpdateProfile() {
                     </div>
                 </form>
 
+                <div className="settings-form-section" style={{ marginTop: '8px' }}>
+                    <h3 className="settings-form-section-title">Reports timezone</h3>
+                    <p style={{ color: '#666', marginBottom: '16px', fontSize: '14px' }}>
+                        Dashboard, detailed reports, and date ranges use this timezone. It is saved on this device.
+                    </p>
+                    <div className="settings-form-row" style={{ maxWidth: '400px' }}>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="profile-report-timezone">
+                                Timezone
+                            </label>
+                            <select
+                                id="profile-report-timezone"
+                                className="form-control"
+                                value={reportTimezone}
+                                onChange={(e) => setReportTimezone(e.target.value)}
+                            >
+                                {REPORT_TIMEZONE_OPTIONS.map((option) => (
+                                    <option key={option.id} value={option.id}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
 
                 {/* Change Password with OTP */}
@@ -243,6 +273,22 @@ function UpdateProfile() {
                             </div>
                         </div>
                     )}
+                </div>
+
+                <hr style={{ margin: '30px 0', border: '0', borderTop: '1px solid #eee' }} />
+
+                <div className="settings-form-section">
+                    <h3 className="settings-form-section-title">App &amp; browser</h3>
+                    <p className="settings-app-help">
+                        The app also refreshes on its own after you have been idle for a while so updates load without you doing anything. If something still looks wrong on this device, you can clear saved app data—you will need to sign in again.
+                    </p>
+                    <button
+                        type="button"
+                        className="btn btn-outline"
+                        onClick={() => resetAppClientData()}
+                    >
+                        Clear app data and sign out
+                    </button>
                 </div>
             </div>
         </div>

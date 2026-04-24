@@ -105,19 +105,6 @@
     }
 }
 
-/* Dark mode adjustments */
-[data-theme="dark"] .refresh-button {
-    box-shadow:
-        0 4px 12px rgba(27, 182, 184, 0.3),
-        0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="dark"] .refresh-button:hover {
-    box-shadow:
-        0 6px 20px rgba(27, 182, 184, 0.4),
-        0 4px 8px rgba(0, 0, 0, 0.4);
-}
-
 /* Accessibility - Focus state */
 .refresh-button:focus {
     outline: none;

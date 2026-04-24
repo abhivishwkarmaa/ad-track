@@ -3,7 +3,15 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
-import { formatDateIST } from '../../utils/dateTime';
+import { formatDateInTimeZone } from '../../utils/dateTime';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
+import {
+    addDaysToYmdInTimeZone,
+    buildDashboardApiParams,
+    countInclusiveYmdRange,
+    userRangeYmdToBackendIstRange,
+    userRangeYmdToBackendUtcMysqlRange,
+} from '../../utils/reportTimezone';
 import { getTimelineRange } from '../../utils/timelineRange';
 import { getUserTimezone } from '../../utils/userTimezone';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
@@ -251,6 +259,7 @@ const Pagination = ({ current, total, limit, onPageChange }) => {
 
 // --- MAIN DASHBOARD COMPONENT ---
 function Dashboard() {
+    const { timezoneRevision } = useReportTimezone();
     return (
         <>
             <style>
@@ -262,7 +271,8 @@ function Dashboard() {
                     .dashboard-card { position: relative; overflow: hidden; }
                 `}
             </style>
-            <DashboardContent />
+            {/* Remount when report timezone changes so all ranges + fetches align (Settings saves revision). */}
+            <DashboardContent key={timezoneRevision} />
         </>
     );
 }
@@ -270,6 +280,7 @@ function Dashboard() {
 function DashboardContent() {
     const { user } = useAuth();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
 
     const [dateFilter, setDateFilter] = useState('today');
     const [customRange, setCustomRange] = useState({ from: '', to: '' });
@@ -308,20 +319,16 @@ function DashboardContent() {
 
     // Date range calculator (current period + previous period for comparison)
     const { dateRange, previousRange, periodLabels } = useMemo(() => {
-        const current = getTimelineRange(dateFilter, customRange);
-        const activeTimezone = getUserTimezone();
-        const fromDate = current.from ? DateTime.fromISO(current.from, { zone: activeTimezone }) : null;
-        const toDate = current.to ? DateTime.fromISO(current.to, { zone: activeTimezone }) : null;
+        const current = getTimelineRange(dateFilter, customRange, reportTimezone);
+        const fromYmd = current.from;
+        const toYmd = current.to;
 
         let previous = null;
-        if (fromDate?.isValid && toDate?.isValid && toDate >= fromDate) {
-            const days = Math.max(1, Math.floor(toDate.diff(fromDate, 'days').days) + 1);
-            const prevTo = fromDate.minus({ days: 1 });
-            const prevFrom = prevTo.minus({ days: days - 1 });
-            previous = {
-                from: prevFrom.toFormat('yyyy-LL-dd'),
-                to: prevTo.toFormat('yyyy-LL-dd'),
-            };
+        if (fromYmd && toYmd) {
+            const n = countInclusiveYmdRange(fromYmd, toYmd, reportTimezone);
+            const prevToYmd = addDaysToYmdInTimeZone(fromYmd, -1, reportTimezone);
+            const prevFromYmd = addDaysToYmdInTimeZone(prevToYmd, -(n - 1), reportTimezone);
+            previous = { from: prevFromYmd, to: prevToYmd };
         }
 
         const labels = {
@@ -341,10 +348,68 @@ function DashboardContent() {
             previousRange: previous,
             periodLabels: labelsForPeriod
         };
-    }, [dateFilter, customRange, user?.timezone]);
+    }, [dateFilter, customRange, reportTimezone]);
+
+    const apiDateRange = useMemo(
+        () => userRangeYmdToBackendIstRange(dateRange.from, dateRange.to, reportTimezone),
+        [dateRange.from, dateRange.to, reportTimezone]
+    );
+
+    const apiPreviousRange = useMemo(
+        () =>
+            previousRange
+                ? userRangeYmdToBackendIstRange(previousRange.from, previousRange.to, reportTimezone)
+                : null,
+        [previousRange, reportTimezone]
+    );
+
+    const utcRange = useMemo(
+        () => userRangeYmdToBackendUtcMysqlRange(dateRange.from, dateRange.to, reportTimezone),
+        [dateRange.from, dateRange.to, reportTimezone]
+    );
+
+    const previousUtcRange = useMemo(
+        () =>
+            previousRange
+                ? userRangeYmdToBackendUtcMysqlRange(previousRange.from, previousRange.to, reportTimezone)
+                : null,
+        [previousRange, reportTimezone]
+    );
 
     const groupBy = (dateFilter === 'today' || dateFilter === 'yesterday') ? 'hour' : 'day';
-    const baseParams = { date_from: dateRange.from, date_to: dateRange.to, limit: 10 };
+
+    const baseParams = useMemo(
+        () =>
+            buildDashboardApiParams(
+                {
+                    date_from: apiDateRange.date_from,
+                    date_to: apiDateRange.date_to,
+                    ...(utcRange.range_start_utc && utcRange.range_end_utc
+                        ? {
+                            range_start_utc: utcRange.range_start_utc,
+                            range_end_utc: utcRange.range_end_utc,
+                        }
+                        : {}),
+                    ...(previousUtcRange?.range_start_utc && previousUtcRange?.range_end_utc
+                        ? {
+                            previous_range_start_utc: previousUtcRange.range_start_utc,
+                            previous_range_end_utc: previousUtcRange.range_end_utc,
+                        }
+                        : {}),
+                    limit: 10,
+                },
+                reportTimezone
+            ),
+        [
+            apiDateRange.date_from,
+            apiDateRange.date_to,
+            utcRange.range_start_utc,
+            utcRange.range_end_utc,
+            previousUtcRange?.range_start_utc,
+            previousUtcRange?.range_end_utc,
+            reportTimezone,
+        ]
+    );
 
     // 1. Core Dashboard Data (Cards, Charts, Summary) - Depends on Date Range
     useEffect(() => {
@@ -384,8 +449,22 @@ function DashboardContent() {
             .catch(err => mountCheck() && console.error('Summary error:', err))
             .finally(() => mountCheck() && setLoadingSummary(false));
 
-        if (previousRange) {
-            dashboardAPI.getPerformanceSummary({ date_from: previousRange.from, date_to: previousRange.to })
+        if (apiPreviousRange?.date_from && apiPreviousRange?.date_to) {
+            dashboardAPI.getPerformanceSummary(
+                buildDashboardApiParams(
+                    {
+                        date_from: apiPreviousRange.date_from,
+                        date_to: apiPreviousRange.date_to,
+                        ...(previousUtcRange?.range_start_utc && previousUtcRange?.range_end_utc
+                            ? {
+                                range_start_utc: previousUtcRange.range_start_utc,
+                                range_end_utc: previousUtcRange.range_end_utc,
+                            }
+                            : {}),
+                    },
+                    reportTimezone
+                )
+            )
                 .then(res => mountCheck() && res.success && setSummaryPrevious(res.data || null))
                 .catch(err => mountCheck() && console.error('Summary previous error:', err));
         } else {
@@ -393,7 +472,7 @@ function DashboardContent() {
         }
 
         // Fetch Live Offers (Static limit)
-        dashboardAPI.getLiveOffers({ limit: 5 })
+        dashboardAPI.getLiveOffers(buildDashboardApiParams({ limit: 5 }, reportTimezone))
             .then(res => mountCheck() && res.success && setLiveOffers(res.data || []))
             .catch(err => mountCheck() && console.error('Live offers error:', err))
             .finally(() => mountCheck() && setLoadingLiveOffers(false));
@@ -420,8 +499,11 @@ function DashboardContent() {
             });
 
         // Fetch Comparison
-        if (previousRange) {
-            const prevParams = { previous_from: previousRange.from, previous_to: previousRange.to };
+        if (apiPreviousRange?.date_from && apiPreviousRange?.date_to) {
+            const prevParams = {
+                previous_from: apiPreviousRange.date_from,
+                previous_to: apiPreviousRange.date_to,
+            };
             dashboardAPI.getPerformanceComparison({ ...baseParams, ...prevParams, group_by: groupBy })
                 .then(res => mountCheck() && res.success && setPerformanceComparison(res.data || []))
                 .catch(err => mountCheck() && console.error('Comparison error:', err))
@@ -435,7 +517,21 @@ function DashboardContent() {
             cancelled = true;
             clearTimeout(eventSummaryTimeout);
         };
-    }, [dateRange.from, dateRange.to, previousRange?.from, previousRange?.to, refreshKey]);
+    }, [
+        apiDateRange.date_from,
+        apiDateRange.date_to,
+        apiPreviousRange?.date_from,
+        apiPreviousRange?.date_to,
+        utcRange.range_start_utc,
+        utcRange.range_end_utc,
+        previousUtcRange?.range_start_utc,
+        previousUtcRange?.range_end_utc,
+        refreshKey,
+        dateFilter,
+        groupBy,
+        reportTimezone,
+        timezoneRevision,
+    ]);
 
     // 2. Offer Statistics - Depends on sorting and page
     useEffect(() => {
@@ -452,7 +548,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Offer stats error:', err))
             .finally(() => !cancelled && setLoadingOfferStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, offerSort, offerPage, refreshKey, user?.timezone]);
+    }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, offerSort, offerPage, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
 
     // 3. Publisher Statistics - Depends on sorting and page
     useEffect(() => {
@@ -469,7 +565,7 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Publisher stats error:', err))
             .finally(() => !cancelled && setLoadingPublisherStats(false));
         return () => { cancelled = true; };
-    }, [dateRange.from, dateRange.to, pubSort, pubPage, refreshKey, user?.timezone]);
+    }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, pubSort, pubPage, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
 
     const handleOfferSort = (field) => {
         setOfferPage(1); // Reset to page 1 on sort change
@@ -504,12 +600,7 @@ function DashboardContent() {
 
     const cardsData = cards || {};
 
-    const todayStr = formatDateIST(new Date(), {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    }, 'en-US');
+    const todayStr = formatDateInTimeZone(new Date(), reportTimezone, {}, 'en-US');
 
     const statCardsConfig = [
         {

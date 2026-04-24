@@ -136,6 +136,8 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
     const config = {
         ...options,
         credentials: 'include',
+        // Avoid stale dashboard/report data when query string is unchanged (e.g. same IST dates after TZ change).
+        cache: 'no-store',
         headers: {
             ...(needsContentType && { 'Content-Type': 'application/json' }),
             ...(!skipAuth && token && { 'Authorization': `Bearer ${token}` }),

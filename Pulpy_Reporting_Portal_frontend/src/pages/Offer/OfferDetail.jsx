@@ -5,12 +5,20 @@ import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { useAuth } from '../../context/AuthContext';
+import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
-import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
+import { formatDateTimeInTimeZone, parseDate } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import { getTimelineRange } from '../../utils/timelineRange';
 import { getUserTimezone } from '../../utils/userTimezone';
+import {
+    buildDashboardApiParams,
+    formatYmdInTimeZone,
+    REPORT_TIMEZONE_OPTIONS,
+    userRangeYmdToBackendIstRange,
+    userRangeYmdToBackendUtcMysqlRange,
+} from '../../utils/reportTimezone';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -59,6 +67,16 @@ const CopyIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+);
+
+const ShareIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="18" cy="5" r="3" />
+        <circle cx="6" cy="12" r="3" />
+        <circle cx="18" cy="19" r="3" />
+        <line x1="8.7" y1="10.7" x2="15.3" y2="6.3" />
+        <line x1="8.7" y1="13.3" x2="15.3" y2="17.7" />
     </svg>
 );
 
@@ -144,26 +162,13 @@ function OfferDetail() {
         { id: 'custom', label: 'Custom Range' },
     ];
 
-    const toUserYmd = (value, timezone) => {
-        if (!value) return '';
-        const zone = timezone || getUserTimezone();
-        const normalized = String(value).replace(' ', 'T');
-        let dt = DateTime.fromISO(normalized, { zone: 'Asia/Kolkata' });
-        if (!dt.isValid) {
-            dt = DateTime.fromSQL(String(value), { zone: 'Asia/Kolkata' });
-        }
-        if (!dt.isValid) {
-            return '';
-        }
-        return dt.setZone(zone).toISODate();
-    };
-
     const { id } = useParams();
     const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const toast = useToast();
     const { refreshKey } = useRefresh();
+    const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [offer, setOffer] = useState(null);
@@ -200,14 +205,63 @@ function OfferDetail() {
     const selectedTimelineRange = useMemo(() => {
         const activeTimezone = user?.timezone || getUserTimezone();
         if (selectedRange === 'since_created') {
-            const todayInUserTz = DateTime.now().setZone(activeTimezone).startOf('day').toISODate();
-            return {
-                from: toUserYmd(offer?.created_at, activeTimezone) || todayInUserTz,
-                to: todayInUserTz,
-            };
+        if (selectedRange === 'since_created') {
+            const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
+            const fromUserYmd = offer?.created_at
+                ? formatYmdInTimeZone(new Date(offer.created_at), reportTimezone)
+                : toUserYmd;
+            let from = fromUserYmd;
+            let to = toUserYmd;
+            if (from > to) [from, to] = [to, from];
+            return { from, to };
         }
-        return getTimelineRange(selectedRange, customRange);
-    }, [selectedRange, customRange, offer?.created_at, user?.timezone]);
+        return getTimelineRange(selectedRange, customRange, reportTimezone);
+    }, [selectedRange, customRange, offer?.created_at, reportTimezone]);
+
+    const statsApiRange = useMemo(() => {
+        if (selectedRange === 'since_created') {
+            const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
+            const fromUserYmd = offer?.created_at
+                ? formatYmdInTimeZone(new Date(offer.created_at), reportTimezone)
+                : toUserYmd;
+            let a = fromUserYmd;
+            let b = toUserYmd;
+            if (a > b) [a, b] = [b, a];
+            return userRangeYmdToBackendIstRange(a, b, reportTimezone);
+        }
+        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
+            return { date_from: '', date_to: '' };
+        }
+        return userRangeYmdToBackendIstRange(
+            selectedTimelineRange.from,
+            selectedTimelineRange.to,
+            reportTimezone
+        );
+    }, [selectedRange, selectedTimelineRange, offer?.created_at, reportTimezone]);
+
+    const statsUtcRange = useMemo(
+        () =>
+            userRangeYmdToBackendUtcMysqlRange(
+                selectedTimelineRange.from,
+                selectedTimelineRange.to,
+                reportTimezone
+            ),
+        [selectedTimelineRange.from, selectedTimelineRange.to, reportTimezone]
+    );
+
+    const offerStatsQueryParams = useMemo(() => {
+        const base = {
+            date_from: statsApiRange.date_from,
+            date_to: statsApiRange.date_to,
+            ...(statsUtcRange.range_start_utc && statsUtcRange.range_end_utc
+                ? {
+                    range_start_utc: statsUtcRange.range_start_utc,
+                    range_end_utc: statsUtcRange.range_end_utc,
+                }
+                : {}),
+        };
+        return buildDashboardApiParams(base, reportTimezone);
+    }, [statsApiRange.date_from, statsApiRange.date_to, statsUtcRange, reportTimezone]);
 
     useEffect(() => {
         const fetchOfferDetails = async () => {
@@ -246,10 +300,7 @@ function OfferDetail() {
                 setLoadingStats(true);
                 setStats(null);
 
-                const response = await offersAPI.getOfferStats(id, {
-                    date_from: selectedTimelineRange.from,
-                    date_to: selectedTimelineRange.to,
-                });
+                const response = await offersAPI.getOfferStats(id, offerStatsQueryParams);
 
                 if (requestId !== statsRequestRef.current) return;
                 if (response.success) {
@@ -269,7 +320,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to, user?.timezone]);
+    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         if (!id) return;
@@ -282,10 +333,7 @@ function OfferDetail() {
             const requestId = ++publisherStatsRequestRef.current;
             try {
                 setLoadingPublisherStats(true);
-                const response = await offersAPI.getOfferPublisherStats(id, {
-                    date_from: selectedTimelineRange.from,
-                    date_to: selectedTimelineRange.to,
-                });
+                const response = await offersAPI.getOfferPublisherStats(id, offerStatsQueryParams);
 
                 if (requestId !== publisherStatsRequestRef.current) return;
                 if (response.success) {
@@ -305,7 +353,7 @@ function OfferDetail() {
         }, 250);
 
         return () => clearTimeout(timer);
-    }, [id, refreshKey, selectedRange, selectedTimelineRange.from, selectedTimelineRange.to, user?.timezone]);
+    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -405,7 +453,7 @@ function OfferDetail() {
                                 offer_id: assignment.offer_id?.toString() || '',
                                 publisher_id: assignment.publisher_id,
                                 publisher_email: assignment.publisher_email,
-                                payout_override: assignment.payout_override || '',
+                                payout_override: assignment.payout_override ?? null,
                                 conversion_approval_percentage: assignment.conversion_approval_percentage || '',
                                 capping_type: assignment.capping_type || 'none',
                                 capping_duration: assignment.capping_duration || 'daily',
@@ -460,22 +508,82 @@ function OfferDetail() {
 
     const formatDate = (dateString) => {
         if (!dateString) return '-';
-        return formatDateIST(dateString, {
+        const date = parseDate(dateString);
+        if (!date) return '-';
+        return date.toLocaleDateString('en-US', {
+            timeZone: reportTimezone,
             year: 'numeric',
             month: 'short',
-            day: 'numeric'
-        }, 'en-US');
+            day: 'numeric',
+        });
     };
 
     const formatDateTime = (dateString) => {
         if (!dateString) return '-';
-        return formatDateTimeIST(dateString, {
+        return formatDateTimeInTimeZone(dateString, reportTimezone, {
             year: 'numeric',
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
         }, 'en-US');
+    };
+
+    const reportTzLabel =
+        REPORT_TIMEZONE_OPTIONS.find((o) => o.id === reportTimezone)?.label ?? reportTimezone;
+
+    const safeParseJson = (value) => {
+        if (!value) return null;
+        if (typeof value === 'object') return value;
+        try {
+            return JSON.parse(value);
+        } catch {
+            return null;
+        }
+    };
+
+    const buildAssignmentShareText = (offerObj, assignmentObj) => {
+        const conversionModel = offerObj?.advertiser_model || offerObj?.affiliate_model || '-';
+        const country = offerObj?.country || '-';
+        const carrierName = offerObj?.carrier_name && String(offerObj.carrier_name).trim();
+        const carrierJson = safeParseJson(offerObj?.carrier_targeting_json);
+        const carrierFromJson =
+            (carrierJson?.carrier && Array.isArray(carrierJson.carrier) && carrierJson.carrier.length > 0)
+                ? carrierJson.carrier.join(', ')
+                : null;
+        const carrier = carrierName || carrierFromJson || '-';
+
+        const hasDeviceTargeting = !!(safeParseJson(offerObj?.device_targeting_json)?.device?.length);
+        const hasOsTargeting = !!(safeParseJson(offerObj?.os_targeting_json)?.os?.length);
+        const hasBrowserTargeting = !!(safeParseJson(offerObj?.browser_targeting_json)?.browser?.length);
+        const platforms = (!hasDeviceTargeting && !hasOsTargeting && !hasBrowserTargeting) ? 'All platforms' : 'Targeted';
+
+        const payoutOverride = assignmentObj?.payout_override;
+        const hasPayoutOverride =
+            payoutOverride !== null &&
+            payoutOverride !== undefined &&
+            String(payoutOverride).trim() !== '';
+        const payout = hasPayoutOverride ? payoutOverride : (offerObj?.affiliate_amount ?? '-');
+        const description = offerObj?.description || '-';
+        const categories = offerObj?.category || '-';
+        const trackingLink = assignmentObj?.tracking_url || '-';
+        const billingFlow = offerObj?.billing_flow || '-';
+        const billingType = offerObj?.billing_type || '-';
+        
+
+        return [
+            `Offer:  ${offerObj?.name || '-'}`,
+            `Conversion model: ${conversionModel}`,
+            `Country:  ${country}`,
+            `Carrier:  ${carrier}`,
+            `Platforms: ${platforms}`,
+            `Payout: ${payout}`,
+            `Billing flow: ${billingFlow}`,
+            `Billing type: ${billingType}`,
+            `Description: ${description}`,
+            `Categories: ${categories}`,
+            `Tracking link: ${trackingLink}`,
+        ].join('\n');
     };
 
     const formatConversionStatus = (status) => {
@@ -597,7 +705,7 @@ function OfferDetail() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap' }}>
                     <div>
                         <h2 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: '600' }}>Performance Overview</h2>
-                        <div style={{ color: '#64748b', fontSize: '12px' }}>Data as of IST</div>
+                        <div style={{ color: '#64748b', fontSize: '12px' }}>Metrics use {reportTzLabel} day boundaries</div>
                     </div>
                     <TimelineFilter
                         value={selectedRange}
@@ -659,6 +767,18 @@ function OfferDetail() {
                             <span className="detail-value">{offer.offer_currency}</span>
                         </div>
                         <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Billing Flow:</span>
+                            <span className="detail-value">{offer.billing_flow || '-'}</span>
+                        </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Billing Type:</span>
+                            <span className="detail-value">{offer.billing_type || '-'}</span>
+                        </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Carrier name:</span>
+                            <span className="detail-value">{offer.carrier_name || '-'}</span>
+                        </div>
+                        <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Start Date:</span>
                             <span className="detail-value">{formatDate(offer.start_date)}</span>
                         </div>
@@ -701,8 +821,8 @@ function OfferDetail() {
                                 </a>
                             </span>
                         </div>
-                        {/* <div className="detail-item">
-                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview URL:</span>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Preview offer URL:</span>
                             <span className="detail-value">
                                 {offer.preview_url ? (
                                     <a href={offer.preview_url} target="_blank" rel="noopener noreferrer" style={{ color: '#2196F3' }}>
@@ -710,7 +830,7 @@ function OfferDetail() {
                                     </a>
                                 ) : '-'}
                             </span>
-                        </div> */}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1198,6 +1318,42 @@ function OfferDetail() {
                                     <div className="actions-col">
                                         <button
                                             className="icon-btn"
+                                            onClick={async () => {
+                                                try {
+                                                    const text = buildAssignmentShareText(offer, assignment);
+                                                    const textForNativeShare = text.startsWith('Offer:')
+                                                        ? text.split('\n').slice(1).join('\n').trim()
+                                                        : text;
+
+                                                    // Prefer native share when available (mobile)
+                                                    if (navigator?.share) {
+                                                        await navigator.share({
+                                                            title: `Offer: ${offer?.name || ''}`,
+                                                            text: textForNativeShare,
+                                                        });
+                                                        return;
+                                                    }
+
+                                                    const result = await safeCopyToClipboard(text);
+                                                    if (result.success) {
+                                                        toast.success('Offer details copied. You can paste and share.');
+                                                    } else {
+                                                        toast.error(result.error || 'Failed to copy share text');
+                                                    }
+                                                } catch (error) {
+                                                    // If user cancels native share, ignore silently
+                                                    if (error?.name === 'AbortError') return;
+                                                    console.error(error);
+                                                    toast.error('Failed to share details');
+                                                }
+                                            }}
+                                            title="Share Offer Details"
+                                        >
+                                            <ShareIcon />
+                                        </button>
+
+                                        <button
+                                            className="icon-btn"
                                             onClick={() => {
                                                 if (assignment.assignment_id) {
                                                     const currentUrl = `${location.pathname}${location.search}${location.hash}`;
@@ -1279,7 +1435,7 @@ function OfferDetail() {
                                                     offer_id: assignment.offer_id?.toString() || id?.toString(),
                                                     publisher_id: assignment.publisher_id,
                                                     publisher_email: assignment.publisher_email,
-                                                    payout_override: assignment.payout_override || '',
+                                                    payout_override: assignment.payout_override ?? null,
                                                     conversion_approval_percentage: assignment.conversion_approval_percentage || '',
                                                     capping_type: assignment.capping_type || 'none',
                                                     capping_duration: assignment.capping_duration || 'daily',
