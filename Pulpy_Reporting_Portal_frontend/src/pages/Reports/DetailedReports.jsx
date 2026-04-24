@@ -105,11 +105,11 @@ const AVAILABLE_METRICS = [
 
 const DATE_PRESET_OPTIONS = [
     { id: 'today', label: 'Today' },
+    { id: 'tomorrow', label: 'Tomorrow' },
     { id: 'yesterday', label: 'Yesterday' },
     { id: 'this_week', label: 'This Week' },
     { id: 'this_month', label: 'This Month' },
     { id: 'last_month', label: 'Last Month' },
-    { id: 'all', label: 'All Time' },
     { id: 'custom', label: 'Custom Range' },
 ];
 
@@ -136,7 +136,7 @@ function DetailedReports() {
 
     const [datePreset, setDatePreset] = useState(
         searchParams.get('date_preset') ||
-        (searchParams.get('all_dates') === 'true' ? 'all' : (searchParams.get('date_from') || searchParams.get('date_to') ? 'custom' : 'today'))
+        ((searchParams.get('date_from') || searchParams.get('date_to')) ? 'custom' : 'this_month')
     );
     const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '');
     const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '');
@@ -220,17 +220,13 @@ function DetailedReports() {
                 ? { from: dateFrom, to: dateTo, allDates: false }
                 : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
-            if (resolvedRange.allDates) {
-                params.all_dates = 'true';
-            } else {
-                const { date_from, date_to } = userRangeYmdToBackendIstRange(
-                    resolvedRange.from,
-                    resolvedRange.to,
-                    reportTimezone
-                );
-                if (date_from) params.date_from = date_from;
-                if (date_to) params.date_to = date_to;
-            }
+            const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                resolvedRange.from,
+                resolvedRange.to,
+                reportTimezone
+            );
+            if (date_from) params.date_from = date_from;
+            if (date_to) params.date_to = date_to;
             if (offerFilter !== 'all') params.offer_id = offerFilter;
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
             if (statusFilter !== 'all') params.status = statusFilter;
@@ -258,7 +254,6 @@ function DetailedReports() {
             urlParams.set('page', params.page);
             urlParams.set('limit', params.limit);
             urlParams.set('date_preset', datePreset);
-            if (params.all_dates === 'true') urlParams.set('all_dates', 'true');
             if (params.date_from) urlParams.set('date_from', params.date_from);
             if (params.date_to) urlParams.set('date_to', params.date_to);
             if (offerFilter !== 'all') urlParams.set('offer_id', offerFilter);
@@ -447,17 +442,13 @@ function DetailedReports() {
                 ? { from: dateFrom, to: dateTo, allDates: false }
                 : getDetailedReportsPresetRange(datePreset, reportTimezone);
 
-            if (resolvedRange.allDates) {
-                params.set('all_dates', 'true');
-            } else {
-                const { date_from, date_to } = userRangeYmdToBackendIstRange(
-                    resolvedRange.from,
-                    resolvedRange.to,
-                    reportTimezone
-                );
-                if (date_from) params.set('date_from', date_from);
-                if (date_to) params.set('date_to', date_to);
-            }
+            const { date_from, date_to } = userRangeYmdToBackendIstRange(
+                resolvedRange.from,
+                resolvedRange.to,
+                reportTimezone
+            );
+            if (date_from) params.set('date_from', date_from);
+            if (date_to) params.set('date_to', date_to);
             if (offerFilter !== 'all') params.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
             if (statusFilter !== 'all') params.set('status', statusFilter);

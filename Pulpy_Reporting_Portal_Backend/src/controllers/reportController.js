@@ -67,6 +67,20 @@ export class ReportController {
         });
       }
 
+      // All-time queries (`all_dates=true`) are disabled for performance reasons.
+      // UI should always send an explicit date range (today/this month/this week/custom/etc).
+      if (request.query.all_dates !== undefined) {
+        const val = String(request.query.all_dates).toLowerCase();
+        const allDates = val === 'true' || val === '1' || val === 'yes';
+        if (allDates) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Bad Request',
+            message: 'all_dates=true is not supported. Please select a date range (today/this week/this month/custom).',
+          });
+        }
+      }
+
       const filters = {};
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
@@ -106,10 +120,7 @@ export class ReportController {
       if (request.query.groupBy) filters.groupBy = request.query.groupBy;
       if (request.query.columns) filters.columns = request.query.columns;
       if (request.query.metrics) filters.metrics = request.query.metrics;
-      if (request.query.all_dates !== undefined) {
-        const val = String(request.query.all_dates).toLowerCase();
-        filters.all_dates = val === 'true' || val === '1' || val === 'yes';
-      }
+      // all_dates is intentionally not accepted (guarded above)
 
       const result = await reportService.getDetailed(filters, tenantId);
 
