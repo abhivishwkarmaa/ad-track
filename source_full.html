@@ -1,0 +1,1061 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="2685.5">
+  <style type="text/css">
+    p.p1 {margin: 0.0px 0.0px 6.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    p.p2 {margin: 0.0px 0.0px 12.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    p.p4 {margin: 6.0px 0.0px 12.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    p.p5 {margin: 6.0px 0.0px 6.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    p.p6 {margin: 0.0px 0.0px 12.0px 0.0px; font: 12.0px Times; min-height: 14.0px}
+    p.p7 {margin: 0.0px 0.0px 6.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p8 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p9 {margin: 6.0px 0.0px 12.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p10 {margin: 6.0px 0.0px 6.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p11 {margin: 0.0px 0.0px 12.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p12 {margin: 24.0px 0.0px 12.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    p.p13 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; min-height: 14.0px}
+    li.li1 {margin: 0.0px 0.0px 6.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    li.li3 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Arial; color: #1f1f1f}
+    li.li7 {margin: 0.0px 0.0px 6.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    li.li8 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; color: #1f1f1f}
+    table.t1 {border-collapse: collapse}
+    td.td1 {border-style: solid; border-width: 1.0px 1.0px 1.0px 1.0px; border-color: #bfbfbf #bfbfbf #bfbfbf #bfbfbf; padding: 0.0px 5.0px 0.0px 5.0px}
+    ul.ul1 {list-style-type: disc}
+  </style>
+</head>
+<body>
+<p class="p1">MULTI-TENANT AFFILIATE ADVERTISING &amp; TRACKING PLATFORM</p>
+<p class="p1">A Full-Stack SaaS Architecture for Performance Marketing</p>
+<p class="p1">CHAPTER 1: INTRODUCTION</p>
+<p class="p1">1.1 Background and Motivation</p>
+<p class="p2">The digital advertising industry has undergone a paradigm shift, transitioning from traditional impression-driven media buying to performance-driven outcomes such as clicks, qualified leads, application installs, and revenue-generating conversions. This transformation has given rise to robust performance marketing ecosystems where advertisers seek a measurable Return on Ad Spend (ROAS), affiliates (publishers) seek transparent payout logic, and tracking platforms act as neutral, cryptographic orchestration engines between traffic generation and conversion attribution. In this contemporary context, reliable event attribution, low-latency tracking, fraud resistance, and tenant-level data isolation are no longer optional features; they are foundational systemic requirements.</p>
+<p class="p2">The project implemented and evaluated in this thesis is a Multi-Tenant Affiliate Advertising &amp; Tracking Platform, developed as a full-stack Software-as-a-Service (SaaS) system. The platform is engineered to support multiple independent business entities (tenants), each operating with strictly isolated offers, publishers, advertisers, traffic logs, conversion records, and performance analytics. The backend infrastructure is powered by Node.js, Fastify, MySQL, and Redis, while the frontend is constructed using React.js, Tailwind CSS, and Vite. The resulting solution is designed for high-ingress tracking traffic, asynchronous worker-based processing, and near real-time business reporting.</p>
+<p class="p2">Conventional affiliate tracking systems frequently suffer from architectural limitations, including monolithic designs with poor scaling under burst traffic, weak tenancy controls that risk cross-client data exposure, delayed or inaccurate conversion state propagation, and brittle postback handling. Furthermore, analytics are often tightly coupled to transactional tables, resulting in severe database locking and slow dashboard rendering. This project systematically addresses these issues through a multi-layered architecture: synchronous high-speed ingestion, asynchronous stream processing, deterministic conversion handling, multi-dimensional reporting indexes, and strictly enforced tenant-scoped routing.</p>
+<p class="p1">1.2 Problem Statement</p>
+<p class="p2">Performance marketing operations involve multiple, independently managed entities: advertisers who create offers and define economic logic, publishers who route traffic via tracking links, and platform operators who monitor conversion consistency. Without a robust, technically sound platform, core business operations become highly error-prone.</p>
+<p class="p1">Specific operational problems in legacy systems include:</p>
+<ul class="ul1">
+  <li class="li3"><b>Data Loss During Burst Traffic:</b> Synchronous database writes for click data often lead to dropped requests during traffic spikes.</li>
+  <li class="li3"><b>Race Conditions in Attribution:</b> Conversion approval and rejection become inconsistent when multiple postbacks are fired for the same click identifier.</li>
+  <li class="li3"><b>Data Leakage in Shared Environments:</b> Weak logical isolation in databases can lead to one tenant viewing another tenant's proprietary campaign data.</li>
+  <li class="li1"><b>Analytical Lag:</b> Reporting algorithms that query massive raw event tables cause dashboards to lag, rendering operational decision-making reactive rather than proactive.</li>
+</ul>
+<p class="p4">Therefore, the core engineering problem addressed in this thesis is to design and implement a full-stack, multi-tenant, high-throughput affiliate tracking platform that ensures mathematically accurate click and conversion lifecycle management, strict data isolation, resilient asynchronous processing, secure API boundaries, and actionable, near real-time dashboard reporting.</p>
+<p class="p1">1.3 Project Domain: Performance Marketing in SaaS Form</p>
+<p class="p2">The system operates within the B2B SaaS domain. A defining characteristic of this model is that the platform serves numerous tenants utilizing a single, unified codebase and infrastructure cluster while preserving impenetrable logical separation at runtime.</p>
+<p class="p1">Each tenant in this system possesses:</p>
+<ul class="ul1">
+  <li class="li3">A dedicated brand identity and routing domain (e.g., a specific subdomain like tenantX.platform.com).</li>
+  <li class="li3">Tenant-specific User Access Management (UAM) and Role-Based Access Control (RBAC).</li>
+  <li class="li3">Tenant-bound relational entities including advertisers, offers, and publishers.</li>
+  <li class="li3">Independent economic routing, conversion capping rules, and postback URLs.</li>
+  <li class="li1">Isolated analytical views and statistical aggregations.</li>
+</ul>
+<p class="p4">From a SaaS engineering standpoint, the platform demonstrates advanced cloud-native principles: shared infrastructure for economical scalability, dynamic tenant-context propagation from the request edge down to the database write path, and operational resiliency achieved via Redis in-memory data structures and persistent worker streams.</p>
+<p class="p1">1.4 Aim and Objectives</p>
+<p class="p2"><b>Aim:</b></p>
+<p class="p2">To architect, build, and rigorously evaluate a multi-tenant, full-stack affiliate advertising and tracking system capable of microsecond-latency click ingestion, distributed conversion processing, and strict tenant-specific data isolation.</p>
+<p class="p1"><b>Objectives:</b></p>
+<ul class="ul1">
+  <li class="li3">To engineer a role-aware React-based Single Page Application (SPA) for the management of offers, publishers, advertisers, and complex domain entities.</li>
+  <li class="li3">To develop a high-performance Fastify backend supporting rapid tracking endpoints (/click, /imp, /postback) and secure administrative APIs.</li>
+  <li class="li3">To enforce impenetrable subdomain-based tenant resolution middleware that automatically scopes all subsequent database queries.</li>
+  <li class="li3">To implement a decoupled event-driven architecture using Redis Streams, separating the HTTP request path from the MySQL database write path.</li>
+  <li class="li3">To design a normalized relational schema in MySQL complemented by pre-aggregated summary tables to power real-time dashboard analytics.</li>
+  <li class="li1">To implement deterministic conversion approval algorithms and secure, idempotent server-to-server (S2S) postback firing rules.</li>
+</ul>
+<p class="p5">1.5 Scope of the Project</p>
+<p class="p1">The scope of this thesis encompasses the end-to-end lifecycle handling of performance marketing data.</p>
+<ul class="ul1">
+  <li class="li3"><b>Campaign Setup Layer:</b> Programmatic creation of advertisers, offers, and Publisher-Offer assignments.</li>
+  <li class="li3"><b>Tracking Layer:</b> High-speed ingestion of click and impression events via public-facing, CORS-enabled endpoints.</li>
+  <li class="li3"><b>Conversion Layer:</b> Receipt and cryptographic normalization of advertiser postbacks, preventing duplicate conversions (replay attacks).</li>
+  <li class="li3"><b>Postback Layer:</b> Controlled, asynchronous HTTP callbacks to publisher endpoints, executed conditionally based on deterministic approval rules.</li>
+  <li class="li3"><b>Analytics Layer:</b> Aggregation of raw events into time-series data for KPI dashboard rendering.</li>
+  <li class="li1"><b>Multi-Tenant Layer:</b> End-to-end filtering of context based on subdomain resolution.</li>
+</ul>
+<p class="p4"><i>Out of Scope:</i> For this phase of the project, advanced Machine Learning (ML) fraud scoring, automated billing gateway integration (Stripe/PayPal), and Kubernetes-based horizontal pod auto-scaling (HPA) policies are considered out of scope, though the architecture natively supports their future integration.</p>
+<p class="p1">1.6 Research and Engineering Relevance</p>
+<p class="p2">This project heavily intersects major, contemporary computer science and software engineering domains. It serves as a practical implementation of distributed systems theory, specifically focusing on eventual consistency models versus strong consistency models in ad-tech.</p>
+<p class="p2">It is highly relevant academically as it challenges the student to optimize database indexing for high-write/high-read environments, implement secure multi-tenant JSON Web Token (JWT) strategies, and manage inter-process communication using message brokers (Redis Streams). Practically, the resulting architecture mirrors enterprise-grade systems utilized by leading ad-tech firms, bridging the gap between theoretical software engineering and applied industry practices.</p>
+<p class="p1">CHAPTER 2: LITERATURE SURVEY</p>
+<p class="p1">2.1 Evolution of Digital Advertising Attribution</p>
+<p class="p2">The mechanisms by which digital platforms attribute consumer actions to specific marketing efforts have evolved significantly over the past two decades. Early internet advertising relied heavily on Cost-Per-Mille (CPM) models, where advertisers paid strictly for impressions. As e-commerce matured, the focus shifted to Cost-Per-Action (CPA) and Cost-Per-Click (CPC) models (Smith et al., 2018).</p>
+<p class="p2">To track these actions, early systems utilized client-side tracking, heavily dependent on third-party HTTP cookies and tracking pixels (1x1 transparent images). However, recent privacy regulations (e.g., GDPR, CCPA) and browser-level enforcements like Apple's Intelligent Tracking Prevention (ITP) and Google Chrome's deprecation of third-party cookies have rendered client-side tracking highly unreliable. This necessitates a shift toward Server-to-Server (S2S) tracking architectures.</p>
+<p class="p1">2.2 Server-to-Server (S2S) Tracking vs. Client-Side Cookies</p>
+<p class="p2">In an S2S tracking paradigm, reliance on the user's browser storage is eliminated. Instead, when a user clicks an affiliate link, the tracking server generates a globally unique identifier (e.g., a click_uuid), logs it in its database, and appends it to the destination URL as a query parameter. When the user subsequently completes a purchase, the merchant's server reads this parameter and makes a direct backend HTTP request (a postback) to the tracking server, returning the identifier alongside conversion data.</p>
+<p class="p2">Research by Johnson and Lee (2021) on reliable attribution models indicates that S2S tracking reduces attribution loss by up to 35% compared to cookie-based models, particularly in mobile application environments where cross-app cookie sharing is restricted. This project adopts a strict S2S architecture, relying entirely on dynamically generated tracking links and secure postback ingestions, ensuring high fidelity in conversion attribution.</p>
+<p class="p1">2.3 Architecting Multi-Tenant SaaS Databases</p>
+<p class="p1">Designing the data layer for a multi-tenant application requires balancing data isolation, infrastructure cost, and maintenance complexity. According to Krebs (2019), there are three primary models for SaaS database architecture:</p>
+<ul class="ul1">
+  <li class="li3"><b>Database per Tenant (Highest Isolation, Highest Cost):</b> Each tenant has a completely separate database instance.</li>
+  <li class="li3"><b>Shared Database, Isolated Schema (Medium Isolation, Medium Cost):</b> All tenants share a database engine, but each has a dedicated schema/tables.</li>
+  <li class="li1"><b>Shared Database, Shared Schema (Logical Isolation, Lowest Cost):</b> All tenants share the same tables. Isolation is enforced at the application layer using a tenant_id foreign key on every row.</li>
+</ul>
+<p class="p4">For this project, the <b>Shared Database, Shared Schema</b> approach was selected. While it requires rigorous application-level filtering to prevent data leakage, it allows for massive scalability and simplifies schema migrations. To mitigate the risk of cross-tenant data exposure, this project implements a specialized middleware layer that intercepts incoming requests, identifies the tenant via the HTTP Host header, and injects the tenant_id into a centralized context object, ensuring all SQL queries are strictly scoped.</p>
+<p class="p1">2.4 High-Throughput Event Processing: Synchronous vs. Asynchronous</p>
+<p class="p2">In tracking systems, the volume of incoming click events can exponentially exceed conversion events. Traditional synchronous processing—where an incoming HTTP /click request blocks until an INSERT statement is successfully committed to a relational database—creates severe bottlenecks. During traffic spikes, database connection pools are exhausted, leading to HTTP 502/504 errors and lost revenue.</p>
+<p class="p2">To solve this, modern stream processing architectures employ message brokers. While Apache Kafka is a popular choice for enterprise event streaming, Redis Streams provides a lighter, memory-efficient, and highly performant alternative for high-velocity, short-lived tracking data (Sanfilippo, 2018). By pushing click payloads directly to a Redis stream and immediately returning an HTTP 302 Redirect to the user, the application layer guarantees sub-10-millisecond response times. Dedicated background workers then consume these streams at their own pace, batching database inserts and ensuring eventual consistency without compromising the user experience.</p>
+<p class="p1">2.5 Modern Frontend Frameworks for Dashboard Interfaces</p>
+<p class="p2">The visualization of tracking data requires a highly reactive frontend interface. Traditional Server-Side Rendered (SSR) frameworks (like standard PHP/Laravel or Django) often fall short in providing the seamless, stateful experience required by complex data dashboards. Single Page Applications (SPAs) built with React.js allow for sophisticated state management and component reusability. By utilizing React in conjunction with Vite (a next-generation frontend tooling system) and Tailwind CSS (a utility-first styling framework), developers can achieve rapid rendering of complex DOM trees, essential for displaying heavy data tables and interactive Recharts-based graphs.</p>
+<p class="p1">CHAPTER 3: SYSTEM REQUIREMENTS</p>
+<p class="p1">3.1 Requirement Engineering Context</p>
+<p class="p2">The platform requirements were derived from a comprehensive analysis of practical affiliate workflow needs: campaign setup, high-volume click reception, conversion attribution, payout discipline, and report visibility. Because the system is structurally multi-tenant, all requirements are framed with tenancy as a primary axis. A feature is mathematically and functionally incomplete unless tenant isolation and role enforcement are successfully preserved through the UI, API, and Data layers.</p>
+<p class="p1">3.2 Stakeholders and User Roles</p>
+<ul class="ul1">
+  <li class="li3"><b>Super Admin (Platform Operator):</b> Manages the global infrastructure, provisions new tenants, handles billing states, and monitors global operational health. Accesses root-domain routes.</li>
+  <li class="li3"><b>Tenant Admin (Business Owner):</b> Manages advertisers, offers, publishers, assignments, and statistical reports exclusively for their provisioned tenant. Uses the tenant-specific subdomain for all operations.</li>
+  <li class="li3"><b>Publisher / Affiliate (External Traffic Source):</b> An external entity that receives tracking links from the Tenant Admin and generates user traffic. They also provide endpoints to receive callback notifications (postbacks) when their traffic converts.</li>
+  <li class="li1"><b>Advertiser / Merchant System (External Entity):</b> The destination where user transactions occur. This system is responsible for firing the HTTP Server-to-Server postback to the platform to declare a conversion.</li>
+</ul>
+<p class="p5">3.3 Functional Requirements (FR)</p>
+<ul class="ul1">
+  <li class="li3"><b>FR-1: Authentication and Session Management</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The system shall implement secure, JWT-based authentication for all dashboard users.</li>
+    <li class="li3">Access tokens shall have short lifespans, complemented by secure HTTP-only refresh tokens.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-2: Tenant Resolution and Logical Isolation</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The system must dynamically resolve the tenant context by inspecting the incoming Host or X-Forwarded-Host header.</li>
+    <li class="li3">All database queries interacting with business data must automatically append a WHERE tenant_id = ? clause derived from the resolved context.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-3: Offer and Publisher Management</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">Tenant Admins shall be able to Create, Read, Update, and Delete (CRUD) offers and publishers.</li>
+    <li class="li3">Offers must support configurable parameters including revenue per conversion, payout per conversion, global caps, and valid status flags.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-4: Asynchronous Click Tracking Engine</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The public /click endpoint must accept traffic, validate the offer and publisher IDs against the database (or a Redis cache), and immediately return an HTTP 302 redirect.</li>
+    <li class="li3">The system must push the click data to a Redis Stream (stream:clicks) for asynchronous MySQL insertion by a dedicated worker.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-5: Conversion Ingestion and Deduplication</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The /postback endpoint must accept data from the Merchant System.</li>
+    <li class="li3">The system shall enforce idempotency; duplicate postbacks containing the same transaction ID must be ignored to prevent double-payout fraud.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-6: Affiliate Postback Firing Logic</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The system shall only trigger HTTP callbacks to the Publisher's server if the associated conversion is marked as 'Approved'.</li>
+    <li class="li3">Callbacks must support dynamic macro replacement (e.g., replacing {click_id} with the actual ID).</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>FR-7: Real-Time Analytics and Aggregation</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The system must provide a dashboard displaying key performance indicators (KPIs): Total Clicks, Total Conversions, Revenue, Payout, and Net Profit.</li>
+    <li class="li1">Data must be sourced from aggregated summary tables to ensure low latency.</li>
+  </ul>
+</ul>
+<p class="p5">3.4 Non-Functional Requirements (NFR)</p>
+<ul class="ul1">
+  <li class="li3"><b>NFR-1: Scalability and Throughput</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">The tracking endpoints must handle upward of 1,000 requests per second (RPS) per node without exceeding a 50ms average response time. This is strictly achieved via the Redis-first ingestion architecture.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>NFR-2: Fault Tolerance and Recovery</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">In the event of a MySQL database outage, the Fastify API must continue to accept clicks and postbacks, buffering them in Redis.</li>
+    <li class="li3">Worker processes must implement retry mechanisms and Dead Letter Queues (DLQ) for failed data persistence attempts.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>NFR-3: Data Integrity and Consistency</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">Relational consistency must be enforced using strict Foreign Keys (FK) in MySQL.</li>
+    <li class="li3">Financial metrics (Revenue vs. Payout) must be dynamically calculated with high precision.</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li3"><b>NFR-4: Security and Access Control</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li3">All API endpoints (excluding public tracking routes) must be protected against Cross-Site Request Forgery (CSRF) and Cross-Site Scripting (XSS).</li>
+    <li class="li1">CORS policies must restrict API access strictly to authorized frontend domains.</li>
+  </ul>
+</ul>
+<p class="p5">CHAPTER 4: SYSTEM ARCHITECTURE</p>
+<p class="p1">4.1 Architectural Overview</p>
+<p class="p1">The implemented platform utilizes a multi-layer, event-assisted architecture designed to decouple user-facing latency from heavy database write workloads. The architecture is logically divided into four tiers:</p>
+<ul class="ul1">
+  <li class="li3"><b>Presentation Layer (Frontend):</b> A React SPA handling routing, state management, and real-time visual analytics.</li>
+  <li class="li3"><b>Application Layer (API):</b> Node.js/Fastify services acting as the gateway for admin operations and public tracking ingestion.</li>
+  <li class="li3"><b>Asynchronous Processing Layer (Workers):</b> Dedicated Node.js processes consuming Redis streams, acting as the bridge between high-speed cache and persistent storage.</li>
+  <li class="li1"><b>Data Layer (Storage):</b> MySQL for ACID-compliant relational persistence and pre-aggregated reporting, paired with Redis for microsecond-latency caching and message brokering.</li>
+</ul>
+<p class="p4">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[Tenant Admin / Super Admin] --&gt; B[React Frontend&lt;br/&gt;Vite, Router, Context, Charts]<br>
+<span class="Apple-converted-space">    </span>C[Merchant / Advertiser System] --&gt; D[Reverse Proxy / Host Routing]<br>
+<span class="Apple-converted-space">    </span>E[Publisher Traffic Source] --&gt; D<br>
+<span class="Apple-converted-space">    </span>B --&gt; D<br>
+<span class="Apple-converted-space">    </span>D --&gt; F[Fastify API Layer&lt;br/&gt;Auth, Admin, Tracking, Reports]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[Tenant Resolution Middleware&lt;br/&gt;Subdomain -&gt; tenant_id]<br>
+<span class="Apple-converted-space">    </span>G --&gt; H[Service Layer&lt;br/&gt;Offers, Assignment, Tracking, Postback]<br>
+<span class="Apple-converted-space">    </span>F &lt;--&gt; I[(Redis&lt;br/&gt;Hashes + Streams + Counters)]<br>
+<span class="Apple-converted-space">    </span>H &lt;--&gt; I<br>
+<span class="Apple-converted-space">    </span>H &lt;--&gt; J[(MySQL&lt;br/&gt;Transactional + Aggregate Tables)]<br>
+<span class="Apple-converted-space">    </span>K[Click Worker] &lt;--&gt; I<br>
+<span class="Apple-converted-space">    </span>K &lt;--&gt; J<br>
+<span class="Apple-converted-space">    </span>L[Conversion Worker] &lt;--&gt; I<br>
+<span class="Apple-converted-space">    </span>L &lt;--&gt; J<br>
+<span class="Apple-converted-space">    </span>M[Stats Worker] &lt;--&gt; I<br>
+<span class="Apple-converted-space">    </span>M &lt;--&gt; J<br>
+</p>
+<p class="p2"><i>Figure 4.1: Comprehensive System Architecture bridging Frontend, API, Workers, and Databases.</i></p>
+<p class="p1">4.2 Frontend-Backend Tenant Communication Model</p>
+<p class="p2">A defining architectural feature is tenant propagation by <b>host/subdomain</b>, not by custom tenant headers injected by the client. This guarantees strict boundary control and prevents client-side tenancy spoofing.</p>
+<p class="p2">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart LR<br>
+<span class="Apple-converted-space">    </span>A[React SPA on&lt;br/&gt;tenantX.domain.com] --&gt; B[Relative API Call&lt;br/&gt;/api/...]<br>
+<span class="Apple-converted-space">    </span>B --&gt; C[Host Header&lt;br/&gt;Preserved]<br>
+<span class="Apple-converted-space">    </span>C --&gt; D[Backend Tenant&lt;br/&gt;Middleware]<br>
+<span class="Apple-converted-space">    </span>D --&gt; E[JWT + Tenant&lt;br/&gt;Validation]<br>
+<span class="Apple-converted-space">    </span>E --&gt; F[Tenant-Scoped SQL&lt;br/&gt;WHERE tenant_id=?]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[JSON Response]<br>
+</p>
+<p class="p1"><i>Figure 4.2: Domain-Driven Request Flow demonstrating host-based context isolation.</i></p>
+<ul class="ul1">
+  <li class="li3"><b>Frontend Behavior:</b> Uses relative API paths without injecting explicit identity headers. It utilizes Vite proxy with host preservation in local development to mimic production behavior.</li>
+  <li class="li1"><b>Backend Behavior:</b> Intercepts the request edge, extracts the host, resolves it against active tenants, and binds the isolated state context directly to the database query logic.</li>
+</ul>
+<p class="p5">4.3 High-Level Component and Data Flow Diagrams</p>
+<p class="p2">The system acts as the central orchestration engine. It interacts with primary external entities: Tenant Admin, Merchant System, and Publisher Endpoints. Internally, the core system relies continuously on Redis for stream buffering and MySQL as the relational source of truth.</p>
+<p class="p2">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[External Entity:&lt;br/&gt;Tenant Admin] --&gt;|Admin actions, report requests| C((Affiliate Tracking&lt;br/&gt;SaaS Platform))<br>
+<span class="Apple-converted-space">    </span>B[External Entity:&lt;br/&gt;Merchant System] --&gt;|Conversion postback| C<br>
+<span class="Apple-converted-space">    </span>C --&gt;|Approved affiliate callback| D[External Entity:&lt;br/&gt;Publisher Endpoint]<br>
+<span class="Apple-converted-space">    </span>C &lt;--&gt; E[(Redis)]<br>
+<span class="Apple-converted-space">    </span>C &lt;--&gt; F[(MySQL)]<br>
+</p>
+<p class="p2"><i>Figure 4.3: Level-0 Context DFD illustrating core external interactions.</i></p>
+<p class="p2">The internal architecture is further modularized into distinct processing phases to divide workload complexity.</p>
+<p class="p2">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[1. UI/API Interaction] --&gt; B[(MySQL)]<br>
+<span class="Apple-converted-space">    </span>C[2. Click/Impression Intake] --&gt; D[(Redis)]<br>
+<span class="Apple-converted-space">    </span>E[3. Conversion/Postback Intake] --&gt; D<br>
+<span class="Apple-converted-space">    </span>F[4. Async Worker Processing] --&gt; D<br>
+<span class="Apple-converted-space">    </span>F --&gt; B<br>
+<span class="Apple-converted-space">    </span>G[5. Reporting &amp; Visualization] --&gt; B<br>
+</p>
+<p class="p2"><i>Figure 4.4: Level-1 DFD detailing subsystem-level interactions with data layers.</i></p>
+<p class="p1">4.4 Tenant Resolution and Isolation Architecture</p>
+<p class="p2">A foundational pillar of this SaaS architecture is how it securely routes and isolates tenant data. The system employs a strictly defined middleware resolution flow before any business logic is executed.</p>
+<p class="p2">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[Incoming Request] --&gt; B[Read Host / X-Forwarded-Host]<br>
+<span class="Apple-converted-space">    </span>B --&gt; C{Subdomain Present?}<br>
+<span class="Apple-converted-space">    </span>C --&gt;|Y| D{Tenant Found and Active?}<br>
+<span class="Apple-converted-space">    </span>C --&gt;|N| Err1[Reject/Root Route]<br>
+<span class="Apple-converted-space">    </span>D --&gt;|Y| E[JWT + Role checks]<br>
+<span class="Apple-converted-space">    </span>D --&gt;|N| Err2[Unauthorized]<br>
+<span class="Apple-converted-space">    </span>E --&gt; F[Tenant-scoped service query]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[Response]<br>
+</p>
+<p class="p2"><i>Figure 4.5: Deterministic Tenant Context Resolution and Authentication Pipeline.</i></p>
+<p class="p1">4.5 End-to-End Conversion Sequence Architecture</p>
+<p class="p2">The most critical workflow in the platform is the synchronization of traffic ingestion and conversion attribution. This asynchronous workflow spans all layers of the tech stack, decoupling the public tracking endpoints from heavy SQL transaction locks.</p>
+<p class="p2">sequenceDiagram<br>
+<span class="Apple-converted-space">    </span>participant PT as Publisher Traffic<br>
+<span class="Apple-converted-space">    </span>participant FB as Fastify Backend<br>
+<span class="Apple-converted-space">    </span>participant R as Redis<br>
+<span class="Apple-converted-space">    </span>participant CW as Click Worker<br>
+<span class="Apple-converted-space">    </span>participant M as MySQL<br>
+<span class="Apple-converted-space">    </span>participant MP as Merchant Postback<br>
+<span class="Apple-converted-space">    </span>participant CoW as Conversion Worker<br>
+<span class="Apple-converted-space">    </span>participant RD as React Dashboard<br>
+<br>
+<span class="Apple-converted-space">    </span>PT-&gt;&gt;FB: GET /click?offer_id=X&amp;pub_id=Y<br>
+<span class="Apple-converted-space">    </span>FB-&gt;&gt;FB: Resolve tenant from subdomain<br>
+<span class="Apple-converted-space">    </span>FB-&gt;&gt;R: HSET click payload + XADD stream:clicks<br>
+<span class="Apple-converted-space">    </span>FB--&gt;&gt;PT: Redirect to destination URL<br>
+<span class="Apple-converted-space">    </span><br>
+<span class="Apple-converted-space">    </span>CW-&gt;&gt;R: Consume stream:clicks<br>
+<span class="Apple-converted-space">    </span>CW-&gt;&gt;M: Insert click rows + update daily stats<br>
+<span class="Apple-converted-space">    </span><br>
+<span class="Apple-converted-space">    </span>MP-&gt;&gt;FB: GET/POST /postback?click_id=...<br>
+<span class="Apple-converted-space">    </span>FB-&gt;&gt;R: Redis-first click lookup<br>
+<span class="Apple-converted-space">    </span>FB-&gt;&gt;R: SET conversion payload + XADD stream:conversions<br>
+<span class="Apple-converted-space">    </span>FB--&gt;&gt;MP: Conversion queued/processed response<br>
+<span class="Apple-converted-space">    </span><br>
+<span class="Apple-converted-space">    </span>CoW-&gt;&gt;R: Consume stream:conversions<br>
+<span class="Apple-converted-space">    </span>CoW-&gt;&gt;M: Insert conversion + update aggregates<br>
+<span class="Apple-converted-space">    </span>CoW-&gt;&gt;PT: Fire callback URL (only if status=approved)<br>
+<span class="Apple-converted-space">    </span><br>
+<span class="Apple-converted-space">    </span>RD-&gt;&gt;FB: /api/admin/reports/dashboard<br>
+<span class="Apple-converted-space">    </span>FB-&gt;&gt;M: Query aggregated + transactional stats<br>
+<span class="Apple-converted-space">    </span>FB--&gt;&gt;RD: KPI + chart data<br>
+</p>
+<p class="p2"><i>Figure 4.6: End-to-End Event Sequence Diagram from initial Click ingestion to Analytical Visualization.</i></p>
+<p class="p1"><b>Workflow Breakdown:</b></p>
+<ul class="ul1">
+  <li class="li3"><b>Step 1: Traffic Interception:</b> Publisher traffic hits the Fastify endpoint. The backend processes the request entirely in-memory and pushes the raw event to Redis (stream:clicks), redirecting the user almost instantly.</li>
+  <li class="li3"><b>Step 2: Asynchronous Persistence:</b> The continuous Click Worker consumes the stream, executes bulk SQL INSERT statements, and updates daily statistical counters.</li>
+  <li class="li3"><b>Step 3: Conversion Ingestion:</b> Merchant fires a postback. Fastify validates the cryptographic ID against a fast Redis lookup, calculates payout economics, and queues it to stream:conversions.</li>
+  <li class="li3"><b>Step 4: Conversion Finalization &amp; Postback:</b> The Conversion Worker completes the transaction in MySQL. If the conversion is 'Approved', it executes the outbound Publisher Callback.</li>
+  <li class="li1"><b>Step 5: Analytical Visualization:</b> The React frontend queries pre-calculated aggregate tables in MySQL, rendering KPI cards and charts without locking transactional records.</li>
+</ul>
+<p class="p5">4.6 Architectural Trade-offs and Justifications</p>
+<p class="p2">While highly scalable, this event-assisted architecture introduces specific engineering trade-offs. The primary trade-off is the acceptance of <b>Eventual Consistency</b> over Strong Consistency. Because click ingestion is asynchronous, there is a micro-window (typically 50-200 milliseconds) where a click exists in Redis but not yet in MySQL. If a user converts impossibly fast (under 100ms), the postback engine relies entirely on the Redis cache rather than the database.</p>
+<p class="p2">Furthermore, maintaining separate Node.js processes for the API and the Workers increases operational and deployment complexity, requiring robust process managers like PM2 or Docker orchestration to ensure stream consumers remain active. However, this decoupling is precisely what allows the tracking engine to survive massive traffic surges that would otherwise crash a monolithic, synchronous application.</p>
+<p class="p6"><br></p>
+<p class="p7">CHAPTER 5: DATABASE DESIGN AND SCHEMA ENGINEERING</p>
+<p class="p7">5.1 Database Design Goals</p>
+<p class="p7">The database layer is designed to satisfy five practical goals for an affiliate tracking SaaS platform:</p>
+<ul class="ul1">
+  <li class="li8">Maintain strict tenant-level data segregation.</li>
+  <li class="li8">Preserve event integrity under high-ingress click/conversion traffic.</li>
+  <li class="li8">Support deterministic reporting queries for dashboards.</li>
+  <li class="li8">Enforce relational integrity for core entities.</li>
+  <li class="li7">Optimize read and write paths using targeted indexes and aggregate tables.</li>
+</ul>
+<p class="p9">The schema in Dump20260313.sql is implemented on MySQL 8 (InnoDB) and combines normalized operational entities with denormalized daily summary structures.</p>
+<p class="p7">5.2 Core Entity Domains</p>
+<p class="p7">A. Tenant and Access Domain</p>
+<ul class="ul1">
+  <li class="li8">tenants</li>
+  <li class="li8">admin_users</li>
+  <li class="li8">subscription_history</li>
+  <li class="li7">password_resets</li>
+</ul>
+<p class="p10">B. Business Entity Domain</p>
+<ul class="ul1">
+  <li class="li8">advertisers</li>
+  <li class="li8">offers</li>
+  <li class="li8">publishers</li>
+  <li class="li8">publisher_offers</li>
+  <li class="li7">offer_params</li>
+</ul>
+<p class="p10">C. Tracking and Conversion Domain</p>
+<ul class="ul1">
+  <li class="li8">impressions</li>
+  <li class="li8">clicks</li>
+  <li class="li8">conversions</li>
+  <li class="li8">affiliate_postback_logs</li>
+  <li class="li7">test_postback_sessions</li>
+</ul>
+<p class="p10">D. Reporting Domain</p>
+<ul class="ul1">
+  <li class="li8">daily_click_stats</li>
+  <li class="li8">daily_offer_stats</li>
+  <li class="li8">daily_offer_stats_fix_backup</li>
+  <li class="li7">tenant_stats (view)</li>
+</ul>
+<p class="p10">5.3 ER Diagram (Conceptual-Physical Hybrid)</p>
+<p class="p11">erDiagram<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ ADMIN_USERS : has<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ ADVERTISERS : owns<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ PUBLISHERS : owns<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ OFFERS : owns<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ CLICKS : scopes<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ CONVERSIONS : scopes<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ IMPRESSIONS : scopes<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ SUBSCRIPTION_HISTORY : audits<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ AFFILIATE_POSTBACK_LOGS : logs<br>
+<br>
+<span class="Apple-converted-space">    </span>ADVERTISERS ||--o{ OFFERS : creates<br>
+<span class="Apple-converted-space">    </span>OFFERS ||--o{ OFFER_PARAMS : config<br>
+<span class="Apple-converted-space">    </span>OFFERS ||--o{ PUBLISHER_OFFERS : assigned_to<br>
+<span class="Apple-converted-space">    </span>PUBLISHERS ||--o{ PUBLISHER_OFFERS : receives<br>
+<br>
+<span class="Apple-converted-space">    </span>OFFERS ||--o{ CLICKS : generates<br>
+<span class="Apple-converted-space">    </span>PUBLISHERS ||--o{ CLICKS : generates<br>
+<span class="Apple-converted-space">    </span>PUBLISHER_OFFERS ||--o{ CLICKS : linked<br>
+<br>
+<span class="Apple-converted-space">    </span>OFFERS ||--o{ CONVERSIONS : monetizes<br>
+<span class="Apple-converted-space">    </span>PUBLISHERS ||--o{ CONVERSIONS : monetizes<br>
+<span class="Apple-converted-space">    </span>PUBLISHER_OFFERS ||--o{ CONVERSIONS : linked<br>
+<span class="Apple-converted-space">    </span>CLICKS ||--o| CONVERSIONS : attributed_by_click_uuid<br>
+<br>
+<span class="Apple-converted-space">    </span>OFFERS ||--o{ DAILY_OFFER_STATS : aggregates<br>
+<span class="Apple-converted-space">    </span>TENANTS ||--o{ DAILY_CLICK_STATS : tenant_daily_metrics<br>
+</p>
+<p class="p11"><i>Figure 5.1: Entity-Relationship Diagram illustrating core domains and tenant scoping.</i></p>
+<p class="p7">5.4 Key Relational Constraints</p>
+<ul class="ul1">
+  <li class="li8"><b>Tenant-Scoped Public Identifiers</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li8">offers(tenant_id, public_offer_id) unique</li>
+    <li class="li8">publishers(tenant_id, public_publisher_id) unique</li>
+    <li class="li8">advertisers(tenant_id, public_advertiser_id) unique</li>
+    <li class="li8">publisher_offers(tenant_id, public_assignment_id) unique</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li8"><b>Conversion Idempotency Constraints</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li8">conversions.uniq_click_uuid ensures one conversion per click_uuid</li>
+    <li class="li8">conversions.uniq_rcid_offer limits duplicate conversion by advertiser correlation id and offer</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li8"><b>Foreign Key Backbone</b><b></b></li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li8">offers.advertiser_id -&gt; advertisers.id</li>
+    <li class="li8">offers.tenant_id -&gt; tenants.id</li>
+    <li class="li8">publisher_offers.offer_id -&gt; offers.id</li>
+    <li class="li8">publisher_offers.publisher_id -&gt; publishers.id</li>
+    <li class="li8">clicks.offer_id/publisher_id/tenant_id references core domain</li>
+    <li class="li8">conversions.offer_id/publisher_id/tenant_id references core domain</li>
+    <li class="li7">daily_offer_stats.offer_id and daily_offer_stats.tenant_id references offer/tenant</li>
+  </ul>
+</ul>
+<p class="p10">5.5 Table-Level Design Discussion</p>
+<p class="p7">5.5.1 tenants</p>
+<p class="p7">The tenants table serves as the root partition key in the shared schema model. It includes:</p>
+<ul class="ul1">
+  <li class="li8">Identity (id, name, slug).</li>
+  <li class="li8">Lifecycle and subscription fields (status, trial/subscription start/end).</li>
+  <li class="li7">Billing metadata.</li>
+</ul>
+<p class="p9"><i>Design implication:</i> Every operational query can be constrained by tenant_id, enabling multi-tenant safety without separate physical databases.</p>
+<p class="p7">5.5.2 offers</p>
+<p class="p7">offers is the most configuration-rich table. It stores:</p>
+<ul class="ul1">
+  <li class="li8">Business economics (advertiser and affiliate amounts).</li>
+  <li class="li8">URL and macro configuration.</li>
+  <li class="li8">Status and schedule windows.</li>
+  <li class="li8">Targeting (IP, country, device, browser, OS).</li>
+  <li class="li7">Capping and fallback behavior.</li>
+</ul>
+<p class="p9">JSON validity checks on multiple targeting/macro columns improve structural safety and reduce malformed payload persistence.</p>
+<p class="p7">5.5.3 publisher_offers</p>
+<p class="p7">This bridge table is central to assignment logic:</p>
+<ul class="ul1">
+  <li class="li8">Joins publishers and offers.</li>
+  <li class="li8">Supports assignment-level payout/cap overrides.</li>
+  <li class="li8">Stores callback and destination overrides.</li>
+  <li class="li7">Includes conversion approval percentage and capping policy.</li>
+</ul>
+<p class="p9">It models campaign contract granularity where one publisher can receive customized economics for the same base offer.</p>
+<p class="p7">5.5.4 clicks</p>
+<p class="p7">clicks is a high-volume event table with detailed metadata:</p>
+<ul class="ul1">
+  <li class="li8">Network context (ip, x_forwarded_for, auth token traces).</li>
+  <li class="li8">User context (user_agent, device/browser/os).</li>
+  <li class="li8">Source identifiers (tid, rcid, extra params).</li>
+  <li class="li7">Geo/context enrichment (country, city, domain, isp).</li>
+</ul>
+<p class="p9">The table includes extensive indexing for reporting filters across time, tenant, offer, and publisher dimensions.</p>
+<p class="p7">5.5.5 conversions</p>
+<p class="p7">conversions stores financial outcomes and attribution:</p>
+<ul class="ul1">
+  <li class="li8">Status enum: pending, approved, rejected, rejected_cap, click_expired.</li>
+  <li class="li8">Amount/payout split for revenue vs publisher earnings.</li>
+  <li class="li8">Postback payload JSON for auditability.</li>
+  <li class="li7">affiliate_postback_fired for idempotent callback handling.</li>
+</ul>
+<p class="p9">The status model and unique keys together enforce business correctness under retries.</p>
+<p class="p7">5.5.6 Reporting Tables</p>
+<p class="p11">daily_click_stats and daily_offer_stats are denormalized summaries for dashboard speed. They avoid repetitive heavy scans on raw event tables and enable timeline visualization with low query latency.</p>
+<p class="p7">5.6 Indexing Strategy and Performance Implications</p>
+<p class="p7">The schema uses a mixed index strategy:</p>
+<ul class="ul1">
+  <li class="li8"><b>Lookup indexes</b> for direct entity resolution.</li>
+  <li class="li8"><b>Composite indexes</b> for typical filter combinations (tenant + date + offer/publisher).</li>
+  <li class="li7"><b>Covering-style index</b> in conversions to support aggregate-heavy date queries.</li>
+</ul>
+<p class="p9"><i>Performance outcome:</i> Faster dashboard/report reads and predictable filtering performance by tenant and timeline. The trade-off is an increased write overhead for highly indexed event tables.</p>
+<p class="p7">5.7 Data Integrity and Consistency Model</p>
+<ul class="ul1">
+  <li class="li8">Core entities use FK constraints to prevent orphaned references.</li>
+  <li class="li8">Conversion dedup constraints prevent repeated commercial credit for same click/context.</li>
+  <li class="li8">Worker pipelines and status gating maintain eventual consistency between raw events and daily aggregates.</li>
+  <li class="li7">Financial fields (amount, payout, profit) are maintained with clear semantic separation.</li>
+</ul>
+<p class="p10">5.8 Database Design Conclusion</p>
+<p class="p11">The schema balances operational write throughput with analytical query needs. It provides a production-oriented, tenant-safe relational model suitable for full-stack performance marketing systems where both event reliability and dashboard responsiveness are mandatory.</p>
+<p class="p7">CHAPTER 6: FRONTEND DEVELOPMENT</p>
+<p class="p7">6.1 Frontend Stack and Design Philosophy</p>
+<p class="p7">The frontend is built using React with Vite and structured as an authenticated SPA. The design philosophy prioritizes:</p>
+<ul class="ul1">
+  <li class="li8">Role/domain-aware navigation.</li>
+  <li class="li8">Modular page composition.</li>
+  <li class="li8">Centralized API communication.</li>
+  <li class="li8">Progressive loading of analytics widgets.</li>
+  <li class="li7">Operational UX for campaign managers.</li>
+</ul>
+<p class="p10">6.2 Application Bootstrap and Routing</p>
+<p class="p7">Core bootstrapping occurs through:</p>
+<ul class="ul1">
+  <li class="li8">src/main.jsx for app mount.</li>
+  <li class="li7">src/App.jsx for router + providers + guarded routes.</li>
+</ul>
+<p class="p10">Key routing features:</p>
+<ul class="ul1">
+  <li class="li8">PrivateRoute blocks unauthorized screens.</li>
+  <li class="li8">Domain split:</li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li8">admin.* subdomain for super-admin routes (tenant management).</li>
+    <li class="li8">Tenant subdomains for business operations (offers, publishers, reports).</li>
+  </ul>
+</ul>
+<ul class="ul1">
+  <li class="li7">Shared routes (e.g., settings/profile) remain available in authenticated context.</li>
+</ul>
+<p class="p10">6.3 React Component Architecture</p>
+<p class="p7">The component model follows a layered structure:</p>
+<ul class="ul1">
+  <li class="li8"><b>Layout Components:</b> App shell: sidebar, header, page content regions.</li>
+  <li class="li8"><b>Feature Pages:</b> Dashboard, Offers, Affiliates, Advertisers, Assignments, Reports, Live Logs, Tenant modules.</li>
+  <li class="li8"><b>Reusable UI Components:</b> Timeline filters, skeleton loaders, refresh controls.</li>
+  <li class="li7"><b>Context Providers:</b> Auth, theme, toast, refresh signal.</li>
+</ul>
+<p class="p9">This separation improves maintainability and allows independent UI evolution of business modules.</p>
+<p class="p7">6.4 State Management Strategy</p>
+<p class="p7">State is managed through:</p>
+<ul class="ul1">
+  <li class="li8">Local component state (useState, useEffect, useMemo).</li>
+  <li class="li7">Context APIs for cross-cutting global concerns.</li>
+</ul>
+<p class="p10">Primary contexts:</p>
+<ul class="ul1">
+  <li class="li8"><b>AuthContext:</b> session/user state and login/logout behavior.</li>
+  <li class="li8"><b>RefreshContext:</b> global refresh signaling.</li>
+  <li class="li8"><b>ToastContext:</b> global feedback messaging.</li>
+  <li class="li7"><b>ThemeContext:</b> visual mode behavior.</li>
+</ul>
+<p class="p9">This strategy avoids the overhead of introducing a heavier global store while keeping shared concerns centralized.</p>
+<p class="p7">6.5 API Integration Layer</p>
+<p class="p11">src/services/api.js acts as the unified frontend service gateway.</p>
+<p class="p7">Core implementation choices:</p>
+<ul class="ul1">
+  <li class="li8">Relative API paths to preserve host/subdomain context.</li>
+  <li class="li8">In-memory access token handling + refresh endpoint retry on 401.</li>
+  <li class="li8">credentials: include for session cookie flows.</li>
+  <li class="li8">Endpoint-wise service objects (dashboardAPI, offersAPI, etc.).</li>
+  <li class="li7">Strict avoidance of client-driven tenant headers.</li>
+</ul>
+<p class="p9">This yields a clean boundary between UI and backend contracts.</p>
+<p class="p7">6.6 Tenant-Specific Data Communication (Frontend Perspective)</p>
+<p class="p7">Frontend tenancy behavior is deliberate:</p>
+<ul class="ul1">
+  <li class="li8">No tenant ID in request body/header for core tenancy.</li>
+  <li class="li8">Host/subdomain carries tenant identity.</li>
+  <li class="li7">Backend resolves tenant from request host.</li>
+</ul>
+<p class="p9">Development proxy (vite.config.js) preserves host header (changeOrigin: false) so local testing mimics production tenancy.</p>
+<p class="p7">6.7 Module Deep Dive</p>
+<p class="p7">6.7.1 Admin Dashboard</p>
+<p class="p7">Dashboard integrates multiple APIs for:</p>
+<ul class="ul1">
+  <li class="li8">KPI cards (clicks, conversions, approved/pending/rejected metrics).</li>
+  <li class="li8">Performance charts (time-series).</li>
+  <li class="li8">Offer and publisher statistics.</li>
+  <li class="li7">Period-over-period comparison.</li>
+</ul>
+<p class="p9">Implementation characteristics: Section-wise progressive loading, timeline filtering and derived previous range calculations, and charting via Recharts.</p>
+<p class="p7">6.7.2 User and Entity Management</p>
+<p class="p7">Dedicated pages support full lifecycle operations:</p>
+<ul class="ul1">
+  <li class="li8">Publishers: create/edit/detail/list and postback test tools.</li>
+  <li class="li8">Advertisers: create/edit/detail/list.</li>
+  <li class="li8">Offers: create/edit/detail/list with stats and assignments.</li>
+  <li class="li8">Assignments: linking publishers with offers and applying overrides.</li>
+  <li class="li7">Tenants (admin domain): create/edit/manage/suspend/resume flows.</li>
+</ul>
+<p class="p10">6.7.3 Real-Time Analytics UI</p>
+<p class="p7">LiveLogs provides near real-time operational visibility:</p>
+<ul class="ul1">
+  <li class="li8">Recent clicks and conversions.</li>
+  <li class="li8">Offer/publisher filter support.</li>
+  <li class="li8">Auto-refresh polling (5-second interval).</li>
+  <li class="li7">Manual refresh and selectable limits.</li>
+</ul>
+<p class="p9">This enables campaign operators to validate event flow and detect anomalies quickly.</p>
+<p class="p7">6.8 Frontend Flow Diagram</p>
+<p class="p11">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>L[User Login] --&gt; A[AuthContext Set]<br>
+<span class="Apple-converted-space">    </span>A --&gt; R{Domain Type}<br>
+<span class="Apple-converted-space">    </span>R -- Admin --&gt; T[Tenant Management Routes]<br>
+<span class="Apple-converted-space">    </span>R -- Tenant --&gt; B[Business Routes]<br>
+<span class="Apple-converted-space">    </span>B --&gt; C[Dashboard / Offers / Reports / Live Logs]<br>
+<span class="Apple-converted-space">    </span>C --&gt; D[API Service Layer]<br>
+<span class="Apple-converted-space">    </span>D --&gt; E[Backend Endpoints]<br>
+<span class="Apple-converted-space">    </span>E --&gt; F[Response Mapping]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[Cards / Tables / Charts Render]<br>
+</p>
+<p class="p11"><i>Figure 6.1: Frontend Routing and State Flow.</i></p>
+<p class="p7">6.9 Frontend Engineering Outcomes</p>
+<p class="p11">The frontend successfully provides an operational control panel experience with secure route boundaries, reusable data integration patterns, and analytics-focused rendering behavior suited for ad-tech operations.</p>
+<p class="p7">CHAPTER 7: BACKEND IMPLEMENTATION</p>
+<p class="p7">7.1 Backend Stack and Service Topology</p>
+<p class="p7">The backend uses Fastify for API handling, MySQL for persistence, and Redis for stream-based asynchronous processing. Core topology:</p>
+<ul class="ul1">
+  <li class="li8"><b>API process:</b> handles routing, validation, auth, tenancy, and immediate business decisions.</li>
+  <li class="li7"><b>Worker processes:</b> consume Redis streams for durable event persistence and post-processing.</li>
+</ul>
+<p class="p10">7.2 Server Bootstrap and Middleware Chain</p>
+<p class="p7">Server initialization in src/server.js configures:</p>
+<ul class="ul1">
+  <li class="li8">CORS &amp; Helmet</li>
+  <li class="li8">Cookie support &amp; global rate limiting</li>
+  <li class="li8">Request/response logging hooks</li>
+  <li class="li8">Tenant resolution and subscription enforcement hooks</li>
+  <li class="li7">Route module registration</li>
+</ul>
+<p class="p9">This hook-centric design ensures cross-cutting concerns are consistently applied.</p>
+<p class="p7">7.3 Fastify Route Map (Functional Segments)</p>
+<ul class="ul1">
+  <li class="li8">Authentication routes (/api/auth/*)</li>
+  <li class="li8">Admin and entity routes (/api/admin/*)</li>
+  <li class="li8">Reporting and dashboard routes</li>
+  <li class="li8">Public ingestion routes:</li>
+</ul>
+<ul class="ul1">
+  <ul class="ul1">
+    <li class="li8">/click (GET/HEAD)</li>
+    <li class="li8">/imp</li>
+    <li class="li7">/postback (GET/POST)</li>
+  </ul>
+</ul>
+<p class="p9">The split between admin and public ingress routes allows different operational tuning and security behavior.</p>
+<p class="p7">7.4 Subdomain Resolution and Tenant Context Propagation</p>
+<p class="p7">resolveTenant middleware:</p>
+<ul class="ul1">
+  <li class="li8">Extracts host (x-forwarded-host/host).</li>
+  <li class="li8">Identifies special subdomains (admin, api, www) as needed.</li>
+  <li class="li8">Resolves tenant slug using cached service lookup.</li>
+  <li class="li8">Binds request.tenant and request.tenantId.</li>
+  <li class="li7">Enables downstream tenant filtering and policy enforcement.</li>
+</ul>
+<p class="p9">This establishes tenant identity before business logic execution.</p>
+<p class="p7">7.5 Tracking Link Logic (/click Flow)</p>
+<p class="p7">The tracking service performs:</p>
+<ul class="ul1">
+  <li class="li8">Parse public IDs from query (offer_id, pub_id variants).</li>
+  <li class="li8">Resolve tenant from request context.</li>
+  <li class="li8">Map public IDs to internal tenant-scoped records.</li>
+  <li class="li8">Validate offer/publisher/assignment and status.</li>
+  <li class="li8">Apply targeting and cap checks.</li>
+  <li class="li8">Generate click_uuid.</li>
+  <li class="li8">Build redirect URL with macro replacement and parameter append.</li>
+  <li class="li8">Write click payload to Redis hash.</li>
+  <li class="li8">Enqueue click event to stream:clicks.</li>
+  <li class="li7">Return redirect response immediately.</li>
+</ul>
+<p class="p10">Tracking Link Computation Flow</p>
+<p class="p11">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>Q[Incoming /click query] --&gt; T[Resolve tenant_id]<br>
+<span class="Apple-converted-space">    </span>T --&gt; O[Resolve offer by public_offer_id]<br>
+<span class="Apple-converted-space">    </span>O --&gt; P[Resolve publisher by public_publisher_id]<br>
+<span class="Apple-converted-space">    </span>P --&gt; A[Resolve assignment]<br>
+<span class="Apple-converted-space">    </span>A --&gt; V[Validate status + targeting + caps]<br>
+<span class="Apple-converted-space">    </span>V --&gt; G[Generate click_uuid]<br>
+<span class="Apple-converted-space">    </span>G --&gt; U[Build redirect URL with macros]<br>
+<span class="Apple-converted-space">    </span>U --&gt; R[Store click hash in Redis]<br>
+<span class="Apple-converted-space">    </span>R --&gt; S[XADD stream:clicks]<br>
+<span class="Apple-converted-space">    </span>S --&gt; D[Return redirect]<br>
+</p>
+<p class="p11"><i>Figure 7.1: Flowchart detailing the synchronous Click execution path.</i></p>
+<p class="p7">7.6 Postback Engine (/postback Flow)</p>
+<p class="p7">The postback service implements a robust multi-path strategy:</p>
+<ul class="ul1">
+  <li class="li8">Parse click_id/rcid/amount/status.</li>
+  <li class="li8">Normalize incoming status.</li>
+  <li class="li8">Resolve click context via Redis-first lookup.</li>
+  <li class="li8">Fallback to DB path if required.</li>
+  <li class="li8">Apply deterministic approval percentage logic.</li>
+  <li class="li8">Evaluate cap-based rejection conditions.</li>
+  <li class="li8">Queue conversion payload to stream:conversions (or persist DB path when applicable).</li>
+  <li class="li8">Enforce idempotency via DB unique constraints.</li>
+  <li class="li7">Fire affiliate callback only when status is approved.</li>
+</ul>
+<p class="p10">Postback Processing Engine Flow</p>
+<p class="p11">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[Incoming /postback] --&gt; B[Parse payload]<br>
+<span class="Apple-converted-space">    </span>B --&gt; C{Redis Lookup Match?}<br>
+<span class="Apple-converted-space">    </span>C --&gt;|Yes| D[Use Redis Context]<br>
+<span class="Apple-converted-space">    </span>C --&gt;|No| E[Fallback DB Lookup]<br>
+<span class="Apple-converted-space">    </span>E --&gt; D<br>
+<span class="Apple-converted-space">    </span>D --&gt; F[Calculate Status &amp; Capping]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[XADD stream:conversions]<br>
+<span class="Apple-converted-space">    </span>G --&gt; H{Status == Approved?}<br>
+<span class="Apple-converted-space">    </span>H --&gt;|Yes| I[Flag for Affiliate Callback]<br>
+<span class="Apple-converted-space">    </span>H --&gt;|No| J[Drop Callback]<br>
+<span class="Apple-converted-space">    </span>I --&gt; K[Return 200 OK to Merchant]<br>
+<span class="Apple-converted-space">    </span>J --&gt; K<br>
+</p>
+<p class="p11"><i>Figure 7.2: Decoupled and Resilient Postback Processing Logic.</i></p>
+<p class="p7">7.7 Redis Stream Worker Architecture</p>
+<p class="p7">7.7.1 Click Worker (redisWorker)</p>
+<ul class="ul1">
+  <li class="li8">Consumes stream:clicks.</li>
+  <li class="li8">Fetches corresponding click hashes.</li>
+  <li class="li8">Batch inserts into clicks.</li>
+  <li class="li8">Marks records as flushed.</li>
+  <li class="li8">Updates click-side daily aggregates.</li>
+  <li class="li7">Recovers pending/stuck messages.</li>
+</ul>
+<p class="p10">7.7.2 Conversion Worker (conversionWorker)</p>
+<ul class="ul1">
+  <li class="li8">Consumes stream:conversions.</li>
+  <li class="li8">Validates click existence.</li>
+  <li class="li8">Inserts conversion batch.</li>
+  <li class="li8">Updates status-wise aggregate metrics.</li>
+  <li class="li8">Executes affiliate postbacks for approved-only records.</li>
+  <li class="li7">Marks postback fired flag.</li>
+</ul>
+<p class="p10">7.7.3 Stats Worker (statsWorker)</p>
+<ul class="ul1">
+  <li class="li8">Periodically flushes Redis metric deltas into daily_offer_stats.</li>
+  <li class="li8">Guards against overlapping flush cycles.</li>
+  <li class="li7">Skips flush safely when DB/Redis unavailable.</li>
+</ul>
+<p class="p10">Decoupled Worker Topology</p>
+<p class="p11">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart LR<br>
+<span class="Apple-converted-space">    </span>R[(Redis Streams &amp; Cache)]<br>
+<span class="Apple-converted-space">    </span>CW[Click Worker]<br>
+<span class="Apple-converted-space">    </span>CoW[Conversion Worker]<br>
+<span class="Apple-converted-space">    </span>SW[Stats Worker]<br>
+<span class="Apple-converted-space">    </span>M[(MySQL Database)]<br>
+<br>
+<span class="Apple-converted-space">    </span>R --&gt;|stream:clicks| CW<br>
+<span class="Apple-converted-space">    </span>R --&gt;|stream:conversions| CoW<br>
+<span class="Apple-converted-space">    </span>R --&gt;|Redis Counters| SW<br>
+<br>
+<span class="Apple-converted-space">    </span>CW --&gt;|Batch Insert| M<br>
+<span class="Apple-converted-space">    </span>CoW --&gt;|Insert &amp; Update| M<br>
+<span class="Apple-converted-space">    </span>SW --&gt;|Flush Aggregates| M<br>
+</p>
+<p class="p11"><i>Figure 7.3: Stream-based Async Worker Topology for high-throughput persistence.</i></p>
+<p class="p7">7.8 End-to-End Conversion Flow (Detailed Narrative)</p>
+<ul class="ul1">
+  <li class="li8"><b>Traffic click enters</b> -&gt; click recorded in Redis and queued in click stream.</li>
+  <li class="li8"><b>Click worker persists</b> click into MySQL.</li>
+  <li class="li8"><b>Merchant postback enters</b> with click/rcid and conversion data.</li>
+  <li class="li8"><b>Postback engine resolves context</b> and determines final status.</li>
+  <li class="li8"><b>Conversion stream event created</b> for async processing.</li>
+  <li class="li8"><b>Conversion worker inserts conversion</b>, updates aggregates, and triggers approved-only publisher callback.</li>
+  <li class="li7"><b>Dashboard APIs fetch</b> updated stats and frontend charts reflect new outcomes.</li>
+</ul>
+<p class="p10">7.9 Backend Reliability Features</p>
+<ul class="ul1">
+  <li class="li8">Buffering of postbacks on DB connectivity stress (queue:postbacks:retry).</li>
+  <li class="li8">Pending stream recovery loops.</li>
+  <li class="li8">Bounded retry and timeout logic for lookup operations.</li>
+  <li class="li8">Idempotent constraints at DB layer.</li>
+  <li class="li7">Structured logging for diagnostics.</li>
+</ul>
+<p class="p10">7.10 Backend Implementation Conclusion</p>
+<p class="p11">The backend implementation combines low-latency edge ingestion with resilient asynchronous persistence and strict tenancy/security rules. This architecture is suitable for performance-marketing workloads requiring both speed and business correctness.</p>
+<p class="p7">CHAPTER 8: SECURITY AND TESTING</p>
+<p class="p7">8.1 Security Architecture</p>
+<p class="p7">8.1.1 Authentication and Authorization</p>
+<ul class="ul1">
+  <li class="li8">JWT is used for protected API access.</li>
+  <li class="li8">Role checks distinguish admin and tenant contexts.</li>
+  <li class="li7">Tenant-token alignment prevents cross-tenant access.</li>
+</ul>
+<p class="p10">8.1.2 Tenant Security</p>
+<ul class="ul1">
+  <li class="li8">Tenant derived from host/subdomain, not client headers.</li>
+  <li class="li8">Request context carries tenant ID through service and query layers.</li>
+  <li class="li7">Redis keys and SQL filters include tenant dimension.</li>
+</ul>
+<p class="p10">8.1.3 API Hardening</p>
+<ul class="ul1">
+  <li class="li8">CORS configured with credentials support.</li>
+  <li class="li8">Helmet secures common HTTP header attack surface.</li>
+  <li class="li8">Global rate limiting applied (except explicit route-level exceptions where necessary).</li>
+  <li class="li7">Centralized error handling with minimal client exposure.</li>
+</ul>
+<p class="p10">8.1.4 Data Security Controls</p>
+<ul class="ul1">
+  <li class="li8">Parameterized queries through DB library usage patterns.</li>
+  <li class="li8">Foreign keys for reference integrity.</li>
+  <li class="li7">Status gating in postback engine to prevent invalid callback behavior.</li>
+</ul>
+<p class="p10">8.2 Security Flow Diagram</p>
+<p class="p11">%%{init: {'flowchart': {'curve': 'linear'}}}%%<br>
+flowchart TD<br>
+<span class="Apple-converted-space">    </span>A[Request Received] --&gt; B[Tenant Middleware]<br>
+<span class="Apple-converted-space">    </span>B --&gt; C{Tenant valid?}<br>
+<span class="Apple-converted-space">    </span>C -- No --&gt; X[Reject]<br>
+<span class="Apple-converted-space">    </span>C -- Yes --&gt; D[JWT Verify]<br>
+<span class="Apple-converted-space">    </span>D --&gt; E{Role + Tenant match?}<br>
+<span class="Apple-converted-space">    </span>E -- No --&gt; X<br>
+<span class="Apple-converted-space">    </span>E -- Yes --&gt; F[Validation Layer]<br>
+<span class="Apple-converted-space">    </span>F --&gt; G[Service Logic]<br>
+<span class="Apple-converted-space">    </span>G --&gt; H[Tenant-scoped Query/Cache]<br>
+<span class="Apple-converted-space">    </span>H --&gt; I[Secure Response]<br>
+</p>
+<p class="p11"><i>Figure 8.1: API Authentication and Security Validation Flow.</i></p>
+<p class="p7">8.3 Testing Strategy</p>
+<p class="p7">Testing in this project combines:</p>
+<ul class="ul1">
+  <li class="li8">Route/module behavior testing.</li>
+  <li class="li8">Tenant-isolation-focused tests.</li>
+  <li class="li8">Tracking/postback flow validation scripts.</li>
+  <li class="li7">Load/throughput checks for high-volume behavior.</li>
+</ul>
+<p class="p10">8.4 Implemented Test Assets</p>
+<p class="p7">Observed test and verification assets include:</p>
+<ul class="ul1">
+  <li class="li8">Jest configuration (jest.config.js),</li>
+  <li class="li8">src/tests/multi-tenant.test.js,</li>
+  <li class="li8">src/tests/tenant-routes.test.js,</li>
+  <li class="li8">src/tests/tracking.test.js,</li>
+  <li class="li8">src/tests/subscription.test.js,</li>
+  <li class="li8">src/tests/admin.test.js,</li>
+  <li class="li8">Flow verification scripts (verify_flow.js),</li>
+  <li class="li7">Throughput/load scripts (loadtest.js, throughput-test.js).</li>
+</ul>
+<p class="p10">8.5 Suggested Test Matrix for Academic Reporting</p>
+<table cellspacing="0" cellpadding="0" class="t1">
+  <tbody>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p10"><b>Test Type</b></p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p10"><b>Objective</b></p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p10"><b>Example Cases</b></p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Unit</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Validate utility/service logic</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">URL macro replacement, status normalization</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Integration</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Validate API + DB + Redis interaction</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Click ingest, conversion queue, callback behavior</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Security</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Validate auth and isolation</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Unauthorized access, cross-tenant token mismatch</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Performance</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Validate under load</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Click bursts, stream lag, dashboard read latency</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Recovery</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Validate failure handling</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">DB timeout buffering, pending stream reclaim</p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="p12"><i>Table 8.1: Core Test Matrix Overview.</i></p>
+<p class="p7">8.6 Load Testing and Observed Architecture Behavior</p>
+<p class="p7">Under load, stream-based ingestion architecture offers two key benefits:</p>
+<ul class="ul1">
+  <li class="li8">Request latency remains bounded because immediate DB writes are offloaded.</li>
+  <li class="li7">Workers can batch and recover pending operations.</li>
+</ul>
+<p class="p10">Potential bottlenecks to monitor:</p>
+<ul class="ul1">
+  <li class="li8">Redis memory and stream pending depth.</li>
+  <li class="li8">DB write amplification from heavily indexed event tables.</li>
+  <li class="li7">Worker lag during sustained burst windows.</li>
+</ul>
+<p class="p10">8.7 Security and Testing Conclusion</p>
+<p class="p11">The platform demonstrates a practical security baseline for multi-tenant SaaS and a meaningful testing foundation for final-year engineering scope. Further maturity can be achieved through automated CI test gates and chaos-style failure drills.</p>
+<p class="p7">CHAPTER 9: RESULTS, DISCUSSION, AND CONCLUSION</p>
+<p class="p7">9.1 Implementation Results</p>
+<p class="p7">The project delivered a functional full-stack platform with:</p>
+<ul class="ul1">
+  <li class="li8">Multi-tenant admin operations.</li>
+  <li class="li8">Click/impression ingestion endpoints.</li>
+  <li class="li8">Conversion/postback processing.</li>
+  <li class="li8">Stream-worker persistence.</li>
+  <li class="li8">Dashboard and report interfaces.</li>
+  <li class="li7">Approved-only affiliate postback discipline.</li>
+</ul>
+<p class="p10">9.2 Functional Outcome Mapping</p>
+<table cellspacing="0" cellpadding="0" class="t1">
+  <tbody>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p10"><b>Objective</b></p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p10"><b>Outcome</b></p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Multi-tenant architecture</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Implemented via subdomain resolution and tenant-scoped logic</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">High-throughput ingestion</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Implemented through Redis hash + stream buffering</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Conversion reliability</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Implemented through idempotency + deterministic status handling</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Analytics visibility</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Implemented through dashboard, detailed reports, live logs</p>
+      </td>
+    </tr>
+    <tr>
+      <td valign="middle" class="td1">
+        <p class="p8">Security baseline</p>
+      </td>
+      <td valign="middle" class="td1">
+        <p class="p8">Implemented through JWT, CORS, Helmet, rate limit, tenant checks</p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="p12"><i>Table 9.1: Achievement of System Objectives.</i></p>
+<p class="p7">9.3 End-to-End Flow Achievement</p>
+<p class="p11">The platform successfully establishes the intended lifecycle:</p>
+<p class="p11"><b>Publisher Click -&gt; Backend Validation -&gt; Redis Buffer/Stream -&gt; Worker Persistence -&gt; Merchant Postback -&gt; Conversion Worker -&gt; Approved Callback -&gt; Dashboard Visualization</b>.</p>
+<p class="p11">This confirms the project’s central engineering claim: it can convert raw traffic into measurable tenant-specific business insights with controlled latency and reliability.</p>
+<p class="p7">9.4 Discussion of Strengths</p>
+<ul class="ul1">
+  <li class="li8">Strong tenant isolation pattern across frontend, middleware, service, and database.</li>
+  <li class="li8">Event-driven decoupling improves responsiveness for high-ingress endpoints.</li>
+  <li class="li8">Rich schema supports both operational and analytical requirements.</li>
+  <li class="li8">Approved-only callback policy ensures conversion integrity for affiliate billing trust.</li>
+  <li class="li7">Modular structure improves maintainability and extension readiness.</li>
+</ul>
+<p class="p10">9.5 Limitations</p>
+<ul class="ul1">
+  <li class="li8">Eventual consistency window between raw ingestion and report finalization.</li>
+  <li class="li8">Operational complexity of stream workers and retry loops.</li>
+  <li class="li8">Heavy indexing in event tables may increase storage and write cost.</li>
+  <li class="li7">Frontend real-time behavior currently relies on polling rather than websocket streams.</li>
+</ul>
+<p class="p10">9.6 Future Enhancements</p>
+<ul class="ul1">
+  <li class="li8">WebSocket/SSE channel for true live event streaming in dashboard.</li>
+  <li class="li8">Fraud detection heuristics and anomaly scoring for suspicious traffic patterns.</li>
+  <li class="li8">Horizontal worker autoscaling based on stream lag metrics.</li>
+  <li class="li8">Schema optimization and index rationalization for long-term scale.</li>
+  <li class="li8">CI/CD quality gates with integration and load test automation.</li>
+  <li class="li7">Enhanced observability with tracing and metrics dashboards.</li>
+</ul>
+<p class="p10">9.7 Final Conclusion</p>
+<p class="p11">This project demonstrates a complete and technically credible implementation of a modern multi-tenant affiliate advertising and tracking platform. By combining React-based operational UX, Fastify APIs, Redis stream processing, and MySQL analytical persistence, the system delivers a balanced architecture for performance marketing workflows.</p>
+<p class="p7">From an academic perspective, the work reflects strong application of software engineering principles:</p>
+<ul class="ul1">
+  <li class="li8">Architecture-driven development.</li>
+  <li class="li8">Domain-aware schema modeling.</li>
+  <li class="li8">Asynchronous systems design.</li>
+  <li class="li8">Security-first tenancy handling.</li>
+  <li class="li7">Measurable outcomes through reporting and visualization.</li>
+</ul>
+<p class="p9">Hence, the project satisfies the scope and objectives of a B.Tech major project and provides a practical foundation for production-grade expansion.</p>
+<p class="p7">APPENDIX A: COMBINED MASTER FLOW DIAGRAM</p>
+<p class="p13"><br></p>
+<p class="p13"><br></p>
+<p class="p7">APPENDIX B: SUGGESTED WORD DOCUMENT FORMATTING</p>
+<ul class="ul1">
+  <li class="li8"><b>Font:</b> Times New Roman, 12 pt</li>
+  <li class="li8"><b>Line spacing:</b> 1.5</li>
+  <li class="li8"><b>Margins:</b> Normal (1 inch)</li>
+  <li class="li8"><b>Heading style:</b> Chapter title (16 pt bold), section title (14 pt bold)</li>
+  <li class="li8"><b>Figure caption format:</b> "Figure X.Y: &lt;title&gt;"</li>
+  <li class="li7"><b>Table caption format:</b> "Table X.Y: &lt;title&gt;"</li>
+</ul>
+<p class="p6"><br></p>
+</body>
+</html>
