@@ -468,6 +468,10 @@ export const offersAPI = {
         const queryString = new URLSearchParams(convertDateParamsToIST(params)).toString();
         return apiRequest(`/api/admin/offers/${id}/publisher-stats${queryString ? `?${queryString}` : ''}`);
     },
+    getOfferEventSummary: async (id, params = {}) => {
+        const queryString = new URLSearchParams({ ...params, offer_id: id }).toString();
+        return apiRequest(`/api/admin/reports/events?${queryString}`);
+    },
     getOfferForEdit: async (id) => {
         return apiRequest(`/api/admin/offers/${id}/edit`);
     },

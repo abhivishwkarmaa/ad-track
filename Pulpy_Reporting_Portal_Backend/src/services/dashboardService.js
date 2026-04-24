@@ -82,7 +82,6 @@ export class DashboardService {
     const { from, to } = getIstYmdSpanPrevious();
     return istYmdSpanToMysqlUtcRange(from, to);
   }
-  }
 
   async getDashboardStats(filters = {}, tenantId) {
     // Handle overload: getDashboardStats(tenantId)

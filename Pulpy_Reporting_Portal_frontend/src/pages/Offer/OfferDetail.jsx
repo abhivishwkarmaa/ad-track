@@ -202,9 +202,9 @@ function OfferDetail() {
     const searchContainerRef = useRef(null);
     const statsRequestRef = useRef(0);
     const publisherStatsRequestRef = useRef(0);
+    const eventSummaryRequestRef = useRef(0);
     const selectedTimelineRange = useMemo(() => {
         const activeTimezone = user?.timezone || getUserTimezone();
-        if (selectedRange === 'since_created') {
         if (selectedRange === 'since_created') {
             const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
             const fromUserYmd = offer?.created_at
@@ -354,6 +354,47 @@ function OfferDetail() {
 
         return () => clearTimeout(timer);
     }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
+
+    // FETCH EVENT SUMMARY
+    useEffect(() => {
+        if (!id || !offerStatsQueryParams) return;
+
+        const fetchEventSummaryData = async (scope = 'timeline') => {
+            const requestId = ++eventSummaryRequestRef.current;
+            setLoadingEventSummary(true);
+            try {
+                // If scope is all_time, we send empty params (backend handles it)
+                const params = scope === 'all_time' ? {} : { ...offerStatsQueryParams };
+                const response = await offersAPI.getOfferEventSummary(id, params);
+
+                if (requestId !== eventSummaryRequestRef.current) return;
+
+                if (response?.success) {
+                    const data = response.data || [];
+                    if (data.length === 0 && scope === 'timeline') {
+                        // If no events in timeline, try all-time fallback
+                        setEventSummaryScope('all_time');
+                        await fetchEventSummaryData('all_time');
+                    } else {
+                        setEventSummary(data);
+                        setEventSummaryScope(scope);
+                    }
+                } else {
+                    setEventSummary([]);
+                }
+            } catch (err) {
+                if (requestId !== eventSummaryRequestRef.current) return;
+                console.error('Error fetching event summary:', err);
+                setEventSummary([]);
+            } finally {
+                if (requestId === eventSummaryRequestRef.current) {
+                    setLoadingEventSummary(false);
+                }
+            }
+        };
+
+        fetchEventSummaryData();
+    }, [id, refreshKey, offerStatsQueryParams, timezoneRevision]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
