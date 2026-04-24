@@ -543,20 +543,15 @@ function OfferDetail() {
                 : null;
         const carrier = carrierName || carrierFromJson || '-';
 
-        const hasDeviceTargeting = !!(safeParseJson(offerObj?.device_targeting_json)?.device?.length);
-        const hasOsTargeting = !!(safeParseJson(offerObj?.os_targeting_json)?.os?.length);
-        const hasBrowserTargeting = !!(safeParseJson(offerObj?.browser_targeting_json)?.browser?.length);
-        const platforms = (!hasDeviceTargeting && !hasOsTargeting && !hasBrowserTargeting) ? 'All platforms' : 'Targeted';
-
         const payoutOverride = assignmentObj?.payout_override;
         const hasPayoutOverride =
             payoutOverride !== null &&
             payoutOverride !== undefined &&
             String(payoutOverride).trim() !== '';
         const payout = hasPayoutOverride ? payoutOverride : (offerObj?.affiliate_amount ?? '-');
-        const description = offerObj?.description || '-';
         const categories = offerObj?.category || '-';
         const trackingLink = assignmentObj?.tracking_url || '-';
+        const previewLink = offerObj?.preview_url || '-';
         const billingFlow = offerObj?.billing_flow || '-';
         const billingType = offerObj?.billing_type || '-';
         
@@ -566,11 +561,10 @@ function OfferDetail() {
             `Conversion model: ${conversionModel}`,
             `Country:  ${country}`,
             `Carrier:  ${carrier}`,
-            `Platforms: ${platforms}`,
             `Payout: ${payout}`,
             `Billing flow: ${billingFlow}`,
             `Billing type: ${billingType}`,
-            `Description: ${description}`,
+            `Preview link: ${previewLink}`,
             `Categories: ${categories}`,
             `Tracking link: ${trackingLink}`,
         ].join('\n');
