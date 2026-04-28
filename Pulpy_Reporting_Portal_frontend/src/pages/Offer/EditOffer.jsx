@@ -5,32 +5,10 @@ import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI, advertisersAPI, assignmentsAPI, publishersAPI } from '../../services/api';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { OFFER_COUNTRIES } from '../../utils/countries';
 import './Offer.css';
 
 // Country and Currency data - matching HTML
-const countries = [
-    { code: 'US', name: 'United States' },
-    { code: 'UK', name: 'United Kingdom' },
-    { code: 'CA', name: 'Canada' },
-    { code: 'DE', name: 'Germany' },
-    { code: 'FR', name: 'France' },
-    { code: 'IN', name: 'India' },
-    { code: 'AU', name: 'Australia' },
-    { code: 'JP', name: 'Japan' },
-    { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' },
-    { code: 'CN', name: 'China' },
-    { code: 'RU', name: 'Russia' },
-    { code: 'IT', name: 'Italy' },
-    { code: 'ES', name: 'Spain' },
-    { code: 'NL', name: 'Netherlands' },
-    { code: 'SE', name: 'Sweden' },
-    { code: 'CH', name: 'Switzerland' },
-    { code: 'SG', name: 'Singapore' },
-    { code: 'MX', name: 'Mexico' },
-    { code: 'ZA', name: 'South Africa' },
-    { code: 'CUSTOM', name: 'Custom' }
-];
 
 const currencies = ['USD', 'EUR', 'GBP', 'INR', 'AUD', 'CAD', 'JPY', 'AED'];
 
@@ -566,7 +544,7 @@ function EditOffer() {
                     }));
 
                     // Check if country is custom
-                    const isStandardCountry = countries.some(c => c.code === (offer.country || 'US'));
+                    const isStandardCountry = OFFER_COUNTRIES.some(c => c.code === (offer.country || 'US'));
                     if (!isStandardCountry && offer.country) {
                         setShowCustomCountry(true);
                     }
@@ -841,7 +819,7 @@ function EditOffer() {
                                             }
                                         }}
                                     >
-                                        {countries.map(country => (
+                                        {OFFER_COUNTRIES.map(country => (
                                             <option key={country.code} value={country.code}>{country.name}</option>
                                         ))}
                                     </select>
