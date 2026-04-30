@@ -152,12 +152,48 @@ export class CacheService {
         }
 
         const key = this._getCapKey(entityType, entityId, capType, duration, tenantId);
+        const metaKey = `${key}:meta`; // stores last_hydrate_ms / last_update_ms for self-healing
         let current = await redis.get(key);
 
         if (current === null) {
             current = await this._hydrateCapFromDB(entityType, entityId, capType, duration, tenantId);
             const ttl = this._capKeyTTL(duration);
             await redis.setex(key, ttl, String(current));
+            // Track hydration time to avoid repeated DB hits when keys exist but are stale.
+            await redis.setex(metaKey, ttl, JSON.stringify({ last_hydrate_ms: Date.now() }));
+        } else {
+            // Self-healing: counters can drift low if some conversion insert paths skip incrementCap
+            // or if worker lag/drop happens. We periodically reconcile upward from DB.
+            // Important: we only ever increase the counter (max of Redis vs DB) to avoid loosening caps.
+            try {
+                const ttl = this._capKeyTTL(duration);
+                const metaRaw = await redis.get(metaKey);
+                let lastHydrateMs = 0;
+                if (metaRaw) {
+                    try {
+                        const meta = JSON.parse(metaRaw);
+                        lastHydrateMs = Number(meta?.last_hydrate_ms || 0);
+                    } catch (e) {
+                        lastHydrateMs = 0;
+                    }
+                }
+
+                // Rate limit DB reconciliation to once per 5 minutes per cap key.
+                const nowMs = Date.now();
+                const reconcileIntervalMs = 5 * 60 * 1000;
+                if (!lastHydrateMs || (nowMs - lastHydrateMs) >= reconcileIntervalMs) {
+                    const redisVal = parseFloat(current);
+                    const dbVal = await this._hydrateCapFromDB(entityType, entityId, capType, duration, tenantId);
+                    if (Number.isFinite(dbVal) && Number.isFinite(redisVal) && dbVal > redisVal) {
+                        await redis.setex(key, ttl, String(dbVal));
+                        current = String(dbVal);
+                    }
+                    await redis.setex(metaKey, ttl, JSON.stringify({ last_hydrate_ms: nowMs }));
+                }
+            } catch (e) {
+                // Never fail cap checks due to reconciliation errors; keep Redis value as source of truth.
+                logger.warn(`Cap reconciliation failed for ${key}: ${e.message}`);
+            }
         }
 
         return {
@@ -189,11 +225,17 @@ export class CacheService {
         if (incrementValue <= 0) return;
 
         const key = this._getCapKey(entityType, entityId, capType, duration, tenantId);
+        const metaKey = `${key}:meta`;
         const ttl = this._capKeyTTL(duration);
 
         try {
             await redis.incrbyfloat(key, incrementValue);
             await redis.expire(key, ttl);
+            // Record last update time for observability / reconciliation pacing.
+            // Keep it best-effort; do not block conversion processing on this.
+            try {
+                await redis.setex(metaKey, ttl, JSON.stringify({ last_update_ms: Date.now() }));
+            } catch (e) { /* ignore */ }
         } catch (e) {
             logger.warn(`Redis incr cap error: ${e.message}`);
         }
