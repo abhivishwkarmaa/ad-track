@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { dashboardAPI } from '../../services/api';
+import EntitySearchSelect from '../../components/EntitySearchSelect/EntitySearchSelect';
 import {
     formatDateIST,
     formatDateTimeIST,
@@ -105,7 +106,6 @@ const AVAILABLE_METRICS = [
 
 const DATE_PRESET_OPTIONS = [
     { id: 'today', label: 'Today' },
-    { id: 'tomorrow', label: 'Tomorrow' },
     { id: 'yesterday', label: 'Yesterday' },
     { id: 'this_week', label: 'This Week' },
     { id: 'this_month', label: 'This Month' },
@@ -119,8 +119,6 @@ function DetailedReports() {
     const { refreshKey } = useRefresh();
     const { reportTimezone, timezoneRevision } = useReportTimezone();
     const [reports, setReports] = useState([]);
-    const [offers, setOffers] = useState([]);
-    const [publishers, setPublishers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -134,14 +132,16 @@ function DetailedReports() {
         totalPages: 1
     });
 
+    const initialDatePreset = searchParams.get('date_preset') ||
+        ((searchParams.get('date_from') || searchParams.get('date_to')) ? 'custom' : 'today');
     const [datePreset, setDatePreset] = useState(
-        searchParams.get('date_preset') ||
-        ((searchParams.get('date_from') || searchParams.get('date_to')) ? 'custom' : 'this_month')
+        initialDatePreset === 'tomorrow' ? 'today' : initialDatePreset
     );
     const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '');
     const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '');
     const [offerFilter, setOfferFilter] = useState(searchParams.get('offer_id') || 'all');
     const [publisherFilter, setPublisherFilter] = useState(searchParams.get('publisher_id') || 'all');
+    const [advertiserFilter, setAdvertiserFilter] = useState(searchParams.get('advertiser_id') || 'all');
     const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all');
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
     const [sourceIpFilter, setSourceIpFilter] = useState(searchParams.get('sourceIp') || '');
@@ -179,23 +179,6 @@ function DetailedReports() {
     /** Dedupe back-to-back identical fetches (React Strict Mode dev double-invoke + redundant effect runs). */
     const lastFetchDedupRef = useRef({ key: '', at: 0 });
 
-    // Fetch filter options
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }),
-                    publishersAPI.getPublishers({ limit: 100 })
-                ]);
-                if (offersRes.success) setOffers(offersRes.data);
-                if (publishersRes.success) setPublishers(publishersRes.data);
-            } catch (err) {
-                console.error('Error fetching filter data:', err);
-            }
-        };
-        fetchData();
-    }, []);
-
     useEffect(() => {
         if (datePreset === 'custom') return;
         const range = getDetailedReportsPresetRange(datePreset, reportTimezone);
@@ -229,6 +212,7 @@ function DetailedReports() {
             if (date_to) params.date_to = date_to;
             if (offerFilter !== 'all') params.offer_id = offerFilter;
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
+            if (advertiserFilter !== 'all') params.advertiser_id = advertiserFilter;
             if (statusFilter !== 'all') params.status = statusFilter;
             if (searchTerm) params.search = searchTerm;
             if (sourceIpFilter) params.sourceIp = sourceIpFilter;
@@ -258,6 +242,7 @@ function DetailedReports() {
             if (params.date_to) urlParams.set('date_to', params.date_to);
             if (offerFilter !== 'all') urlParams.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') urlParams.set('publisher_id', publisherFilter);
+            if (advertiserFilter !== 'all') urlParams.set('advertiser_id', advertiserFilter);
             if (statusFilter !== 'all') urlParams.set('status', statusFilter);
             if (searchTerm) urlParams.set('search', searchTerm);
             if (sourceIpFilter) urlParams.set('sourceIp', sourceIpFilter);
@@ -451,6 +436,7 @@ function DetailedReports() {
             if (date_to) params.set('date_to', date_to);
             if (offerFilter !== 'all') params.set('offer_id', offerFilter);
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
+            if (advertiserFilter !== 'all') params.set('advertiser_id', advertiserFilter);
             if (statusFilter !== 'all') params.set('status', statusFilter);
             if (searchTerm) params.set('search', searchTerm);
             if (sourceIpFilter) params.set('sourceIp', sourceIpFilter);
@@ -635,18 +621,28 @@ function DetailedReports() {
                             </div>
                         </div>
                         <div className="filter-group">
-                            <label>Offer</label>
-                            <select className="form-control" value={offerFilter} onChange={e => setOfferFilter(e.target.value)}>
-                                <option value="all">All Offers</option>
-                                {offers.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                            </select>
+                            <EntitySearchSelect
+                                type="offer"
+                                label="Offer"
+                                value={offerFilter}
+                                onChange={setOfferFilter}
+                            />
                         </div>
                         <div className="filter-group">
-                            <label>Publisher</label>
-                            <select className="form-control" value={publisherFilter} onChange={e => setPublisherFilter(e.target.value)}>
-                                <option value="all">All Publishers</option>
-                                {publishers.map(p => <option key={p.id} value={p.id}>{p.company_name} ({p.email})</option>)}
-                            </select>
+                            <EntitySearchSelect
+                                type="publisher"
+                                label="Publisher"
+                                value={publisherFilter}
+                                onChange={setPublisherFilter}
+                            />
+                        </div>
+                        <div className="filter-group">
+                            <EntitySearchSelect
+                                type="advertiser"
+                                label="Advertiser"
+                                value={advertiserFilter}
+                                onChange={setAdvertiserFilter}
+                            />
                         </div>
                         <div className="filter-group">
                             <label>Status</label>

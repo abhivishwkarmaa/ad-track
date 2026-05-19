@@ -186,6 +186,12 @@ export class PublisherService {
       params.push(`%${filters.company_name}%`);
     }
 
+    if (filters.search) {
+      const term = `%${String(filters.search).trim()}%`;
+      where += ' AND (email LIKE ? OR company_name LIKE ? OR first_name LIKE ? OR CAST(public_publisher_id AS CHAR) LIKE ?)';
+      params.push(term, term, term, term);
+    }
+
     // Pagination
     const page = parseInt(filters.page || 1, 10);
     const limit = parseInt(filters.limit || 10, 10);

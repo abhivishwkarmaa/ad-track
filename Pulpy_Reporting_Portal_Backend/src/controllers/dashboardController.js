@@ -345,6 +345,7 @@ export class DashboardController {
         order_by: request.query.order_by,
         range_start_utc: request.query.range_start_utc,
         range_end_utc: request.query.range_end_utc,
+        search: request.query.search,
       };
 
       const data = await dashboardService.getOfferStatistics(filters, tenantId);

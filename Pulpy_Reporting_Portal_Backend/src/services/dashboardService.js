@@ -927,6 +927,15 @@ export class DashboardService {
       const limit = parseInt(filters.limit || 10);
       const offset = (page - 1) * limit;
 
+      const searchTerm = (filters.search || '').trim();
+      const searchParams = [];
+      let searchClause = '';
+      if (searchTerm.length >= 1) {
+        const wildcard = `%${searchTerm}%`;
+        searchClause = ' AND (o.name LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)';
+        searchParams.push(wildcard, wildcard);
+      }
+
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
@@ -959,16 +968,16 @@ export class DashboardService {
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) conv ON o.id = conv.offer_id
-        WHERE o.status != 'remove' AND o.tenant_id = ?
+        WHERE o.status != 'remove' AND o.tenant_id = ?${searchClause}
         ORDER BY ${finalSortBy} ${finalOrderBy}, clicks DESC, conversions DESC
         LIMIT ? OFFSET ?
         `,
-        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, limit, offset]
+        [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd, tenantId, ...searchParams, limit, offset]
       );
 
       const [totalRows] = await pool.query(
-        `SELECT COUNT(*) as total FROM offers WHERE status != 'remove' AND tenant_id = ?`,
-        [tenantId]
+        `SELECT COUNT(*) as total FROM offers o WHERE o.status != 'remove' AND o.tenant_id = ?${searchClause}`,
+        [tenantId, ...searchParams]
       );
 
       return {

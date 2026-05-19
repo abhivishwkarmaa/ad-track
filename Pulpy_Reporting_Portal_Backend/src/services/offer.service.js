@@ -1142,8 +1142,8 @@ class OfferService {
 
     if (filters.search) {
       const term = `%${filters.search}%`;
-      conditions.push('(o.name LIKE ? OR o.description LIKE ?)');
-      params.push(term, term);
+      conditions.push('(o.name LIKE ? OR o.description LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)');
+      params.push(term, term, term);
     }
 
     const page = Number(filters.page) > 0 ? Number(filters.page) : 1;
@@ -1186,7 +1186,7 @@ class OfferService {
 
   async searchOffers(filters = {}, tenantId = null) {
     const term = (filters.q || '').trim();
-    if (!term) {
+    if (!term || term.length < 3) {
       return [];
     }
 

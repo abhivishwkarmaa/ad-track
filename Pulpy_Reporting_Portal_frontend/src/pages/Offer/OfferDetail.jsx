@@ -355,7 +355,7 @@ function OfferDetail() {
 
     useEffect(() => {
         const fetchSearchResults = async () => {
-            if (!debouncedSearchTerm) {
+            if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
                 setSearchResults([]);
                 setSearchLoading(false);
                 return;

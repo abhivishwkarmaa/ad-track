@@ -9,7 +9,6 @@ import {
 export const TIMELINE_OPTIONS = [
     { id: 'today', label: 'Today' },
     { id: 'yesterday', label: 'Yesterday' },
-    { id: 'tomorrow', label: 'Tomorrow' },
     { id: 'this_week', label: 'This Week' },
     { id: 'last_week', label: 'Last Week' },
     { id: 'this_month', label: 'This Month' },
@@ -26,11 +25,6 @@ export const getTimelineRange = (preset, customRange = {}, timeZone = DEFAULT_RE
     const todayYmd = formatYmdInTimeZone(now, timeZone);
 
     if (preset === 'today') return { from: todayYmd, to: todayYmd };
-
-    if (preset === 'tomorrow') {
-        const t = addDaysToYmdInTimeZone(todayYmd, 1, timeZone);
-        return { from: t, to: t };
-    }
 
     if (preset === 'yesterday') {
         const y = addDaysToYmdInTimeZone(todayYmd, -1, timeZone);

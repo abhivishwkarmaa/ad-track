@@ -307,6 +307,9 @@ function DashboardContent() {
     // Pagination state
     const [offerPage, setOfferPage] = useState(1);
     const [totalOffers, setTotalOffers] = useState(0);
+    const [offerSearchInput, setOfferSearchInput] = useState('');
+    const [offerSearchApplied, setOfferSearchApplied] = useState('');
+    const [showOfferSearch, setShowOfferSearch] = useState(false);
     const [pubPage, setPubPage] = useState(1);
     const [totalPublishers, setTotalPublishers] = useState(0);
 
@@ -508,7 +511,13 @@ function DashboardContent() {
         if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
         let cancelled = false;
         setLoadingOfferStats(true);
-        dashboardAPI.getOfferStatistics({ ...baseParams, sort_by: offerSort.by, order_by: offerSort.order, page: offerPage })
+        dashboardAPI.getOfferStatistics({
+            ...baseParams,
+            sort_by: offerSort.by,
+            order_by: offerSort.order,
+            page: offerPage,
+            ...(offerSearchApplied.length > 0 ? { search: offerSearchApplied } : {}),
+        })
             .then(res => {
                 if (!cancelled && res.success) {
                     setOfferStatistics(res.data.data || []);
@@ -518,7 +527,27 @@ function DashboardContent() {
             .catch(err => !cancelled && console.error('Offer stats error:', err))
             .finally(() => !cancelled && setLoadingOfferStats(false));
         return () => { cancelled = true; };
-    }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, offerSort, offerPage, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
+    }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, offerSort, offerPage, offerSearchApplied, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
+
+    // Debounced auto-search (~350ms after user stops typing)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const term = offerSearchInput.trim();
+            const nextApplied = term.length > 0 ? term : '';
+            setOfferSearchApplied((prev) => {
+                if (prev !== nextApplied) setOfferPage(1);
+                return nextApplied;
+            });
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [offerSearchInput]);
+
+    const handleClearOfferSearch = () => {
+        setOfferSearchInput('');
+        setOfferSearchApplied('');
+        setOfferPage(1);
+        setShowOfferSearch(false);
+    };
 
     // 3. Publisher Statistics - Depends on sorting and page
     useEffect(() => {
@@ -885,8 +914,56 @@ function DashboardContent() {
                 <div className="dashboard-card offer-stats-card">
                     <div className="card-header">
                         <h3>Offer Statistics</h3>
-                        <Link to="/reports" className="view-all">View Full Report</Link>
+                        <div className="offer-stats-header-actions">
+                            {!showOfferSearch && !offerSearchApplied && (
+                                <button
+                                    type="button"
+                                    className="btn btn-outline btn-sm offer-stats-search-toggle"
+                                    onClick={() => setShowOfferSearch(true)}
+                                >
+                                    Search offer
+                                </button>
+                            )}
+                            <Link to="/reports" className="view-all">View Full Report</Link>
+                        </div>
                     </div>
+                    {(showOfferSearch || offerSearchApplied) && (
+                        <div className="offer-stats-search-panel">
+                            <input
+                                type="text"
+                                className="form-control offer-stats-search-input"
+                                placeholder="Type to filter offers (empty = show all)..."
+                                autoFocus={showOfferSearch && !offerSearchApplied}
+                                value={offerSearchInput}
+                                onChange={(e) => setOfferSearchInput(e.target.value)}
+                            />
+                            {offerSearchInput.trim().length > 0 &&
+                                offerSearchInput.trim() !== offerSearchApplied && (
+                                <span className="offer-stats-search-pending">Searching…</span>
+                            )}
+                            {offerSearchApplied ? (
+                                <button type="button" className="btn btn-outline btn-sm" onClick={handleClearOfferSearch}>
+                                    Clear &amp; show all
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn btn-outline btn-sm"
+                                    onClick={() => {
+                                        setShowOfferSearch(false);
+                                        setOfferSearchInput('');
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    {offerSearchApplied ? (
+                        <div className="offer-stats-search-active-hint">
+                            Filtered by &ldquo;{offerSearchApplied}&rdquo;
+                        </div>
+                    ) : null}
                     <ProgressBar visible={loadingOfferStats} />
                     {loadingOfferStats && offerStatistics.length === 0 ? (
                         <SkeletonTable rows={5} cols={8} className="stats-table stats-table-offer" />
@@ -931,7 +1008,13 @@ function DashboardContent() {
                                 onPageChange={setOfferPage} 
                             />
                         </>
-                    ) : <div className="no-data">No offer statistics available</div>}
+                    ) : (
+                        <div className="no-data">
+                            {offerSearchApplied
+                                ? `No offers found matching "${offerSearchApplied}"`
+                                : 'No offer statistics available'}
+                        </div>
+                    )}
                 </div>
 
                 {/* Publisher Statistics */}

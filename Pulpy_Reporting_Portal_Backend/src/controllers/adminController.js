@@ -230,6 +230,7 @@ export class AdminController {
         status: request.query.status,
         email: request.query.email,
         company_name: request.query.company_name,
+        search: request.query.search,
         page: request.query.page,
         limit: request.query.limit,
       };
