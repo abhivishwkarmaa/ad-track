@@ -1258,28 +1258,35 @@ function OfferDetail() {
                                             onClick={async () => {
                                                 try {
                                                     const text = buildAssignmentShareText(offer, assignment);
-                                                    const textForNativeShare = text.startsWith('Offer:')
-                                                        ? text.split('\n').slice(1).join('\n').trim()
-                                                        : text;
+                                                    const result = await safeCopyToClipboard(text);
 
-                                                    // Prefer native share when available (mobile)
                                                     if (navigator?.share) {
-                                                        await navigator.share({
-                                                            title: `Offer: ${offer?.name || ''}`,
-                                                            text: textForNativeShare,
-                                                        });
-                                                        return;
+                                                        const textForNativeShare = text.startsWith('Offer:')
+                                                            ? text.split('\n').slice(1).join('\n').trim()
+                                                            : text;
+                                                        try {
+                                                            await navigator.share({
+                                                                title: `Offer: ${offer?.name || ''}`,
+                                                                text: textForNativeShare,
+                                                            });
+                                                            return;
+                                                        } catch (shareError) {
+                                                            if (shareError?.name === 'AbortError') {
+                                                                if (result.success) {
+                                                                    toast.success('Offer details copied. You can paste and share.');
+                                                                }
+                                                                return;
+                                                            }
+                                                            throw shareError;
+                                                        }
                                                     }
 
-                                                    const result = await safeCopyToClipboard(text);
                                                     if (result.success) {
                                                         toast.success('Offer details copied. You can paste and share.');
                                                     } else {
                                                         toast.error(result.error || 'Failed to copy share text');
                                                     }
                                                 } catch (error) {
-                                                    // If user cancels native share, ignore silently
-                                                    if (error?.name === 'AbortError') return;
                                                     console.error(error);
                                                     toast.error('Failed to share details');
                                                 }
