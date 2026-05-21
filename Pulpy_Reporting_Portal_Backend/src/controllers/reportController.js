@@ -3,6 +3,24 @@ import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import {
+  assignEntityFilterQuery,
+  resolveReportEntityFilters,
+  ResolveEntityFilterError,
+} from '../utils/resolveReportEntityFilters.js';
+
+async function resolveFiltersForReports(filters, tenantId) {
+  try {
+    return await resolveReportEntityFilters(filters, tenantId);
+  } catch (error) {
+    if (error instanceof ResolveEntityFilterError) {
+      const err = new Error(error.message);
+      err.statusCode = 400;
+      throw err;
+    }
+    throw error;
+  }
+}
 
 export class ReportController {
   async getSummary(request, reply) {
@@ -22,8 +40,7 @@ export class ReportController {
       if (request.query.date_to) filters.date_to = request.query.date_to;
       if (request.query.range_start_utc) filters.range_start_utc = request.query.range_start_utc;
       if (request.query.range_end_utc) filters.range_end_utc = request.query.range_end_utc;
-      if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
-      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
+      assignEntityFilterQuery(filters, request.query);
       if (request.query.country) filters.country = request.query.country;
       if (request.query.ip) filters.ip = request.query.ip;
       if (request.query.tid) filters.tid = request.query.tid;
@@ -44,7 +61,8 @@ export class ReportController {
       if (request.query.hour !== undefined) filters.hour = parseInt(request.query.hour);
       if (request.query.search) filters.search = request.query.search;
 
-      const summary = await reportService.getSummary(filters, tenantId);
+      const resolvedFilters = await resolveFiltersForReports(filters, tenantId);
+      const summary = await reportService.getSummary(resolvedFilters, tenantId);
 
       return reply.send({
         success: true,
@@ -52,7 +70,8 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getSummary error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
     }
   }
 
@@ -85,8 +104,7 @@ export class ReportController {
 
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
-      if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
-      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
+      assignEntityFilterQuery(filters, request.query);
       if (request.query.country) filters.country = request.query.country;
       if (request.query.ip) filters.ip = request.query.ip;
       if (request.query.tid) filters.tid = request.query.tid;
@@ -106,7 +124,6 @@ export class ReportController {
       if (request.query.city) filters.city = request.query.city;
       if (request.query.region) filters.region = request.query.region;
       if (request.query.domain) filters.domain = request.query.domain;
-      if (request.query.advertiser_id) filters.advertiser_id = parseInt(request.query.advertiser_id);
       if (request.query.page) filters.page = parseInt(request.query.page);
       if (request.query.limit) filters.limit = parseInt(request.query.limit);
       if (request.query.search) filters.search = request.query.search;
@@ -122,7 +139,8 @@ export class ReportController {
       if (request.query.metrics) filters.metrics = request.query.metrics;
       // all_dates is intentionally not accepted (guarded above)
 
-      const result = await reportService.getDetailed(filters, tenantId);
+      const resolvedFilters = await resolveFiltersForReports(filters, tenantId);
+      const result = await reportService.getDetailed(resolvedFilters, tenantId);
 
       // Handle CSV Export
       if (result.isExport) {
@@ -162,7 +180,8 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getDetailed error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
     }
   }
 
@@ -179,12 +198,12 @@ export class ReportController {
 
       const filters = {};
 
-      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
-      if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
+      assignEntityFilterQuery(filters, request.query);
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
 
-      const result = await reportService.getPublisherConversionStats(filters, tenantId);
+      const resolvedFilters = await resolveFiltersForReports(filters, tenantId);
+      const result = await reportService.getPublisherConversionStats(resolvedFilters, tenantId);
 
       return reply.send({
         success: true,
@@ -192,7 +211,8 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getPublisherConversionStats error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
     }
   }
   async getConversions(request, reply) {
@@ -212,13 +232,13 @@ export class ReportController {
       if (request.query.limit) filters.limit = request.query.limit;
       if (request.query.date_from) filters.date_from = request.query.date_from;
       if (request.query.date_to) filters.date_to = request.query.date_to;
-      if (request.query.offer_id) filters.offer_id = parseInt(request.query.offer_id);
-      if (request.query.publisher_id) filters.publisher_id = parseInt(request.query.publisher_id);
+      assignEntityFilterQuery(filters, request.query);
       if (request.query.status) filters.status = request.query.status;
       if (request.query.conversion_uuid) filters.conversion_uuid = request.query.conversion_uuid;
       if (request.query.click_uuid) filters.click_uuid = request.query.click_uuid;
 
-      const result = await reportService.getConversions(filters, tenantId);
+      const resolvedFilters = await resolveFiltersForReports(filters, tenantId);
+      const result = await reportService.getConversions(resolvedFilters, tenantId);
 
       return reply.send({
         success: true,
@@ -226,7 +246,8 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getConversions error:', error);
-      return reply.code(500).send(createErrorResponse(error, 500));
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
     }
   }
 

@@ -5,6 +5,38 @@ import { summaryShouldUseDailyClickStats } from '../utils/reportDailyRollup.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 
 export class ReportService {
+  /**
+   * Offer / publisher / advertiser filters for fast reporting paths (fact table scans).
+   * Advertiser uses non-correlated IN (SELECT ...) instead of per-row EXISTS.
+   */
+  buildEntityFactPredicates(alias, filters, tenantId) {
+    const parts = [];
+    const params = [];
+    if (filters.offer_id) {
+      parts.push(`${alias}.offer_id = ?`);
+      params.push(filters.offer_id);
+    }
+    if (filters.publisher_id) {
+      parts.push(`${alias}.publisher_id = ?`);
+      params.push(filters.publisher_id);
+    }
+    if (filters.advertiser_id && tenantId) {
+      parts.push(
+        `${alias}.offer_id IN (SELECT id FROM offers WHERE tenant_id = ? AND advertiser_id = ?)`
+      );
+      params.push(tenantId, filters.advertiser_id);
+    }
+    const sql = parts.length ? ` AND ${parts.join(' AND ')}` : '';
+    return { sql, params };
+  }
+
+  appendEntityFiltersToWhere(whereParts, params, alias, filters, tenantId) {
+    const pred = this.buildEntityFactPredicates(alias, filters, tenantId);
+    if (!pred.sql) return;
+    whereParts.push(pred.sql.replace(/^ AND /, ''));
+    params.push(...pred.params);
+  }
+
   async getSummary(filters = {}, tenantId = null) {
     // FINANCIAL SEPARATION RULES:
     // 1. Revenue = SUM(amount)  — ALL conversions regardless of status
@@ -225,26 +257,8 @@ export class ReportService {
 
           const needsUniqueClicksAgg = wantsMetric('unique_clicks') || includeAllMetrics;
 
-          const build3DimFactPredicates = (alias) => {
-            const parts = [];
-            const params = [];
-            if (filters.offer_id) {
-              parts.push(`${alias}.offer_id = ?`);
-              params.push(filters.offer_id);
-            }
-            if (filters.publisher_id) {
-              parts.push(`${alias}.publisher_id = ?`);
-              params.push(filters.publisher_id);
-            }
-            if (filters.advertiser_id) {
-              parts.push(`EXISTS (SELECT 1 FROM offers oadv WHERE oadv.id = ${alias}.offer_id AND oadv.advertiser_id = ?)`);
-              params.push(filters.advertiser_id);
-            }
-            const sql = parts.length ? ` AND ${parts.join(' AND ')}` : '';
-            return { sql, params };
-          };
-          const predC = build3DimFactPredicates('c');
-          const predConv = build3DimFactPredicates('conv');
+          const predC = this.buildEntityFactPredicates('c', filters, tenantId);
+          const predConv = this.buildEntityFactPredicates('conv', filters, tenantId);
 
           const selectParts = [
             'base.date_group as date_group',
@@ -371,9 +385,11 @@ export class ReportService {
         // Fast path: publisher-only aggregation (most common slow case: month + groupBy=publisher_id)
         // Uses pre-aggregated subqueries and avoids click_uuid joins across large ranges.
         const simpleKeys = new Set(['page', 'limit', 'date_from', 'date_to', 'groupBy', 'metrics', 'columns', 'export', 'all_dates']);
-        const hasComplexFilters = Object.keys(filters).some((k) => !simpleKeys.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
-        // offer/publisher/advertiser filters narrow the 4-dim CTE — allow them without falling back to the slow generic aggregate path
-        const simpleKeysFourDim = new Set([...simpleKeys, 'offer_id', 'publisher_id', 'advertiser_id']);
+        const simpleKeysWithEntityFilters = new Set([...simpleKeys, 'offer_id', 'publisher_id', 'advertiser_id']);
+        const hasComplexFilters = Object.keys(filters).some(
+          (k) => !simpleKeysWithEntityFilters.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== ''
+        );
+        const simpleKeysFourDim = simpleKeysWithEntityFilters;
         const hasBlockingFiltersFourDim = Object.keys(filters).some(
           (k) => !simpleKeysFourDim.has(k) && filters[k] !== undefined && filters[k] !== null && filters[k] !== ''
         );
@@ -398,6 +414,9 @@ export class ReportService {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
             convParams.push(utcStart, utcEnd);
           }
+
+          this.appendEntityFiltersToWhere(clickWhere, clickParams, 'c', filters, tenantId);
+          this.appendEntityFiltersToWhere(convWhere, convParams, 'conv', filters, tenantId);
 
           const needsConversionMetrics =
             wantsMetric('conversions') ||
@@ -609,6 +628,9 @@ export class ReportService {
             convParams.push(utcStart, utcEnd);
           }
 
+          this.appendEntityFiltersToWhere(clickWhere, clickParams, 'c', filters, tenantId);
+          this.appendEntityFiltersToWhere(convWhere, convParams, 'conv', filters, tenantId);
+
           const needsConversionMetrics =
             wantsMetric('conversions') ||
             wantsMetric('approved_conversions') ||
@@ -798,6 +820,9 @@ export class ReportService {
             convWhere.push('conv.created_at BETWEEN ? AND ?');
             convParams.push(utcStart, utcEnd);
           }
+
+          this.appendEntityFiltersToWhere(clickWhere, clickParams, 'c', filters, tenantId);
+          this.appendEntityFiltersToWhere(convWhere, convParams, 'conv', filters, tenantId);
 
           const needsConversionMetrics =
             wantsMetric('conversions') ||
@@ -1041,26 +1066,8 @@ export class ReportService {
 
           // Detailed report: always aggregate from raw `clicks` / `conversions` (no daily_reporting_rollup).
 
-          const buildFourDimFactPredicates = (alias) => {
-            const parts = [];
-            const params = [];
-            if (filters.offer_id) {
-              parts.push(`${alias}.offer_id = ?`);
-              params.push(filters.offer_id);
-            }
-            if (filters.publisher_id) {
-              parts.push(`${alias}.publisher_id = ?`);
-              params.push(filters.publisher_id);
-            }
-            if (filters.advertiser_id) {
-              parts.push(`EXISTS (SELECT 1 FROM offers oadv WHERE oadv.id = ${alias}.offer_id AND oadv.advertiser_id = ?)`);
-              params.push(filters.advertiser_id);
-            }
-            const sql = parts.length ? ` AND ${parts.join(' AND ')}` : '';
-            return { sql, params };
-          };
-          const predC = buildFourDimFactPredicates('c');
-          const predConv = buildFourDimFactPredicates('conv');
+          const predC = this.buildEntityFactPredicates('c', filters, tenantId);
+          const predConv = this.buildEntityFactPredicates('conv', filters, tenantId);
 
           // Use a single statement with CTEs so clicks/conversions are scanned once.
 

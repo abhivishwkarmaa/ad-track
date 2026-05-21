@@ -132,11 +132,11 @@ class AdvertiserService {
     }
   }
 
-  async getAdvertiserById(id, tenantId = null) {
+  async getAdvertiserById(id, tenantId = null, internalOnly = false) {
     if (!id) return null;
 
-    // 1. Try Public ID first
-    if (tenantId) {
+    // 1. Try Public ID first (detail URLs use public_advertiser_id; skip when resolving internal FK ids)
+    if (tenantId && !internalOnly) {
       const [publicRows] = await pool.query(
         'SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE public_advertiser_id = ? AND tenant_id = ? LIMIT 1',
         [id, tenantId]
@@ -166,6 +166,23 @@ class AdvertiserService {
     return advertiser;
   }
 
+  /** Resolve public_advertiser_id (or legacy internal id) to advertisers.id for FK filters. */
+  async getInternalIdByPublicId(publicId, tenantId) {
+    if (publicId == null || !tenantId) return null;
+
+    const [publicRows] = await pool.query(
+      'SELECT id FROM advertisers WHERE tenant_id = ? AND public_advertiser_id = ? LIMIT 1',
+      [tenantId, publicId]
+    );
+    if (publicRows?.[0]?.id) return publicRows[0].id;
+
+    const [internalRows] = await pool.query(
+      'SELECT id FROM advertisers WHERE tenant_id = ? AND id = ? LIMIT 1',
+      [tenantId, publicId]
+    );
+    return internalRows?.[0]?.id ?? null;
+  }
+
   async listAdvertisers(filters = {}, tenantId = null) {
     const conditions = [];
     const params = [];
@@ -188,8 +205,8 @@ class AdvertiserService {
 
     if (filters.search) {
       const term = `%${filters.search}%`;
-      conditions.push('(name LIKE ? OR email LIKE ? OR company_name LIKE ?)');
-      params.push(term, term, term);
+      conditions.push('(name LIKE ? OR email LIKE ? OR company_name LIKE ? OR CAST(public_advertiser_id AS CHAR) LIKE ?)');
+      params.push(term, term, term, term);
     }
 
     const page = Number(filters.page) > 0 ? Number(filters.page) : 1;

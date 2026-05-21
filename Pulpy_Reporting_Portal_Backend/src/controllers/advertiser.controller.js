@@ -65,7 +65,13 @@ class AdvertiserController {
         return reply.code(400).send(buildError('Tenant context required', 400, 'Bad Request'));
       }
       
-      const advertiser = await advertiserService.getAdvertiserById(request.params.id, tenantId);
+      const internalOnly =
+        request.query.internal_only === '1' || request.query.internal_only === 'true';
+      const advertiser = await advertiserService.getAdvertiserById(
+        request.params.id,
+        tenantId,
+        internalOnly
+      );
       if (!advertiser) {
         return reply.code(404).send(buildError('Advertiser not found', 404, 'Not Found'));
       }

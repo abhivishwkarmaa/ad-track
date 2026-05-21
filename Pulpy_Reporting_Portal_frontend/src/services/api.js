@@ -465,8 +465,9 @@ export const publishersAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/publishers?${queryString}`);
     },
-    getPublisher: async (id) => {
-        return apiRequest(`/api/admin/publishers/${id}`);
+    getPublisher: async (id, options = {}) => {
+        const qs = options.internalOnly ? '?internal_only=1' : '';
+        return apiRequest(`/api/admin/publishers/${id}${qs}`);
     },
     createPublisher: async (data) => {
         return apiRequest('/api/admin/publishers', {
@@ -515,8 +516,9 @@ export const advertisersAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/advertisers?${queryString}`);
     },
-    getAdvertiser: async (id) => {
-        return apiRequest(`/api/admin/advertisers/${id}`);
+    getAdvertiser: async (id, options = {}) => {
+        const qs = options.internalOnly ? '?internal_only=1' : '';
+        return apiRequest(`/api/admin/advertisers/${id}${qs}`);
     },
     createAdvertiser: async (data) => {
         return apiRequest('/api/admin/advertisers', {

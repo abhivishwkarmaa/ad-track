@@ -259,7 +259,13 @@ export class AdminController {
         });
       }
 
-      const publisher = await publisherService.findById(request.params.id, tenantId);
+      const internalOnly =
+        request.query.internal_only === '1' || request.query.internal_only === 'true';
+      const publisher = await publisherService.findById(
+        request.params.id,
+        tenantId,
+        internalOnly
+      );
       if (!publisher) {
         return reply.code(404).send({
           success: false,

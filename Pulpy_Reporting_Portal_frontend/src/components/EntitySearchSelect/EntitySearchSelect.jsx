@@ -23,6 +23,23 @@ function formatAdvertiserLabel(item) {
     return pubId ? `${pubId} — ${name}` : name;
 }
 
+/** Value sent to API / URL — always public-facing id where available */
+function getEntityPublicValue(type, item) {
+    if (type === 'offer') {
+        const id = item.display_id ?? item.public_offer_id ?? item.id;
+        return String(id);
+    }
+    if (type === 'publisher') {
+        const id = item.public_publisher_id ?? item.public_id;
+        return id != null ? String(id) : String(item.id);
+    }
+    if (type === 'advertiser') {
+        const id = item.public_advertiser_id;
+        return id != null ? String(id) : String(item.id);
+    }
+    return String(item.id);
+}
+
 /** Empty query → full list; non-empty → server-side search */
 async function fetchEntities(type, query) {
     const q = query.trim();
@@ -210,7 +227,9 @@ function EntitySearchSelect({
                                     type="button"
                                     className="entity-search-option"
                                     role="option"
-                                    onClick={() => handleSelect(String(item.id), formatItem(item))}
+                                    onClick={() =>
+                                        handleSelect(getEntityPublicValue(type, item), formatItem(item))
+                                    }
                                 >
                                     {formatItem(item)}
                                 </button>
