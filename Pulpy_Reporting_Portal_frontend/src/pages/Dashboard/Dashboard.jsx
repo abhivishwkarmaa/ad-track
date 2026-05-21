@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { formatDateInTimeZone } from '../../utils/dateTime';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import {
@@ -413,9 +414,11 @@ function DashboardContent() {
     useEffect(() => {
         if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
 
-        let cancelled = false;
-        const mountCheck = () => !cancelled;
+        const controller = new AbortController();
+        const { signal } = controller;
+        const mountCheck = () => !signal.aborted;
         const cardsReqId = ++cardsRequestSeqRef.current;
+        const requestOptions = { signal };
 
         setLoadingCards(true);
         setLoadingPerformance(true);
@@ -424,26 +427,26 @@ function DashboardContent() {
         setLoadingComparison(true);
 
         // Fetch Cards
-        dashboardAPI.getDashboardCards(baseParams)
+        dashboardAPI.getDashboardCards(baseParams, requestOptions)
             .then(res => {
                 const isStale = cardsReqId !== cardsRequestSeqRef.current;
                 if (mountCheck() && !isStale && res.success) setCards(res.data || {});
             })
-            .catch(err => mountCheck() && console.error('Cards error:', err))
+            .catch(err => mountCheck() && !isAbortError(err) && console.error('Cards error:', err))
             .finally(() => {
                 if (mountCheck() && cardsReqId === cardsRequestSeqRef.current) setLoadingCards(false);
             });
 
         // Fetch Chart
-        dashboardAPI.getPerformance({ ...baseParams, group_by: groupBy })
+        dashboardAPI.getPerformance({ ...baseParams, group_by: groupBy }, requestOptions)
             .then(res => mountCheck() && res.success && setPerformanceChart(res.data || []))
-            .catch(err => mountCheck() && console.error('Performance error:', err))
+            .catch(err => mountCheck() && !isAbortError(err) && console.error('Performance error:', err))
             .finally(() => mountCheck() && setLoadingPerformance(false));
 
         // Fetch Summary
-        dashboardAPI.getPerformanceSummary(baseParams)
+        dashboardAPI.getPerformanceSummary(baseParams, requestOptions)
             .then(res => mountCheck() && res.success && setSummary(res.data || {}))
-            .catch(err => mountCheck() && console.error('Summary error:', err))
+            .catch(err => mountCheck() && !isAbortError(err) && console.error('Summary error:', err))
             .finally(() => mountCheck() && setLoadingSummary(false));
 
         if (apiPreviousRange?.date_from && apiPreviousRange?.date_to) {
@@ -460,18 +463,19 @@ function DashboardContent() {
                             : {}),
                     },
                     reportTimezone
-                )
+                ),
+                requestOptions
             )
                 .then(res => mountCheck() && res.success && setSummaryPrevious(res.data || null))
-                .catch(err => mountCheck() && console.error('Summary previous error:', err));
+                .catch(err => mountCheck() && !isAbortError(err) && console.error('Summary previous error:', err));
         } else {
             setSummaryPrevious(null);
         }
 
         // Fetch Live Offers (Static limit)
-        dashboardAPI.getLiveOffers(buildDashboardApiParams({ limit: 5 }, reportTimezone))
+        dashboardAPI.getLiveOffers(buildDashboardApiParams({ limit: 5 }, reportTimezone), requestOptions)
             .then(res => mountCheck() && res.success && setLiveOffers(res.data || []))
-            .catch(err => mountCheck() && console.error('Live offers error:', err))
+            .catch(err => mountCheck() && !isAbortError(err) && console.error('Live offers error:', err))
             .finally(() => mountCheck() && setLoadingLiveOffers(false));
 
         // Fetch Comparison
@@ -480,16 +484,16 @@ function DashboardContent() {
                 previous_from: apiPreviousRange.date_from,
                 previous_to: apiPreviousRange.date_to,
             };
-            dashboardAPI.getPerformanceComparison({ ...baseParams, ...prevParams, group_by: groupBy })
+            dashboardAPI.getPerformanceComparison({ ...baseParams, ...prevParams, group_by: groupBy }, requestOptions)
                 .then(res => mountCheck() && res.success && setPerformanceComparison(res.data || []))
-                .catch(err => mountCheck() && console.error('Comparison error:', err))
+                .catch(err => mountCheck() && !isAbortError(err) && console.error('Comparison error:', err))
                 .finally(() => mountCheck() && setLoadingComparison(false));
         } else {
             setPerformanceComparison([]);
             setLoadingComparison(false);
         }
 
-        return () => { cancelled = true; };
+        return () => controller.abort();
     }, [
         apiDateRange.date_from,
         apiDateRange.date_to,
@@ -509,7 +513,8 @@ function DashboardContent() {
     // 2. Offer Statistics - Depends on sorting and page
     useEffect(() => {
         if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
-        let cancelled = false;
+        const controller = new AbortController();
+        const { signal } = controller;
         setLoadingOfferStats(true);
         dashboardAPI.getOfferStatistics({
             ...baseParams,
@@ -517,16 +522,16 @@ function DashboardContent() {
             order_by: offerSort.order,
             page: offerPage,
             ...(offerSearchApplied.length > 0 ? { search: offerSearchApplied } : {}),
-        })
+        }, { signal })
             .then(res => {
-                if (!cancelled && res.success) {
+                if (!signal.aborted && res.success) {
                     setOfferStatistics(res.data.data || []);
                     setTotalOffers(res.data.total || 0);
                 }
             })
-            .catch(err => !cancelled && console.error('Offer stats error:', err))
-            .finally(() => !cancelled && setLoadingOfferStats(false));
-        return () => { cancelled = true; };
+            .catch(err => !signal.aborted && !isAbortError(err) && console.error('Offer stats error:', err))
+            .finally(() => !signal.aborted && setLoadingOfferStats(false));
+        return () => controller.abort();
     }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, offerSort, offerPage, offerSearchApplied, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
 
     // Debounced auto-search (~350ms after user stops typing)
@@ -552,18 +557,19 @@ function DashboardContent() {
     // 3. Publisher Statistics - Depends on sorting and page
     useEffect(() => {
         if (dateFilter === 'custom' && (!dateRange.from || !dateRange.to)) return;
-        let cancelled = false;
+        const controller = new AbortController();
+        const { signal } = controller;
         setLoadingPublisherStats(true);
-        dashboardAPI.getPublisherStatistics({ ...baseParams, sort_by: pubSort.by, order_by: pubSort.order, page: pubPage })
+        dashboardAPI.getPublisherStatistics({ ...baseParams, sort_by: pubSort.by, order_by: pubSort.order, page: pubPage }, { signal })
             .then(res => {
-                if (!cancelled && res.success) {
+                if (!signal.aborted && res.success) {
                     setPublisherStatistics(res.data.data || []);
                     setTotalPublishers(res.data.total || 0);
                 }
             })
-            .catch(err => !cancelled && console.error('Publisher stats error:', err))
-            .finally(() => !cancelled && setLoadingPublisherStats(false));
-        return () => { cancelled = true; };
+            .catch(err => !signal.aborted && !isAbortError(err) && console.error('Publisher stats error:', err))
+            .finally(() => !signal.aborted && setLoadingPublisherStats(false));
+        return () => controller.abort();
     }, [apiDateRange.date_from, apiDateRange.date_to, utcRange.range_start_utc, utcRange.range_end_utc, pubSort, pubPage, refreshKey, dateFilter, reportTimezone, timezoneRevision]);
 
     const handleOfferSort = (field) => {

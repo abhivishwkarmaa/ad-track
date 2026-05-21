@@ -4,6 +4,7 @@ import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { publishersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Affiliate.css';
 
@@ -80,6 +81,8 @@ function ManageAffiliate() {
 
     // Fetch publishers data
     useEffect(() => {
+        const controller = new AbortController();
+
         const fetchPublishers = async () => {
             try {
                 setLoading(true);
@@ -96,21 +99,24 @@ function ManageAffiliate() {
                     params.status = statusFilter;
                 }
 
-                const response = await publishersAPI.getPublishers(params);
+                const response = await publishersAPI.getPublishers(params, { signal: controller.signal });
                 if (response.success) {
                     setPublishers(response.data);
                 } else {
                     setError('Failed to load publishers');
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Publishers fetch error:', err);
                 setError(err.message || 'Failed to load publishers');
             } finally {
+                if (controller.signal.aborted) return;
                 setLoading(false);
             }
         };
 
         fetchPublishers();
+        return () => controller.abort();
     }, [statusFilter, refreshKey]);
 
     const filteredAffiliates = publishers.filter(affiliate => {

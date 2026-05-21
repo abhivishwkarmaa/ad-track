@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import './Assignment.css';
 
 function NewAssignment() {
@@ -21,20 +22,26 @@ function NewAssignment() {
     const publisherIdsKey = publisherAssignments.map(a => a.publisher_id).sort((a, b) => a - b).join(',');
 
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchData = async () => {
             try {
                 const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }),
-                    publishersAPI.getPublishers({ limit: 100 })
+                    offersAPI.getOffers({ limit: 100 }, { signal }),
+                    publishersAPI.getPublishers({ limit: 100 }, { signal })
                 ]);
+                if (signal.aborted) return;
                 if (offersRes.success) setOffers(offersRes.data);
                 if (publishersRes.success) setPublishers(publishersRes.data);
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Error fetching data:', err);
                 toast.error('Failed to load data');
             }
         };
         fetchData();
+        return () => controller.abort();
     }, [toast, refreshKey]);
 
     useEffect(() => {

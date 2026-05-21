@@ -4,6 +4,7 @@ import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { advertisersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
@@ -80,6 +81,8 @@ function ManageAdvertiser() {
 
     // Fetch advertisers data
     useEffect(() => {
+        const controller = new AbortController();
+
         const fetchAdvertisers = async () => {
             try {
                 setLoading(true);
@@ -96,21 +99,24 @@ function ManageAdvertiser() {
                     params.status = statusFilter;
                 }
 
-                const response = await advertisersAPI.getAdvertisers(params);
+                const response = await advertisersAPI.getAdvertisers(params, { signal: controller.signal });
                 if (response.success) {
                     setAdvertisers(response.data);
                 } else {
                     setError('Failed to load advertisers');
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Advertisers fetch error:', err);
                 setError(err.message || 'Failed to load advertisers');
             } finally {
+                if (controller.signal.aborted) return;
                 setLoading(false);
             }
         };
 
         fetchAdvertisers();
+        return () => controller.abort();
     }, [statusFilter, refreshKey]);
 
     const filteredAdvertisers = advertisers.filter(advertiser => {

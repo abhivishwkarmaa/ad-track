@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Assignment.css';
 
@@ -54,22 +55,32 @@ function EditAssignment() {
     });
 
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchData = async () => {
             try {
                 const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }),
-                    publishersAPI.getPublishers({ limit: 100 })
+                    offersAPI.getOffers({ limit: 100 }, { signal }),
+                    publishersAPI.getPublishers({ limit: 100 }, { signal })
                 ]);
+                if (signal.aborted) return;
                 if (offersRes.success) setOffers(offersRes.data);
                 if (publishersRes.success) setPublishers(publishersRes.data);
             } catch (err) {
-                console.error('Error fetching data:', err);
+                if (!isAbortError(err)) {
+                    console.error('Error fetching data:', err);
+                }
             }
         };
         fetchData();
+        return () => controller.abort();
     }, [refreshKey]);
 
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const loadPublisherAssignments = async () => {
             const pubId = formData.publisher_id;
             if (!pubId) {
@@ -77,25 +88,35 @@ function EditAssignment() {
                 return;
             }
             try {
-                const res = await assignmentsAPI.getAssignments({ publisher_id: pubId, status: 'active' });
+                const res = await assignmentsAPI.getAssignments(
+                    { publisher_id: pubId, status: 'active' },
+                    { signal }
+                );
+                if (signal.aborted) return;
                 if (res.success && Array.isArray(res.data)) {
                     setPublisherAssignedOfferIds(res.data.map(a => String(a.offer_id)));
                 } else {
                     setPublisherAssignedOfferIds([]);
                 }
             } catch (err) {
-                console.error('Error loading publisher assignments for fallback offers:', err);
-                setPublisherAssignedOfferIds([]);
+                if (!isAbortError(err)) {
+                    console.error('Error loading publisher assignments for fallback offers:', err);
+                    setPublisherAssignedOfferIds([]);
+                }
             }
         };
         loadPublisherAssignments();
+        return () => controller.abort();
     }, [formData.publisher_id, refreshKey]);
 
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchAssignment = async () => {
             try {
                 setLoadingAssignment(true);
-                const response = await assignmentsAPI.getAssignment(id);
+                const response = await assignmentsAPI.getAssignment(id, { signal });
                 if (response.success && response.data) {
                     const data = response.data;
                     setAssignment(data);
@@ -129,17 +150,21 @@ function EditAssignment() {
                     }
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Error fetching assignment:', err);
                 toast.error('Failed to load assignment');
                 goBackToOrigin();
             } finally {
-                setLoadingAssignment(false);
+                if (!signal.aborted) {
+                    setLoadingAssignment(false);
+                }
             }
         };
 
         if (id) {
             fetchAssignment();
         }
+        return () => controller.abort();
     }, [id, toast, refreshKey, goBackToOrigin]);
 
     const handleChange = (field, value) => {

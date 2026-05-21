@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
@@ -254,27 +255,33 @@ function OfferDetail() {
     }, [statsApiRange.date_from, statsApiRange.date_to, statsUtcRange, reportTimezone]);
 
     useEffect(() => {
+        if (!id) return undefined;
+
+        const controller = new AbortController();
+
         const fetchOfferDetails = async () => {
             try {
                 setLoading(true);
                 setError(null);
-                const response = await offersAPI.getOffer(id);
+                const response = await offersAPI.getOffer(id, { signal: controller.signal });
                 if (response.success && response.data) {
                     setOffer(response.data);
                 } else {
                     setError('Offer not found');
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Fetch offer error:', err);
                 setError(err.message || 'Failed to load offer details');
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         };
 
-        if (id) {
-            fetchOfferDetails();
-        }
+        fetchOfferDetails();
+        return () => controller.abort();
     }, [id, refreshKey]);
 
     useEffect(() => {
@@ -284,32 +291,36 @@ function OfferDetail() {
             return;
         }
 
+        const controller = new AbortController();
         const timer = setTimeout(async () => {
             const requestId = ++statsRequestRef.current;
             try {
                 setLoadingStats(true);
                 setStats(null);
 
-                const response = await offersAPI.getOfferStats(id, offerStatsQueryParams);
+                const response = await offersAPI.getOfferStats(id, offerStatsQueryParams, { signal: controller.signal });
 
-                if (requestId !== statsRequestRef.current) return;
+                if (requestId !== statsRequestRef.current || controller.signal.aborted) return;
                 if (response.success) {
                     setStats(response.data || null);
                 } else {
                     setStats(null);
                 }
             } catch (statsError) {
-                if (requestId !== statsRequestRef.current) return;
+                if (requestId !== statsRequestRef.current || isAbortError(statsError)) return;
                 console.error('Error fetching offer stats:', statsError);
                 setStats(null);
             } finally {
-                if (requestId === statsRequestRef.current) {
+                if (requestId === statsRequestRef.current && !controller.signal.aborted) {
                     setLoadingStats(false);
                 }
             }
         }, 250);
 
-        return () => clearTimeout(timer);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
     }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
@@ -319,30 +330,34 @@ function OfferDetail() {
             return;
         }
 
+        const controller = new AbortController();
         const timer = setTimeout(async () => {
             const requestId = ++publisherStatsRequestRef.current;
             try {
                 setLoadingPublisherStats(true);
-                const response = await offersAPI.getOfferPublisherStats(id, offerStatsQueryParams);
+                const response = await offersAPI.getOfferPublisherStats(id, offerStatsQueryParams, { signal: controller.signal });
 
-                if (requestId !== publisherStatsRequestRef.current) return;
+                if (requestId !== publisherStatsRequestRef.current || controller.signal.aborted) return;
                 if (response.success) {
                     setPublisherStats(Array.isArray(response.data) ? response.data : []);
                 } else {
                     setPublisherStats([]);
                 }
             } catch (publisherStatsError) {
-                if (requestId !== publisherStatsRequestRef.current) return;
+                if (requestId !== publisherStatsRequestRef.current || isAbortError(publisherStatsError)) return;
                 console.error('Error fetching offer publisher stats:', publisherStatsError);
                 setPublisherStats([]);
             } finally {
-                if (requestId === publisherStatsRequestRef.current) {
+                if (requestId === publisherStatsRequestRef.current && !controller.signal.aborted) {
                     setLoadingPublisherStats(false);
                 }
             }
         }, 250);
 
-        return () => clearTimeout(timer);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
     }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
@@ -354,6 +369,8 @@ function OfferDetail() {
     }, [searchTerm]);
 
     useEffect(() => {
+        const controller = new AbortController();
+
         const fetchSearchResults = async () => {
             if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
                 setSearchResults([]);
@@ -363,21 +380,30 @@ function OfferDetail() {
 
             try {
                 setSearchLoading(true);
-                const response = await offersAPI.searchOffers({ q: debouncedSearchTerm, limit: 8 });
+                const response = await offersAPI.searchOffers(
+                    { q: debouncedSearchTerm, limit: 8 },
+                    { signal: controller.signal }
+                );
+                if (controller.signal.aborted) return;
                 if (response.success) {
                     setSearchResults(response.data || []);
                 } else {
                     setSearchResults([]);
                 }
             } catch (searchError) {
-                console.error('Error searching offers:', searchError);
-                setSearchResults([]);
+                if (!isAbortError(searchError)) {
+                    console.error('Error searching offers:', searchError);
+                    setSearchResults([]);
+                }
             } finally {
-                setSearchLoading(false);
+                if (!controller.signal.aborted) {
+                    setSearchLoading(false);
+                }
             }
         };
 
         fetchSearchResults();
+        return () => controller.abort();
     }, [debouncedSearchTerm]);
 
     useEffect(() => {
@@ -393,13 +419,17 @@ function OfferDetail() {
 
     // Fetch publishers
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchPublishers = async () => {
             try {
                 setLoadingPublishers(true);
                 const [publishersRes, offersRes] = await Promise.all([
-                    publishersAPI.getPublishers({ status: 'active', limit: 100 }),
-                    offersAPI.getOffers({ limit: 100 })
+                    publishersAPI.getPublishers({ status: 'active', limit: 100 }, { signal }),
+                    offersAPI.getOffers({ limit: 100 }, { signal })
                 ]);
+                if (signal.aborted) return;
                 if (publishersRes.success && publishersRes.data) {
                     setPublishers(publishersRes.data);
                 }
@@ -407,27 +437,37 @@ function OfferDetail() {
                     setOffers(offersRes.data);
                 }
             } catch (error) {
+                if (isAbortError(error)) return;
                 console.error('Error fetching publishers or offers:', error);
                 toast.error('Failed to load publishers or offers');
             } finally {
-                setLoadingPublishers(false);
+                if (!signal.aborted) {
+                    setLoadingPublishers(false);
+                }
             }
         };
 
         fetchPublishers();
+        return () => controller.abort();
     }, [toast, refreshKey]);
 
     // Fetch assignments for this offer only (use offer-specific endpoint so we only get this offer's assignments and correct tracking URLs)
     useEffect(() => {
+        if (!id) return undefined;
+
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchAssignments = async () => {
-            if (!id) return;
             try {
                 setLoadingAssignments(true);
-                const response = await offersAPI.getOfferAssignments(id);
+                const response = await offersAPI.getOfferAssignments(id, { signal });
+                if (signal.aborted) return;
                 if (response.success && response.data) {
                     setAssignments(response.data);
                     const initialAssignments = await Promise.all(
                         response.data.map(async (assignment) => {
+                            if (signal.aborted) return null;
                             let trackingUrl = '';
                             if (assignment.id) {
                                 try {
@@ -436,7 +476,9 @@ function OfferDetail() {
                                         trackingUrl = trackingResponse.data.tracking_url;
                                     }
                                 } catch (error) {
-                                    console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
+                                    if (!isAbortError(error)) {
+                                        console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
+                                    }
                                 }
                             }
                             return {
@@ -459,17 +501,23 @@ function OfferDetail() {
                             };
                         })
                     );
-                    setPublisherAssignments(initialAssignments);
+                    if (!signal.aborted) {
+                        setPublisherAssignments(initialAssignments.filter(Boolean));
+                    }
                 }
             } catch (error) {
+                if (isAbortError(error)) return;
                 console.error('Error fetching assignments:', error);
                 toast.error('Failed to load assignments');
             } finally {
-                setLoadingAssignments(false);
+                if (!signal.aborted) {
+                    setLoadingAssignments(false);
+                }
             }
         };
 
         fetchAssignments();
+        return () => controller.abort();
     }, [id, toast, refreshKey]);
 
     if (loading) {

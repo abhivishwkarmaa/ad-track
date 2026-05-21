@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { offersAPI } from '../services/api';
+import { isAbortError } from './useAbortableRequest';
 
 /**
  * Hook to fetch offer details for editing
@@ -12,33 +13,44 @@ export const useOfferForEdit = (id, shouldFetch = true) => {
     const [loading, setLoading] = useState(shouldFetch);
     const [error, setError] = useState(null);
 
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (signal) => {
         if (!id) return;
 
         try {
             setLoading(true);
             setError(null);
-            const response = await offersAPI.getOfferForEdit(id);
+            const response = await offersAPI.getOfferForEdit(id, signal ? { signal } : {});
             if (response.success) {
                 setData(response.data);
             } else {
                 setError(response.message || 'Failed to fetch offer details');
             }
         } catch (err) {
-            console.error(`Error fetching offer ${id} for edit:`, err);
-            setError(err.message || 'An error occurred while fetching offer details');
+            if (!isAbortError(err)) {
+                console.error(`Error fetching offer ${id} for edit:`, err);
+                setError(err.message || 'An error occurred while fetching offer details');
+            }
         } finally {
-            setLoading(false);
+            if (!signal?.aborted) {
+                setLoading(false);
+            }
         }
     }, [id]);
 
     useEffect(() => {
-        if (shouldFetch && id) {
-            fetchData();
-        }
+        if (!shouldFetch || !id) return undefined;
+
+        const controller = new AbortController();
+        fetchData(controller.signal);
+        return () => controller.abort();
     }, [shouldFetch, fetchData, id]);
 
-    return { data, loading, error, refetch: fetchData };
+    return {
+        data,
+        loading,
+        error,
+        refetch: () => fetchData(),
+    };
 };
 
 /**
@@ -53,7 +65,43 @@ export const useOffers = (initialParams = {}) => {
     const [error, setError] = useState(null);
     const [params, setParams] = useState(initialParams);
 
-    const fetchData = useCallback(async () => {
+    useEffect(() => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
+            try {
+                setLoading(true);
+                setError(null);
+                const response = await offersAPI.getOffers(params, { signal: controller.signal });
+                if (response.success) {
+                    setData(response.data);
+                    if (response.pagination) {
+                        setPagination(response.pagination);
+                    }
+                } else {
+                    setError(response.message || 'Failed to fetch offers');
+                }
+            } catch (err) {
+                if (!isAbortError(err)) {
+                    console.error('Error fetching offers:', err);
+                    setError(err.message || 'An error occurred while fetching offers');
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+        return () => controller.abort();
+    }, [params]);
+
+    const updateParams = (newParams) => {
+        setParams(prev => ({ ...prev, ...newParams }));
+    };
+
+    const refetch = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
@@ -74,15 +122,7 @@ export const useOffers = (initialParams = {}) => {
         }
     }, [params]);
 
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
-
-    const updateParams = (newParams) => {
-        setParams(prev => ({ ...prev, ...newParams }));
-    };
-
-    return { data, pagination, loading, error, refetch: fetchData, updateParams };
+    return { data, pagination, loading, error, refetch, updateParams };
 };
 
 export default {

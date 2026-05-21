@@ -168,6 +168,10 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
 
         return data;
     } catch (error) {
+        if (error?.name === 'AbortError') {
+            throw error;
+        }
+
         // ✅ Don't show error messages for session expiry
         if (error.message === 'SESSION_EXPIRED') {
             throw error;
@@ -274,29 +278,29 @@ export const authAPI = {
 // Dashboard API
 export const dashboardAPI = {
     // Aggregated dashboard - single call for all used data (cards, performance, summary, live offers, offer/pub stats, comparison)
-    getDashboard: async (params = {}) => {
+    getDashboard: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard?${queryString}`, requestOptions);
     },
     // Dashboard cards - main metrics for UI cards display
-    getDashboardCards: async (params = {}) => {
+    getDashboardCards: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/cards?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/cards?${queryString}`, requestOptions);
     },
     // Top offers with conversions
-    getTopOffers: async (params = {}) => {
+    getTopOffers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/top-offers?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/top-offers?${queryString}`, requestOptions);
     },
     // Performance chart data
-    getPerformance: async (params = {}) => {
+    getPerformance: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/performance?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/performance?${queryString}`, requestOptions);
     },
     // Performance summary (matching dashboard cards logic)
-    getPerformanceSummary: async (params = {}) => {
+    getPerformanceSummary: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/performance-summary?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/performance-summary?${queryString}`, requestOptions);
     },
     // Top countries
     getTopCountries: async (params = {}) => {
@@ -304,18 +308,18 @@ export const dashboardAPI = {
         return apiRequest(`/api/admin/reports/dashboard/top-countries?${queryString}`);
     },
     // Live offers
-    getLiveOffers: async (params = {}) => {
+    getLiveOffers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/live-offers?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/live-offers?${queryString}`, requestOptions);
     },
     // Legacy endpoints (keeping for backward compatibility)
     getSummary: async (params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/summary?${queryString}`);
     },
-    getDetailed: async (params = {}, meta) => {
+    getDetailed: async (params = {}, meta = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/detailed?${queryString}`, {}, meta);
+        return apiRequest(`/api/admin/reports/detailed?${queryString}`, requestOptions, meta);
     },
     exportDetailedCSV: async (params = {}) => {
         const queryString = new URLSearchParams({ ...params, export: 'csv' }).toString();
@@ -350,24 +354,24 @@ export const dashboardAPI = {
         return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`);
     },
     // New Conversion Logs
-    getConversions: async (params = {}, meta) => {
+    getConversions: async (params = {}, meta = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/conversions?${queryString}`, {}, meta);
+        return apiRequest(`/api/admin/reports/conversions?${queryString}`, requestOptions, meta);
     },
     // Offer Statistics
-    getOfferStatistics: async (params = {}) => {
+    getOfferStatistics: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/offer-statistics?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/offer-statistics?${queryString}`, requestOptions);
     },
     // Publisher Statistics
-    getPublisherStatistics: async (params = {}) => {
+    getPublisherStatistics: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/publisher-statistics?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/publisher-statistics?${queryString}`, requestOptions);
     },
     // Performance Comparison (current vs previous period)
-    getPerformanceComparison: async (params = {}) => {
+    getPerformanceComparison: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/dashboard/performance-comparison?${queryString}`);
+        return apiRequest(`/api/admin/reports/dashboard/performance-comparison?${queryString}`, requestOptions);
     },
     // Manual Click Approval
     approveClick: async (clickUuid) => {
@@ -399,27 +403,24 @@ export const adminSubscriptionAPI = {
 
 // Offers API
 export const offersAPI = {
-    getOffers: async (params = {}) => {
+    getOffers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/offers?${queryString}`);
+        return apiRequest(`/api/admin/offers?${queryString}`, requestOptions);
     },
-    searchOffers: async (params = {}) => {
+    searchOffers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/offers/search?${queryString}`);
+        return apiRequest(`/api/admin/offers/search?${queryString}`, requestOptions);
     },
-    getOffer: async (id) => {
-        return apiRequest(`/api/admin/offers/${id}`);
+    getOffer: async (id, requestOptions = {}) => {
+        return apiRequest(`/api/admin/offers/${id}`, requestOptions);
     },
-    getOfferStats: async (id, params = {}) => {
+    getOfferStats: async (id, params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/offers/${id}/stats${queryString ? `?${queryString}` : ''}`);
+        return apiRequest(`/api/admin/offers/${id}/stats${queryString ? `?${queryString}` : ''}`, requestOptions);
     },
     getOfferDailyStats: async (id, params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/offers/${id}/daily-stats?${queryString}`);
-    },
-    getOfferAssignments: async (id) => {
-        return apiRequest(`/api/admin/offers/${id}/assignments`);
     },
     getOfferRecentClicks: async (id) => {
         return apiRequest(`/api/admin/offers/${id}/recent-clicks`);
@@ -427,12 +428,15 @@ export const offersAPI = {
     getOfferRecentConversions: async (id) => {
         return apiRequest(`/api/admin/offers/${id}/recent-conversions`);
     },
-    getOfferPublisherStats: async (id, params = {}) => {
+    getOfferPublisherStats: async (id, params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/offers/${id}/publisher-stats${queryString ? `?${queryString}` : ''}`);
+        return apiRequest(`/api/admin/offers/${id}/publisher-stats${queryString ? `?${queryString}` : ''}`, requestOptions);
     },
-    getOfferForEdit: async (id) => {
-        return apiRequest(`/api/admin/offers/${id}/edit`);
+    getOfferForEdit: async (id, requestOptions = {}) => {
+        return apiRequest(`/api/admin/offers/${id}/edit`, requestOptions);
+    },
+    getOfferAssignments: async (id, requestOptions = {}) => {
+        return apiRequest(`/api/admin/offers/${id}/assignments`, requestOptions);
     },
     createOffer: async (data) => {
         return apiRequest('/api/admin/offers', {
@@ -461,13 +465,14 @@ export const offersAPI = {
 
 // Publishers API
 export const publishersAPI = {
-    getPublishers: async (params = {}) => {
+    getPublishers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/publishers?${queryString}`);
+        return apiRequest(`/api/admin/publishers?${queryString}`, requestOptions);
     },
     getPublisher: async (id, options = {}) => {
         const qs = options.internalOnly ? '?internal_only=1' : '';
-        return apiRequest(`/api/admin/publishers/${id}${qs}`);
+        const requestOptions = options.signal ? { signal: options.signal } : {};
+        return apiRequest(`/api/admin/publishers/${id}${qs}`, requestOptions);
     },
     createPublisher: async (data) => {
         return apiRequest('/api/admin/publishers', {
@@ -512,13 +517,14 @@ export const publishersAPI = {
 
 // Advertisers API
 export const advertisersAPI = {
-    getAdvertisers: async (params = {}) => {
+    getAdvertisers: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/advertisers?${queryString}`);
+        return apiRequest(`/api/admin/advertisers?${queryString}`, requestOptions);
     },
     getAdvertiser: async (id, options = {}) => {
         const qs = options.internalOnly ? '?internal_only=1' : '';
-        return apiRequest(`/api/admin/advertisers/${id}${qs}`);
+        const requestOptions = options.signal ? { signal: options.signal } : {};
+        return apiRequest(`/api/admin/advertisers/${id}${qs}`, requestOptions);
     },
     createAdvertiser: async (data) => {
         return apiRequest('/api/admin/advertisers', {
@@ -541,12 +547,12 @@ export const advertisersAPI = {
 
 // Assignments API
 export const assignmentsAPI = {
-    getAssignments: async (params = {}) => {
+    getAssignments: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/assignments?${queryString}`);
+        return apiRequest(`/api/admin/assignments?${queryString}`, requestOptions);
     },
-    getAssignment: async (id) => {
-        return apiRequest(`/api/admin/assignments/${id}`);
+    getAssignment: async (id, requestOptions = {}) => {
+        return apiRequest(`/api/admin/assignments/${id}`, requestOptions);
     },
     createOrUpdateAssignments: async (data) => {
         return apiRequest('/api/admin/assignments', {

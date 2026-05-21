@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { offersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
@@ -95,6 +96,8 @@ function OfferList() {
     }, [effectiveSearch, statusFilter]);
 
     useEffect(() => {
+        const controller = new AbortController();
+
         const fetchOffers = async () => {
             try {
                 if (initialLoading) {
@@ -107,7 +110,7 @@ function OfferList() {
                 if (effectiveSearch) params.search = effectiveSearch;
                 if (statusFilter !== 'all') params.type = statusFilter;
 
-                const response = await offersAPI.getOffers(params);
+                const response = await offersAPI.getOffers(params, { signal: controller.signal });
                 if (response.success) {
                     setOffers(response.data || []);
                     setPagination(response.pagination || { total: 0, totalPages: 1 });
@@ -115,18 +118,23 @@ function OfferList() {
                     setError('Failed to load offers');
                 }
             } catch (err) {
-                console.error('Offers fetch error:', err);
-                setError(err.message || 'Failed to load offers');
+                if (!isAbortError(err)) {
+                    console.error('Offers fetch error:', err);
+                    setError(err.message || 'Failed to load offers');
+                }
             } finally {
-                setLoading(false);
-                setIsRefreshing(false);
-                if (initialLoading) {
-                    setInitialLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                    setIsRefreshing(false);
+                    if (initialLoading) {
+                        setInitialLoading(false);
+                    }
                 }
             }
         };
 
         fetchOffers();
+        return () => controller.abort();
     }, [currentPage, effectiveSearch, statusFilter, refreshKey]);
 
     const { total, totalPages } = pagination;

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { offersAPI, publishersAPI, advertisersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import './EntitySearchSelect.css';
 
 const LIST_LIMIT = 100;
@@ -41,44 +42,47 @@ function getEntityPublicValue(type, item) {
 }
 
 /** Empty query → full list; non-empty → server-side search */
-async function fetchEntities(type, query) {
+async function fetchEntities(type, query, signal) {
     const q = query.trim();
     const hasQuery = q.length > 0;
+    const requestOptions = signal ? { signal } : {};
 
     if (type === 'offer') {
         const params = hasQuery ? { search: q, limit: SEARCH_LIMIT } : { limit: LIST_LIMIT };
-        const res = await offersAPI.getOffers(params);
+        const res = await offersAPI.getOffers(params, requestOptions);
         return res.success ? (res.data || []) : [];
     }
     if (type === 'publisher') {
         const params = hasQuery ? { search: q, limit: SEARCH_LIMIT } : { limit: LIST_LIMIT };
-        const res = await publishersAPI.getPublishers(params);
+        const res = await publishersAPI.getPublishers(params, requestOptions);
         return res.success ? (res.data || []) : [];
     }
     if (type === 'advertiser') {
         const params = hasQuery ? { search: q, limit: SEARCH_LIMIT } : { limit: LIST_LIMIT };
-        const res = await advertisersAPI.getAdvertisers(params);
+        const res = await advertisersAPI.getAdvertisers(params, requestOptions);
         return res.success ? (res.data || []) : [];
     }
     return [];
 }
 
-async function fetchEntityLabel(type, id) {
+async function fetchEntityLabel(type, id, signal) {
     if (!id || id === 'all') return null;
+    const requestOptions = signal ? { signal } : {};
     try {
         if (type === 'offer') {
-            const res = await offersAPI.getOffer(id);
+            const res = await offersAPI.getOffer(id, requestOptions);
             if (res.success && res.data) return formatOfferLabel(res.data);
         }
         if (type === 'publisher') {
-            const res = await publishersAPI.getPublisher(id);
+            const res = await publishersAPI.getPublisher(id, requestOptions);
             if (res.success && res.data) return formatPublisherLabel(res.data);
         }
         if (type === 'advertiser') {
-            const res = await advertisersAPI.getAdvertiser(id);
+            const res = await advertisersAPI.getAdvertiser(id, requestOptions);
             if (res.success && res.data) return formatAdvertiserLabel(res.data);
         }
-    } catch {
+    } catch (err) {
+        if (isAbortError(err)) throw err;
         return null;
     }
     return null;
@@ -111,17 +115,24 @@ function EntitySearchSelect({
               : 'Type to search advertisers, or pick from list...');
 
     useEffect(() => {
-        let cancelled = false;
         if (value === 'all') {
             setSelectedLabel('');
             return undefined;
         }
-        fetchEntityLabel(type, value).then((lbl) => {
-            if (!cancelled) setSelectedLabel(lbl || `ID: ${value}`);
-        });
-        return () => {
-            cancelled = true;
-        };
+
+        const controller = new AbortController();
+        fetchEntityLabel(type, value, controller.signal)
+            .then((lbl) => {
+                if (!controller.signal.aborted) {
+                    setSelectedLabel(lbl || `ID: ${value}`);
+                }
+            })
+            .catch((err) => {
+                if (!isAbortError(err)) {
+                    setSelectedLabel(`ID: ${value}`);
+                }
+            });
+        return () => controller.abort();
     }, [type, value]);
 
     useEffect(() => {
@@ -137,19 +148,29 @@ function EntitySearchSelect({
     useEffect(() => {
         if (!open || value !== 'all') return undefined;
 
+        const controller = new AbortController();
         const timer = setTimeout(async () => {
             try {
                 setLoading(true);
-                const items = await fetchEntities(type, inputValue);
-                setResults(items);
-            } catch {
-                setResults([]);
+                const items = await fetchEntities(type, inputValue, controller.signal);
+                if (!controller.signal.aborted) {
+                    setResults(items);
+                }
+            } catch (err) {
+                if (!isAbortError(err) && !controller.signal.aborted) {
+                    setResults([]);
+                }
             } finally {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         }, 300);
 
-        return () => clearTimeout(timer);
+        return () => {
+            clearTimeout(timer);
+            controller.abort();
+        };
     }, [inputValue, type, open, value]);
 
     const handleSelect = useCallback(

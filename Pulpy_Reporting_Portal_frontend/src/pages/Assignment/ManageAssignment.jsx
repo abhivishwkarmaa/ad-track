@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
@@ -91,23 +92,32 @@ function ManageAssignment() {
 
     // Fetch offers and publishers for filters
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchData = async () => {
             try {
                 const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }),
-                    publishersAPI.getPublishers({ limit: 100 })
+                    offersAPI.getOffers({ limit: 100 }, { signal }),
+                    publishersAPI.getPublishers({ limit: 100 }, { signal })
                 ]);
+                if (signal.aborted) return;
                 if (offersRes.success) setOffers(offersRes.data);
                 if (publishersRes.success) setPublishers(publishersRes.data);
             } catch (err) {
-                console.error('Error fetching filter data:', err);
+                if (!isAbortError(err)) {
+                    console.error('Error fetching filter data:', err);
+                }
             }
         };
         fetchData();
+        return () => controller.abort();
     }, []);
 
     // Fetch assignments data
     useEffect(() => {
+        const controller = new AbortController();
+
         const fetchAssignments = async () => {
             try {
                 setLoading(true);
@@ -128,21 +138,24 @@ function ManageAssignment() {
                     params.status = statusFilter;
                 }
 
-                const response = await assignmentsAPI.getAssignments(params);
+                const response = await assignmentsAPI.getAssignments(params, { signal: controller.signal });
                 if (response.success) {
                     setAssignments(response.data);
                 } else {
                     setError('Failed to load assignments');
                 }
             } catch (err) {
+                if (isAbortError(err)) return;
                 console.error('Assignments fetch error:', err);
                 setError(err.message || 'Failed to load assignments');
             } finally {
+                if (controller.signal.aborted) return;
                 setLoading(false);
             }
         };
 
         fetchAssignments();
+        return () => controller.abort();
     }, [offerFilter, publisherFilter, statusFilter, refreshKey]);
 
     const filteredAssignments = assignments.filter(assignment => {

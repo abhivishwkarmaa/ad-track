@@ -4,6 +4,7 @@ import { useRefresh } from '../../context/RefreshContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useToast } from '../../context/ToastContext';
 import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import { formatDateTimeIST } from '../../utils/dateTime';
 import { formatYmdInTimeZone, userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
@@ -52,36 +53,46 @@ const LiveLogs = () => {
 
     // Fetch Filter Options
     useEffect(() => {
+        const controller = new AbortController();
+        const { signal } = controller;
+
         const fetchFilters = async () => {
             try {
                 const results = await Promise.allSettled([
-                    offersAPI.getOffers({ limit: 1000 }),
-                    publishersAPI.getPublishers({ limit: 1000 })
+                    offersAPI.getOffers({ limit: 1000 }, { signal }),
+                    publishersAPI.getPublishers({ limit: 1000 }, { signal })
                 ]);
+
+                if (signal.aborted) return;
 
                 const offersResult = results[0];
                 const publishersResult = results[1];
 
                 if (offersResult.status === 'fulfilled' && offersResult.value.success) {
                     setOffers(offersResult.value.data);
-                } else {
+                } else if (offersResult.status === 'rejected' && !isAbortError(offersResult.reason)) {
                     console.error("Failed to fetch offers", offersResult.reason || "API Error");
                 }
 
                 if (publishersResult.status === 'fulfilled' && publishersResult.value.success) {
                     setPublishers(publishersResult.value.data);
-                } else {
+                } else if (publishersResult.status === 'rejected' && !isAbortError(publishersResult.reason)) {
                     console.error("Failed to fetch publishers", publishersResult.reason || "API Error");
                 }
             } catch (err) {
-                console.error("Error fetching filters", err);
+                if (!isAbortError(err)) {
+                    console.error("Error fetching filters", err);
+                }
             }
         };
         fetchFilters();
+        return () => controller.abort();
     }, []);
 
     useEffect(() => {
-        fetchLogs();
+        const controller = new AbortController();
+        fetchLogs(false, controller.signal);
+        return () => controller.abort();
     }, [activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, refreshKey, reportTimezone, timezoneRevision]);
 
     useEffect(() => {
@@ -92,7 +103,7 @@ const LiveLogs = () => {
         return () => clearInterval(interval);
     }, [autoRefresh, activeTab, limit, selectedOffer, selectedPublisher, dateFrom, dateTo, reportTimezone, timezoneRevision]);
 
-    const fetchLogs = async (isBackground = false) => {
+    const fetchLogs = async (isBackground = false, signal) => {
         setLoading(true);
         try {
             const params = { limit, page: 1 };
@@ -104,21 +115,29 @@ const LiveLogs = () => {
                 if (date_to) params.date_to = date_to;
             }
 
+            const requestOptions = signal ? { signal } : {};
+
             if (activeTab === 'clicks') {
-                const response = await dashboardAPI.getDetailed(params, { trackActivity: !isBackground });
+                const response = await dashboardAPI.getDetailed(params, { trackActivity: !isBackground }, requestOptions);
+                if (signal?.aborted) return;
                 if (response.success && response.data) {
                     setData(response.data);
                 }
             } else {
-                const response = await dashboardAPI.getConversions(params, { trackActivity: !isBackground });
+                const response = await dashboardAPI.getConversions(params, { trackActivity: !isBackground }, requestOptions);
+                if (signal?.aborted) return;
                 if (response.success && response.data) {
                     setData(response.data);
                 }
             }
         } catch (error) {
-            console.error("Failed to fetch logs", error);
+            if (!isAbortError(error)) {
+                console.error("Failed to fetch logs", error);
+            }
         } finally {
-            setLoading(false);
+            if (!signal?.aborted) {
+                setLoading(false);
+            }
         }
     };
 
