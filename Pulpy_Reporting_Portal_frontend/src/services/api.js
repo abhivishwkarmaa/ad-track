@@ -313,9 +313,9 @@ export const dashboardAPI = {
         return apiRequest(`/api/admin/reports/dashboard/live-offers?${queryString}`, requestOptions);
     },
     // Legacy endpoints (keeping for backward compatibility)
-    getSummary: async (params = {}) => {
+    getSummary: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/summary?${queryString}`);
+        return apiRequest(`/api/admin/reports/summary?${queryString}`, requestOptions);
     },
     getDetailed: async (params = {}, meta = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
@@ -349,9 +349,9 @@ export const dashboardAPI = {
 
         return response.blob();
     },
-    getPublisherConversions: async (params = {}) => {
+    getPublisherConversions: async (params = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
-        return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`);
+        return apiRequest(`/api/admin/reports/publisher-conversions?${queryString}`, requestOptions);
     },
     // New Conversion Logs
     getConversions: async (params = {}, meta = {}, requestOptions = {}) => {

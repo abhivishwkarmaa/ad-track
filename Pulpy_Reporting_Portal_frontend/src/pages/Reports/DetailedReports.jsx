@@ -4,6 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
+import { isAbortError } from '../../hooks/useAbortableRequest';
 import EntitySearchSelect from '../../components/EntitySearchSelect/EntitySearchSelect';
 import {
     formatDateIST,
@@ -259,7 +260,9 @@ function DetailedReports() {
                 setSearchParams(urlParams, { replace: true });
             }
 
-            const response = await dashboardAPI.getDetailed(params);
+            const requestOptions = opts.signal ? { signal: opts.signal } : {};
+            const response = await dashboardAPI.getDetailed(params, {}, requestOptions);
+            if (opts.signal?.aborted) return;
             if (response.success) {
                 setReports(response.data || []);
                 setIsAggregated(response.isAggregated || false);
@@ -283,10 +286,14 @@ function DetailedReports() {
                 setError('Failed to load reports');
             }
         } catch (err) {
-            console.error('Reports fetch error:', err);
-            setError(err.message || 'Failed to load reports');
+            if (!isAbortError(err)) {
+                console.error('Reports fetch error:', err);
+                setError(err.message || 'Failed to load reports');
+            }
         } finally {
-            setLoading(false);
+            if (!opts.signal?.aborted) {
+                setLoading(false);
+            }
         }
     };
 
@@ -314,10 +321,13 @@ function DetailedReports() {
         const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${reportTimezone}|${timezoneRevision}`;
         const now = Date.now();
         if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
-            return;
+            return undefined;
         }
         lastFetchDedupRef.current = { key, at: now };
-        fetchReports();
+
+        const controller = new AbortController();
+        fetchReports(selectedDims, selectedMetrics, { signal: controller.signal });
+        return () => controller.abort();
         // Intentionally only re-fetch when page, limit, global refreshKey, applyFetchKey, or timezone changes; dim/metric state is read inside fetchReports.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pagination.page, pagination.limit, refreshKey, applyFetchKey, reportTimezone, timezoneRevision]);

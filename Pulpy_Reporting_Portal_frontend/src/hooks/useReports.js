@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { dashboardAPI } from '../services/api';
+import { isAbortError } from './useAbortableRequest';
 
 /**
  * Custom hook for fetching dashboard cards
@@ -261,14 +262,43 @@ export function useSummaryReport(filters = {}) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const filtersKey = JSON.stringify(filters);
 
-    const fetchData = async () => {
+    useEffect(() => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+
+            try {
+                const response = await dashboardAPI.getSummary(filters, { signal: controller.signal });
+
+                if (response.success) {
+                    setData(response.data);
+                } else {
+                    setError('Failed to fetch summary');
+                }
+            } catch (err) {
+                if (!isAbortError(err)) {
+                    setError(err.message || 'An error occurred');
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+        return () => controller.abort();
+    }, [filtersKey]);
+
+    const refetch = async () => {
         setLoading(true);
         setError(null);
-
         try {
             const response = await dashboardAPI.getSummary(filters);
-
             if (response.success) {
                 setData(response.data);
             } else {
@@ -281,11 +311,7 @@ export function useSummaryReport(filters = {}) {
         }
     };
 
-    useEffect(() => {
-        fetchData();
-    }, [JSON.stringify(filters)]);
-
-    return { data, loading, error, refetch: fetchData };
+    return { data, loading, error, refetch };
 }
 
 /**
@@ -300,18 +326,48 @@ export function useDetailedReport(filters = {}, page = 1, limit = 50) {
     const [pagination, setPagination] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const filtersKey = JSON.stringify(filters);
 
-    const fetchData = async () => {
+    useEffect(() => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+
+            try {
+                const response = await dashboardAPI.getDetailed(
+                    { ...filters, page, limit },
+                    {},
+                    { signal: controller.signal }
+                );
+
+                if (response.success) {
+                    setData(response.data);
+                    setPagination(response.pagination);
+                } else {
+                    setError('Failed to fetch detailed report');
+                }
+            } catch (err) {
+                if (!isAbortError(err)) {
+                    setError(err.message || 'An error occurred');
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+        return () => controller.abort();
+    }, [filtersKey, page, limit]);
+
+    const refetch = async () => {
         setLoading(true);
         setError(null);
-
         try {
-            const response = await dashboardAPI.getDetailed({
-                ...filters,
-                page,
-                limit
-            });
-
+            const response = await dashboardAPI.getDetailed({ ...filters, page, limit });
             if (response.success) {
                 setData(response.data);
                 setPagination(response.pagination);
@@ -325,11 +381,7 @@ export function useDetailedReport(filters = {}, page = 1, limit = 50) {
         }
     };
 
-    useEffect(() => {
-        fetchData();
-    }, [JSON.stringify(filters), page, limit]);
-
-    return { data, pagination, loading, error, refetch: fetchData };
+    return { data, pagination, loading, error, refetch };
 }
 
 /**
@@ -342,14 +394,44 @@ export function usePublisherConversions(params = {}) {
     const [summary, setSummary] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const paramsKey = JSON.stringify(params);
 
-    const fetchData = async () => {
+    useEffect(() => {
+        const controller = new AbortController();
+
+        const fetchData = async () => {
+            setLoading(true);
+            setError(null);
+
+            try {
+                const response = await dashboardAPI.getPublisherConversions(params, { signal: controller.signal });
+
+                if (response.success) {
+                    setStats(response.data?.stats || []);
+                    setSummary(response.data?.summary || null);
+                } else {
+                    setError('Failed to fetch publisher conversions');
+                }
+            } catch (err) {
+                if (!isAbortError(err)) {
+                    setError(err.message || 'An error occurred');
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchData();
+        return () => controller.abort();
+    }, [paramsKey]);
+
+    const refetch = async () => {
         setLoading(true);
         setError(null);
-
         try {
             const response = await dashboardAPI.getPublisherConversions(params);
-
             if (response.success) {
                 setStats(response.data?.stats || []);
                 setSummary(response.data?.summary || null);
@@ -363,11 +445,7 @@ export function usePublisherConversions(params = {}) {
         }
     };
 
-    useEffect(() => {
-        fetchData();
-    }, [JSON.stringify(params)]);
-
-    return { stats, summary, loading, error, refetch: fetchData };
+    return { stats, summary, loading, error, refetch };
 }
 
 /**
