@@ -41,7 +41,7 @@ const getStoredUser = () => {
 
 const isIdle = () => Date.now() - getLastActivity() > IDLE_TIMEOUT_MS;
 
-const clearClientSession = () => {
+export const clearClientSession = () => {
     clearAccessToken();
     localStorage.removeItem('track-myads_user');
     localStorage.removeItem('bng_token');
@@ -52,27 +52,39 @@ const redirectToLogin = () => {
     window.location.href = '/login';
 };
 
+let refreshInFlight = null;
+
 const refreshAccessToken = async () => {
-    try {
-        const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-        });
-
-        const contentType = response.headers.get('content-type');
-        const data = contentType && contentType.includes('application/json')
-            ? await response.json()
-            : null;
-
-        if (!response.ok || !data?.success || !data?.data?.token) {
-            return false;
-        }
-
-        setAccessToken(data.data.token);
-        return true;
-    } catch {
-        return false;
+    if (refreshInFlight) {
+        return refreshInFlight;
     }
+
+    refreshInFlight = (async () => {
+        try {
+            const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+
+            const contentType = response.headers.get('content-type');
+            const data = contentType && contentType.includes('application/json')
+                ? await response.json()
+                : null;
+
+            if (!response.ok || !data?.success || !data?.data?.token) {
+                return false;
+            }
+
+            setAccessToken(data.data.token);
+            return true;
+        } catch {
+            return false;
+        } finally {
+            refreshInFlight = null;
+        }
+    })();
+
+    return refreshInFlight;
 };
 
 // API request helper

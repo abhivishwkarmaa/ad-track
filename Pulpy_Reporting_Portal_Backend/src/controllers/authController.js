@@ -12,7 +12,7 @@ import subscriptionService from '../services/subscriptionService.js';
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
-const ACCESS_TOKEN_TTL = '5m';
+const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
 const REFRESH_TTL_SECONDS = 180 * 60; // 180 minutes (3 hours)
 const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
 const REFRESH_COOKIE_NAME = 'refresh_token';
@@ -597,8 +597,6 @@ export class AuthController {
       }
 
       if (Date.now() - session.last_activity > SESSION_TTL_MS) {
-        await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -683,11 +681,28 @@ export class AuthController {
           });
         }
       } else {
-        if (!requestTenantId || parseInt(requestTenantId) !== parseInt(tenantId)) {
-          return reply.code(401).send({
-            success: false,
-            error: 'Unauthorized',
-            message: 'Invalid session context',
+        const requestTenantMatches = requestTenantId && parseInt(requestTenantId) === parseInt(tenantId);
+        const sessionTenantMatches = sessionTenantId != null && parseInt(sessionTenantId) === parseInt(tenantId);
+
+        if (!requestTenantMatches) {
+          if (!sessionTenantMatches) {
+            logger.warn('[REFRESH] Invalid session context', {
+              host: request.headers.host,
+              'x-forwarded-host': request.headers['x-forwarded-host'],
+              requestTenantId,
+              tenantId,
+              sessionTenantId,
+            });
+            return reply.code(401).send({
+              success: false,
+              error: 'Unauthorized',
+              message: 'Invalid session context',
+            });
+          }
+          logger.warn('[REFRESH] Host tenant unresolved; allowing refresh via session tenant_id', {
+            host: request.headers.host,
+            'x-forwarded-host': request.headers['x-forwarded-host'],
+            tenantId,
           });
         }
         if (request.tenant) {

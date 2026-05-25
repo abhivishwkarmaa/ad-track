@@ -89,8 +89,6 @@ export async function authenticateAdmin(request, reply) {
     try {
       session = JSON.parse(sessionRaw);
     } catch (parseError) {
-      await redis.del(sessionKey);
-      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
       return reply.code(401).send({
         success: false,
         error: 'Unauthorized',
@@ -99,8 +97,6 @@ export async function authenticateAdmin(request, reply) {
     }
 
     if (session?.user_id && decoded?.id && parseInt(session.user_id) !== parseInt(decoded.id)) {
-      await redis.del(sessionKey);
-      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
       return reply.code(401).send({
         success: false,
         error: 'Unauthorized',
@@ -109,8 +105,6 @@ export async function authenticateAdmin(request, reply) {
     }
 
     if (Date.now() - session.last_activity > SESSION_TTL_MS) {
-      await redis.del(sessionKey);
-      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
       return reply.code(401).send({
         success: false,
         error: 'Unauthorized',
