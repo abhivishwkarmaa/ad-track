@@ -8,18 +8,14 @@ import emailService from '../services/emailService.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
 import subscriptionService from '../services/subscriptionService.js';
-import {
-  REFRESH_COOKIE_NAME,
-  getRefreshCookieOptions,
-  getClearRefreshCookieOptions,
-} from '../utils/authCookies.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
 const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRET || 'tenant-secret-key-change-in-production';
-const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
+const ACCESS_TOKEN_TTL = '5m';
 const REFRESH_TTL_SECONDS = 180 * 60; // 180 minutes (3 hours)
 const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
+const REFRESH_COOKIE_NAME = 'refresh_token';
 
 const generateRefreshToken = () => {
   if (crypto.randomUUID) {
@@ -28,8 +24,11 @@ const generateRefreshToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
-const refreshCookieSetOptions = (request) => ({
-  ...getRefreshCookieOptions(request),
+const getRefreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/',
   maxAge: REFRESH_TTL_SECONDS,
 });
 
@@ -144,7 +143,7 @@ export class AuthController {
         REFRESH_TTL_SECONDS
       );
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
       logger.info('[REGISTER] Registration successful', {
         adminId: adminId,
@@ -424,45 +423,25 @@ export class AuthController {
       );
 
       const refreshToken = generateRefreshToken();
-      try {
-        const setResult = await redis.set(
-          `auth:session:${refreshToken}`,
-          JSON.stringify({
-            user_id: admin.id,
-            tenant_id: tenantId,
-            last_activity: Date.now(),
-          }),
-          'EX',
-          REFRESH_TTL_SECONDS
-        );
-        if (setResult !== 'OK') {
-          logger.error('[LOGIN] Redis session not stored', { setResult, adminId: admin.id });
-          return reply.code(503).send({
-            success: false,
-            error: 'Service Unavailable',
-            message: 'Session store unavailable. Please try again.',
-          });
-        }
-      } catch (redisError) {
-        logger.error({ err: redisError }, '[LOGIN] Redis session store failed');
-        return reply.code(503).send({
-          success: false,
-          error: 'Service Unavailable',
-          message: 'Session store unavailable. Please try again.',
-        });
-      }
+      await redis.set(
+        `auth:session:${refreshToken}`,
+        JSON.stringify({
+          user_id: admin.id,
+          tenant_id: tenantId,
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
 
-      const cookieOpts = refreshCookieSetOptions(request);
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, cookieOpts);
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
       logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
         email: admin.email,
         tenantId: tenantId,
         tokenType: tokenType,
-        host: request.headers.host,
-        cookieSecure: cookieOpts.secure,
-        forwardedProto: request.headers['x-forwarded-proto'],
+        host: request.headers.host
       });
 
       return reply.send({
@@ -596,7 +575,7 @@ export class AuthController {
       const sessionRaw = await redis.get(sessionKey);
 
       if (!sessionRaw) {
-        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -609,7 +588,7 @@ export class AuthController {
         session = JSON.parse(sessionRaw);
       } catch (parseError) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -618,6 +597,8 @@ export class AuthController {
       }
 
       if (Date.now() - session.last_activity > SESSION_TTL_MS) {
+        await redis.del(sessionKey);
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -658,7 +639,7 @@ export class AuthController {
 
       if (!rows || rows.length === 0) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -672,7 +653,7 @@ export class AuthController {
 
       if (sessionTenantId !== null && tenantId !== null && parseInt(sessionTenantId) !== parseInt(tenantId)) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -682,7 +663,7 @@ export class AuthController {
 
       if (sessionTenantId === null && tenantId !== null) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -702,28 +683,11 @@ export class AuthController {
           });
         }
       } else {
-        const requestTenantMatches = requestTenantId && parseInt(requestTenantId) === parseInt(tenantId);
-        const sessionTenantMatches = sessionTenantId != null && parseInt(sessionTenantId) === parseInt(tenantId);
-
-        if (!requestTenantMatches) {
-          if (!sessionTenantMatches) {
-            logger.warn('[REFRESH] Invalid session context', {
-              host: request.headers.host,
-              'x-forwarded-host': request.headers['x-forwarded-host'],
-              requestTenantId,
-              tenantId,
-              sessionTenantId,
-            });
-            return reply.code(401).send({
-              success: false,
-              error: 'Unauthorized',
-              message: 'Invalid session context',
-            });
-          }
-          logger.warn('[REFRESH] Host tenant unresolved; allowing refresh via session tenant_id', {
-            host: request.headers.host,
-            'x-forwarded-host': request.headers['x-forwarded-host'],
-            tenantId,
+        if (!requestTenantId || parseInt(requestTenantId) !== parseInt(tenantId)) {
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid session context',
           });
         }
         if (request.tenant) {
@@ -748,7 +712,7 @@ export class AuthController {
         'EX',
         REFRESH_TTL_SECONDS
       );
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
 
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
@@ -783,7 +747,7 @@ export class AuthController {
       if (refreshToken) {
         await redis.del(`auth:session:${refreshToken}`);
       }
-      reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
       return reply.send({
         success: true,
         message: 'Logged out',

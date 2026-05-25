@@ -41,7 +41,7 @@ const getStoredUser = () => {
 
 const isIdle = () => Date.now() - getLastActivity() > IDLE_TIMEOUT_MS;
 
-export const clearClientSession = () => {
+const clearClientSession = () => {
     clearAccessToken();
     localStorage.removeItem('track-myads_user');
     localStorage.removeItem('bng_token');
@@ -52,62 +52,27 @@ const redirectToLogin = () => {
     window.location.href = '/login';
 };
 
-let refreshInFlight = null;
+const refreshAccessToken = async () => {
+    try {
+        const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+        });
 
-const normalizePath = (path) => {
-    const p = path || '/';
-    if (p.length > 1 && p.endsWith('/')) return p.slice(0, -1);
-    return p;
-};
+        const contentType = response.headers.get('content-type');
+        const data = contentType && contentType.includes('application/json')
+            ? await response.json()
+            : null;
 
-export const isPublicAuthRoute = () => {
-    const path = normalizePath(window.location.pathname);
-    return path === '/login' || path === '/forgot-password';
-};
+        if (!response.ok || !data?.success || !data?.data?.token) {
+            return false;
+        }
 
-export const clearStaleSessionCookie = () => {
-    return fetch(`${BASE_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-    }).catch(() => {});
-};
-
-const refreshAccessToken = async ({ bypassPublicRouteGuard = false } = {}) => {
-    // Block background refresh on /login, but allow post-login session verification
-    if (!bypassPublicRouteGuard && isPublicAuthRoute()) {
+        setAccessToken(data.data.token);
+        return true;
+    } catch {
         return false;
     }
-
-    if (refreshInFlight) {
-        return refreshInFlight;
-    }
-
-    refreshInFlight = (async () => {
-        try {
-            const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
-                method: 'POST',
-                credentials: 'include',
-            });
-
-            const contentType = response.headers.get('content-type');
-            const data = contentType && contentType.includes('application/json')
-                ? await response.json()
-                : null;
-
-            if (!response.ok || !data?.success || !data?.data?.token) {
-                return false;
-            }
-
-            setAccessToken(data.data.token);
-            return true;
-        } catch {
-            return false;
-        } finally {
-            refreshInFlight = null;
-        }
-    })();
-
-    return refreshInFlight;
 };
 
 // API request helper
@@ -178,7 +143,7 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
         }
 
         if (response.status === 401 && !allowUnauthorized) {
-            if (!isPublicAuthRoute() && !skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
+            if (!skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
                 const refreshed = await refreshAccessToken();
                 if (refreshed) {
                     return apiRequest(endpoint, options, { ...meta, isRetry: true });
@@ -234,13 +199,6 @@ export const authAPI = {
 
         if (response?.success && response?.data?.token) {
             setAccessToken(response.data.token);
-            const sessionOk = await refreshAccessToken({ bypassPublicRouteGuard: true });
-            if (!sessionOk) {
-                clearClientSession();
-                throw new Error(
-                    'Login succeeded but the session could not be established. Please try again or clear app data.'
-                );
-            }
         }
 
         return response;

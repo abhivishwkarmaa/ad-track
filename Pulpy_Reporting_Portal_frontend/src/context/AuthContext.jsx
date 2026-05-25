@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { authAPI, clearAccessToken, isPublicAuthRoute } from '../services/api';
+import { authAPI, setAccessToken, clearAccessToken } from '../services/api';
 import { startActivityTracking, onLogoutEvent, getLastActivity, broadcastLogout } from '../utils/activityTracker';
 
 const AuthContext = createContext(null);
@@ -10,39 +10,6 @@ export function AuthProvider({ children }) {
     const [loading, setLoading] = useState(true);
     const isLoggingOutRef = useRef(false);
     const IDLE_TIMEOUT_MS = 180 * 60 * 1000; // 180 minutes (3 hours) of inactivity before logout
-
-    const clearLocalSession = ({ redirect = true, broadcast = false } = {}) => {
-        setUser(null);
-        setIsAuthenticated(false);
-        clearAccessToken();
-        localStorage.removeItem('track-myads_user');
-        if (broadcast) {
-            broadcastLogout();
-        }
-        if (redirect) {
-            window.location.href = '/login';
-        }
-    };
-
-    const handleLogout = async ({ redirect = true, broadcast = true, revokeServerSession = true } = {}) => {
-        if (isLoggingOutRef.current) return;
-        isLoggingOutRef.current = true;
-        if (revokeServerSession) {
-            try {
-                await authAPI.logout();
-            } catch (error) {
-                // Ignore logout errors - session may already be expired
-            }
-        }
-        clearLocalSession({ redirect: false, broadcast: false });
-        if (broadcast) {
-            broadcastLogout();
-        }
-        if (redirect) {
-            window.location.href = '/login';
-        }
-        isLoggingOutRef.current = false;
-    };
 
     useEffect(() => {
         startActivityTracking();
@@ -62,7 +29,8 @@ export function AuthProvider({ children }) {
                 if (parsedUser.mustChangePassword === undefined) {
                     parsedUser.mustChangePassword = false;
                 }
-                // Do not set isAuthenticated until refresh succeeds — avoids stale-session refresh on /login
+                setUser(parsedUser);
+                setIsAuthenticated(true);
             } catch (e) {
                 console.error('Failed to parse saved user:', e);
                 localStorage.removeItem('track-myads_user');
@@ -71,7 +39,11 @@ export function AuthProvider({ children }) {
 
         const unsubscribe = onLogoutEvent(() => {
             if (isLoggingOutRef.current) return;
-            clearLocalSession({ redirect: true });
+            setUser(null);
+            setIsAuthenticated(false);
+            clearAccessToken();
+            localStorage.removeItem('track-myads_user');
+            window.location.href = '/login';
         });
 
         const refreshIfNeeded = async () => {
@@ -79,18 +51,10 @@ export function AuthProvider({ children }) {
                 setLoading(false);
                 return;
             }
-            if (isPublicAuthRoute()) {
-                localStorage.removeItem('track-myads_user');
-                setLoading(false);
-                return;
-            }
             try {
                 await authAPI.refresh();
-                setUser(parsedUser);
-                setIsAuthenticated(true);
             } catch (err) {
-                // Do not call server logout — keeps Redis session for retry after transient failures
-                clearLocalSession({ redirect: true, broadcast: true });
+                await handleLogout({ redirect: true, broadcast: true });
             } finally {
                 setLoading(false);
             }
@@ -112,6 +76,28 @@ export function AuthProvider({ children }) {
         }, 30000);
         return () => clearInterval(interval);
     }, [isAuthenticated]);
+
+    const handleLogout = async ({ redirect = true, broadcast = true } = {}) => {
+        if (isLoggingOutRef.current) return;
+        isLoggingOutRef.current = true;
+        try {
+            await authAPI.logout();
+        } catch (error) {
+            // Ignore logout errors - session may already be expired
+        }
+        if (broadcast) {
+            broadcastLogout();
+        }
+        setUser(null);
+        setIsAuthenticated(false);
+        clearAccessToken();
+        localStorage.removeItem('track-myads_user');
+        // localStorage.removeItem('bng_token');
+        if (redirect) {
+            window.location.href = '/login';
+        }
+        isLoggingOutRef.current = false;
+    };
 
     const login = async (email, password) => {
         try {
