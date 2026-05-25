@@ -72,8 +72,9 @@ export const clearStaleSessionCookie = () => {
     }).catch(() => {});
 };
 
-const refreshAccessToken = async () => {
-    if (isPublicAuthRoute()) {
+const refreshAccessToken = async ({ bypassPublicRouteGuard = false } = {}) => {
+    // Block background refresh on /login, but allow post-login session verification
+    if (!bypassPublicRouteGuard && isPublicAuthRoute()) {
         return false;
     }
 
@@ -233,11 +234,11 @@ export const authAPI = {
 
         if (response?.success && response?.data?.token) {
             setAccessToken(response.data.token);
-            const sessionOk = await refreshAccessToken();
+            const sessionOk = await refreshAccessToken({ bypassPublicRouteGuard: true });
             if (!sessionOk) {
                 clearClientSession();
                 throw new Error(
-                    'Login succeeded but the session cookie was not saved. Use HTTPS and ensure the API sets Secure cookies (COOKIE_SECURE / NODE_ENV).'
+                    'Login succeeded but the session could not be established. Please try again or clear app data.'
                 );
             }
         }
