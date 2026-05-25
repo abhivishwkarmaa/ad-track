@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { authAPI, clearAccessToken } from '../services/api';
+import { authAPI, clearAccessToken, isPublicAuthRoute, clearStaleSessionCookie } from '../services/api';
 import { startActivityTracking, onLogoutEvent, getLastActivity, broadcastLogout } from '../utils/activityTracker';
 
 const AuthContext = createContext(null);
@@ -79,9 +79,9 @@ export function AuthProvider({ children }) {
                 setLoading(false);
                 return;
             }
-            const isPublicAuthRoute = ['/login', '/forgot-password'].includes(window.location.pathname);
-            if (isPublicAuthRoute) {
+            if (isPublicAuthRoute()) {
                 localStorage.removeItem('track-myads_user');
+                clearStaleSessionCookie();
                 setLoading(false);
                 return;
             }

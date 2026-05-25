@@ -424,25 +424,45 @@ export class AuthController {
       );
 
       const refreshToken = generateRefreshToken();
-      await redis.set(
-        `auth:session:${refreshToken}`,
-        JSON.stringify({
-          user_id: admin.id,
-          tenant_id: tenantId,
-          last_activity: Date.now(),
-        }),
-        'EX',
-        REFRESH_TTL_SECONDS
-      );
+      try {
+        const setResult = await redis.set(
+          `auth:session:${refreshToken}`,
+          JSON.stringify({
+            user_id: admin.id,
+            tenant_id: tenantId,
+            last_activity: Date.now(),
+          }),
+          'EX',
+          REFRESH_TTL_SECONDS
+        );
+        if (setResult !== 'OK') {
+          logger.error('[LOGIN] Redis session not stored', { setResult, adminId: admin.id });
+          return reply.code(503).send({
+            success: false,
+            error: 'Service Unavailable',
+            message: 'Session store unavailable. Please try again.',
+          });
+        }
+      } catch (redisError) {
+        logger.error({ err: redisError }, '[LOGIN] Redis session store failed');
+        return reply.code(503).send({
+          success: false,
+          error: 'Service Unavailable',
+          message: 'Session store unavailable. Please try again.',
+        });
+      }
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
+      const cookieOpts = refreshCookieSetOptions(request);
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, cookieOpts);
 
       logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
         email: admin.email,
         tenantId: tenantId,
         tokenType: tokenType,
-        host: request.headers.host
+        host: request.headers.host,
+        cookieSecure: cookieOpts.secure,
+        forwardedProto: request.headers['x-forwarded-proto'],
       });
 
       return reply.send({

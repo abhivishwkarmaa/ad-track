@@ -10,11 +10,8 @@ export function getRefreshCookieOptions(request = null) {
     .trim()
     .toLowerCase();
 
-  const forceSecure = process.env.COOKIE_SECURE === 'true';
-  const forceInsecure = process.env.COOKIE_SECURE === 'false';
-  const secure = forceInsecure
-    ? false
-    : (forceSecure || forwardedProto === 'https' || process.env.NODE_ENV === 'production');
+  // Secure by default (required on https://*.track-myads.com). Local http://localhost dev only: COOKIE_SECURE=false
+  const secure = process.env.COOKIE_SECURE !== 'false';
 
   return {
     httpOnly: true,

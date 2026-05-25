@@ -54,7 +54,29 @@ const redirectToLogin = () => {
 
 let refreshInFlight = null;
 
+const normalizePath = (path) => {
+    const p = path || '/';
+    if (p.length > 1 && p.endsWith('/')) return p.slice(0, -1);
+    return p;
+};
+
+export const isPublicAuthRoute = () => {
+    const path = normalizePath(window.location.pathname);
+    return path === '/login' || path === '/forgot-password';
+};
+
+export const clearStaleSessionCookie = () => {
+    return fetch(`${BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+    }).catch(() => {});
+};
+
 const refreshAccessToken = async () => {
+    if (isPublicAuthRoute()) {
+        return false;
+    }
+
     if (refreshInFlight) {
         return refreshInFlight;
     }
@@ -155,7 +177,7 @@ const apiRequest = async (endpoint, options = {}, meta = {}) => {
         }
 
         if (response.status === 401 && !allowUnauthorized) {
-            if (!skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
+            if (!isPublicAuthRoute() && !skipAuth && !isRetry && endpoint !== '/api/auth/refresh') {
                 const refreshed = await refreshAccessToken();
                 if (refreshed) {
                     return apiRequest(endpoint, options, { ...meta, isRetry: true });
