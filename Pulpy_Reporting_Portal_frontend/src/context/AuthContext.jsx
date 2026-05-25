@@ -62,8 +62,7 @@ export function AuthProvider({ children }) {
                 if (parsedUser.mustChangePassword === undefined) {
                     parsedUser.mustChangePassword = false;
                 }
-                setUser(parsedUser);
-                setIsAuthenticated(true);
+                // Do not set isAuthenticated until refresh succeeds — avoids stale-session refresh on /login
             } catch (e) {
                 console.error('Failed to parse saved user:', e);
                 localStorage.removeItem('track-myads_user');
@@ -80,8 +79,16 @@ export function AuthProvider({ children }) {
                 setLoading(false);
                 return;
             }
+            const isPublicAuthRoute = ['/login', '/forgot-password'].includes(window.location.pathname);
+            if (isPublicAuthRoute) {
+                localStorage.removeItem('track-myads_user');
+                setLoading(false);
+                return;
+            }
             try {
                 await authAPI.refresh();
+                setUser(parsedUser);
+                setIsAuthenticated(true);
             } catch (err) {
                 // Do not call server logout — keeps Redis session for retry after transient failures
                 clearLocalSession({ redirect: true, broadcast: true });
