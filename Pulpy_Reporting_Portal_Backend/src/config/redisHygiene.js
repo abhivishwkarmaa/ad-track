@@ -77,9 +77,9 @@ export class RedisHygieneService {
 
   /**
    * Trim click stream to prevent unbounded growth
-   * Keeps last N entries (default: 10,000)
+   * Keeps last N entries (default: 5,000; override with STREAM_CLICKS_MAX_LEN)
    */
-  async trimClickStream(maxLength = 10000) {
+  async trimClickStream(maxLength = parseInt(process.env.STREAM_CLICKS_MAX_LEN || '5000', 10)) {
     try {
       const streamLength = await redis.xlen('stream:clicks');
 

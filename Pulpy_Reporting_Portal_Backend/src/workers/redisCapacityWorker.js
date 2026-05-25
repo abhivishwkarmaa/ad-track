@@ -64,6 +64,11 @@ export class RedisCapacityWorker {
                 logger.info(`Redis flushed click cleanup: ${flushedDeleted} key(s) removed`);
             }
 
+            const streamTrim = await redisHygiene.trimClickStream();
+            if (streamTrim.trimmed > 0) {
+                logger.info(`Redis click stream trimmed`, streamTrim);
+            }
+
             const result = await redisHygiene.checkCapacityAndCleanup(threshold);
 
             if (result.status === 'cleaned') {

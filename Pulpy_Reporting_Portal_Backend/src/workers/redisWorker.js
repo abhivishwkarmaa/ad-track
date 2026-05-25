@@ -8,6 +8,7 @@ const BATCH_SIZE = 100; // Batch Insert Size
 const BATCH_TIMEOUT = 1000; // Wait max 1s to fill batch
 const STREAM_KEY = 'stream:clicks';
 const GROUP_NAME = 'workers_group';
+const STREAM_TRIM_MAX_LEN = parseInt(process.env.STREAM_CLICKS_MAX_LEN || '5000', 10);
 const CONSUMER_NAME = `worker_${process.env.HOSTNAME || 'local'}_${process.pid}`;
 const MAX_RETRY_ATTEMPTS = 3; // Maximum retry attempts for failed inserts
 
@@ -345,6 +346,21 @@ async function processBatch(buffer) {
     const allMsgIds = buffer.map(b => b.msgId);
     if (allMsgIds.length > 0) {
         await redis.xack(STREAM_KEY, GROUP_NAME, ...allMsgIds);
+        await trimClickStreamIfNeeded();
+    }
+}
+
+/** XACK does not remove entries; trim after processing to cap stream size */
+async function trimClickStreamIfNeeded() {
+    try {
+        const len = await redis.xlen(STREAM_KEY);
+        if (len <= STREAM_TRIM_MAX_LEN) return;
+
+        const before = len;
+        await redis.xtrim(STREAM_KEY, 'MAXLEN', '~', STREAM_TRIM_MAX_LEN);
+        logger.info(`Stream trimmed after batch ACK`, { before, maxLen: STREAM_TRIM_MAX_LEN });
+    } catch (err) {
+        logger.warn(`Stream trim skipped: ${err.message}`);
     }
 }
 
