@@ -147,6 +147,7 @@ export class RedisHygieneService {
         conversions: await this.enforceConversionTTLs(),
         stream: await this.trimClickStream(),
         dedupe: await this.cleanupDedupeKeys(),
+        flushedClicks: await this.cleanupFlushedClicks(),
       };
 
       logger.info('Redis hygiene tasks completed', results);
@@ -191,7 +192,7 @@ export class RedisHygieneService {
       const deletedCount = await redis.eval(luaScript, 0);
 
       if (deletedCount > 0) {
-        logger.info(`Redis hygiene: Emergency cleanup of flushed clicks completed`, { deletedCount });
+        logger.info(`Redis hygiene: Removed flushed click key(s)`, { deletedCount });
       }
 
       return deletedCount;

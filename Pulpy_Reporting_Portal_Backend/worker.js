@@ -3,14 +3,13 @@
 /**
  * Redis Flushed-Click Cleanup Worker
  *
- * Standalone process. Runs every 2 minutes to scan and delete Redis keys
+ * Standalone process. On connect, scans and deletes Redis keys every 2 minutes
  * matching click:* where HGET key 'flushed' == 'true'. Does not block the main server.
  *
  * Usage: node worker.js
  * PM2:   pm2 start worker.js --name redis-cleanup-worker
  */
 
-import cron from 'node-cron';
 import Redis from 'ioredis';
 import dotenv from 'dotenv';
 import logger from './src/utils/logger.js';
@@ -45,7 +44,8 @@ const redisConfig = {
 };
 
 let redis = null;
-let cronTask = null;
+let intervalId = null;
+const CLEANUP_INTERVAL_MS = parseInt(process.env.REDIS_FLUSHED_CLEANUP_INTERVAL_MS || '120000', 10);
 
 async function runCleanup() {
   if (!redis || redis.status !== 'ready') {
@@ -70,6 +70,9 @@ function start() {
 
   redis.on('ready', () => {
     logger.info('Redis cleanup worker: Redis ready');
+    runCleanup();
+    intervalId = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+    logger.info(`Redis cleanup worker scheduled (every ${CLEANUP_INTERVAL_MS}ms)`);
   });
 
   redis.on('error', (err) => {
@@ -80,20 +83,14 @@ function start() {
     logger.warn('Redis connection closed');
   });
 
-  // Every 2 minutes: "*/2 * * * *"
-  cronTask = cron.schedule('*/2 * * * *', runCleanup, {
-    scheduled: true,
-    timezone: undefined,
-  });
-
-  logger.info('Redis cleanup worker started (every 2 minutes)');
+  logger.info('Redis cleanup worker started');
 }
 
 function stop() {
-  if (cronTask) {
-    cronTask.stop();
-    cronTask = null;
-    logger.info('Redis cleanup cron stopped');
+  if (intervalId) {
+    clearInterval(intervalId);
+    intervalId = null;
+    logger.info('Redis cleanup interval stopped');
   }
   if (redis) {
     redis.disconnect();

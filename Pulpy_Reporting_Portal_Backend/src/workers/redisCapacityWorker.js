@@ -58,6 +58,12 @@ export class RedisCapacityWorker {
     async checkCapacity(threshold = 0.8) {
         try {
             this.lastRun = new Date();
+
+            const flushedDeleted = await redisHygiene.cleanupFlushedClicks();
+            if (flushedDeleted > 0) {
+                logger.info(`Redis flushed click cleanup: ${flushedDeleted} key(s) removed`);
+            }
+
             const result = await redisHygiene.checkCapacityAndCleanup(threshold);
 
             if (result.status === 'cleaned') {
