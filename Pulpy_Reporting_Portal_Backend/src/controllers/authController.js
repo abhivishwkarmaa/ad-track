@@ -8,6 +8,11 @@ import emailService from '../services/emailService.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
 import subscriptionService from '../services/subscriptionService.js';
+import {
+  REFRESH_COOKIE_NAME,
+  getRefreshCookieOptions,
+  getClearRefreshCookieOptions,
+} from '../utils/authCookies.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -15,7 +20,6 @@ const TENANT_JWT_SECRET = process.env.TENANT_JWT_SECRET || process.env.JWT_SECRE
 const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
 const REFRESH_TTL_SECONDS = 180 * 60; // 180 minutes (3 hours)
 const SESSION_TTL_MS = 180 * 60 * 1000; // 180 minutes (3 hours)
-const REFRESH_COOKIE_NAME = 'refresh_token';
 
 const generateRefreshToken = () => {
   if (crypto.randomUUID) {
@@ -24,11 +28,8 @@ const generateRefreshToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
-const getRefreshCookieOptions = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  path: '/',
+const refreshCookieSetOptions = (request) => ({
+  ...getRefreshCookieOptions(request),
   maxAge: REFRESH_TTL_SECONDS,
 });
 
@@ -143,7 +144,7 @@ export class AuthController {
         REFRESH_TTL_SECONDS
       );
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
 
       logger.info('[REGISTER] Registration successful', {
         adminId: adminId,
@@ -434,7 +435,7 @@ export class AuthController {
         REFRESH_TTL_SECONDS
       );
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
 
       logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
@@ -575,7 +576,7 @@ export class AuthController {
       const sessionRaw = await redis.get(sessionKey);
 
       if (!sessionRaw) {
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -588,7 +589,7 @@ export class AuthController {
         session = JSON.parse(sessionRaw);
       } catch (parseError) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -637,7 +638,7 @@ export class AuthController {
 
       if (!rows || rows.length === 0) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -651,7 +652,7 @@ export class AuthController {
 
       if (sessionTenantId !== null && tenantId !== null && parseInt(sessionTenantId) !== parseInt(tenantId)) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -661,7 +662,7 @@ export class AuthController {
 
       if (sessionTenantId === null && tenantId !== null) {
         await redis.del(sessionKey);
-        reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+        reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
         return reply.code(401).send({
           success: false,
           error: 'Unauthorized',
@@ -727,7 +728,7 @@ export class AuthController {
         'EX',
         REFRESH_TTL_SECONDS
       );
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieSetOptions(request));
 
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';
@@ -762,7 +763,7 @@ export class AuthController {
       if (refreshToken) {
         await redis.del(`auth:session:${refreshToken}`);
       }
-      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      reply.clearCookie(REFRESH_COOKIE_NAME, getClearRefreshCookieOptions(request));
       return reply.send({
         success: true,
         message: 'Logged out',
