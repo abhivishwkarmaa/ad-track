@@ -277,10 +277,12 @@ export class AssignmentService {
     return {
       id: assignment.public_assignment_id || assignment.id,
       internal_id: assignment.id,
-      publisher_id: assignment.publisher_id, // 🔥 Return Internal ID to match Frontend List (which is keyed by Internal ID)
-      public_publisher_id: assignment.public_publisher_id, // 🔥 Separate Public ID
-      offer_id: assignment.offer_id, // 🔥 Return Internal ID
-      public_offer_id: assignment.public_offer_id, // 🔥 Separate Public ID
+      internal_publisher_id: assignment.publisher_id,
+      internal_offer_id: assignment.offer_id,
+      publisher_id: assignment.publisher_id,
+      public_publisher_id: assignment.public_publisher_id,
+      offer_id: assignment.offer_id,
+      public_offer_id: assignment.public_offer_id,
       payout_override: effectivePayoutOverride,
       cap_override: assignment.cap_override,
       conversion_approval_percentage: assignment.conversion_approval_percentage,
@@ -332,6 +334,68 @@ export class AssignmentService {
       if (e.code === 'ER_BAD_FIELD_ERROR') return null;
       throw e;
     }
+  }
+
+  /**
+   * Resolve assignment for tracking URL. When internalOfferId is set, scope to that offer
+   * so public_assignment_id collisions across offers cannot return the wrong publisher pub_id.
+   */
+  async findAssignmentForTrackingUrl(idParam, tenantId, internalOfferId = null) {
+    if (idParam == null || idParam === '' || !tenantId) return null;
+
+    const idStr = String(idParam).trim();
+    const idNum = Number(idStr);
+    if (!Number.isInteger(idNum) || idNum < 1) return null;
+
+    const assignmentSelect = `SELECT po.*, 
+              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
+              o.name as offer_name, o.category as offer_category, o.public_offer_id,
+              o.affiliate_amount as offer_affiliate_amount
+       FROM publisher_offers po
+       JOIN publishers p ON po.publisher_id = p.id
+       JOIN offers o ON po.offer_id = o.id
+       WHERE po.tenant_id = ?`;
+    const offerFilter = internalOfferId != null ? ' AND po.offer_id = ?' : '';
+    const baseParams = [tenantId];
+
+    try {
+      const params = internalOfferId != null
+        ? [...baseParams, idNum, internalOfferId]
+        : [...baseParams, idNum];
+      const [byPublicAssignment] = await pool.query(
+        `${assignmentSelect} AND po.public_assignment_id = ?${offerFilter} LIMIT 1`,
+        params
+      );
+      if (byPublicAssignment?.[0]) {
+        return this.formatAssignment(byPublicAssignment[0]);
+      }
+    } catch (err) {
+      if (err.code !== 'ER_BAD_FIELD_ERROR') throw err;
+    }
+
+    const byInternalParams = internalOfferId != null
+      ? [...baseParams, idNum, internalOfferId]
+      : [...baseParams, idNum];
+    const [byInternalId] = await pool.query(
+      `${assignmentSelect} AND po.id = ?${offerFilter} LIMIT 1`,
+      byInternalParams
+    );
+    if (byInternalId?.[0]) {
+      return this.formatAssignment(byInternalId[0]);
+    }
+
+    if (internalOfferId != null) {
+      const byPublisherPublicIdParams = [...baseParams, idNum, internalOfferId];
+      const [byPublisherPublicId] = await pool.query(
+        `${assignmentSelect} AND p.public_publisher_id = ?${offerFilter} LIMIT 1`,
+        byPublisherPublicIdParams
+      );
+      if (byPublisherPublicId?.[0]) {
+        return this.formatAssignment(byPublisherPublicId[0]);
+      }
+    }
+
+    return null;
   }
 
   async findById(id, tenantId = null, internalOnly = false) {
@@ -448,13 +512,12 @@ export class AssignmentService {
 
   async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null, overridePublicOfferId = null) {
 
-    const assignment = await this.findById(assignmentId, tenantId);
+    const assignment = await this.findById(assignmentId, tenantId, true);
 
     if (!assignment) {
       return null;
     }
 
-    // 🔥 CRITICAL: Use internal IDs for DB lookups (assignment from formatAssignment has offer_id/publisher_id as public IDs)
     const internalOfferId = assignment.internal_offer_id ?? assignment.offer_id;
     const internalPublisherId = assignment.internal_publisher_id ?? assignment.publisher_id;
 
@@ -482,9 +545,17 @@ export class AssignmentService {
       return null;
     }
 
-    // 🔥 CRITICAL: Fetch publisher strictly by Internal ID
     const publisher = await publisherService.findById(internalPublisherId, tenantId, true);
-    const publicPublisherId = publisher ? (publisher.public_publisher_id || publisher.id) : assignment.publisher_id;
+    const publicPublisherId = assignment.public_publisher_id
+      ?? (publisher ? (publisher.public_publisher_id || publisher.id) : null);
+    if (!publicPublisherId) {
+      logger.error('Publisher missing public identity for tracking URL', {
+        assignment_id: assignmentId,
+        internal_publisher_id: internalPublisherId,
+        tenant_id: tenantId,
+      });
+      return null;
+    }
 
     if (format === 'alternative') {
       const advertiserId = offer.advertiser_id;

@@ -735,10 +735,30 @@ export class AdminController {
       const format = request.query.format || 'standard';
       const forOfferPublicId = request.query.for_offer_public_id ? Number(request.query.for_offer_public_id) : null;
 
-      // UI se public id aata hai → tenant + public id se internal id resolve, phir sab internal se
-      const internalAssignmentId = await assignmentService.getInternalAssignmentIdByPublicId(request.params.id, tenantId) ?? request.params.id;
-      const assignment = await assignmentService.findById(internalAssignmentId, tenantId, true);
-      if (!assignment) {
+      let assignment;
+      let internalAssignmentId;
+
+      if (forOfferPublicId) {
+        const internalOfferId = await offerService.getInternalOfferIdByPublicId(forOfferPublicId, tenantId);
+        if (!internalOfferId) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Not Found',
+            message: 'Offer not found',
+          });
+        }
+        assignment = await assignmentService.findAssignmentForTrackingUrl(
+          request.params.id,
+          tenantId,
+          internalOfferId
+        );
+        internalAssignmentId = assignment?.internal_id ?? null;
+      } else {
+        internalAssignmentId = await assignmentService.getInternalAssignmentIdByPublicId(request.params.id, tenantId) ?? request.params.id;
+        assignment = await assignmentService.findById(internalAssignmentId, tenantId, true);
+      }
+
+      if (!assignment || !internalAssignmentId) {
         return reply.code(404).send({
           success: false,
           error: 'Not Found',

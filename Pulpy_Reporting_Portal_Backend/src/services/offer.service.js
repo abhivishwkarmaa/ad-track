@@ -613,9 +613,11 @@ class OfferService {
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT 
-                po.id, po.publisher_id, po.offer_id, po.tenant_id, po.payout_override, po.cap_override, po.conversion_approval_percentage, po.capping_budget_duration, po.capping_budget_amount, po.capping_conversions_duration, po.capping_conversions_amount, po.callback_url, po.destination_url, po.status, po.assigned_at, po.updated_at, po.notes,
-                po.public_assignment_id,
-                p.id as publisher_id,
+                po.id, po.publisher_id AS internal_publisher_id, po.offer_id AS internal_offer_id,
+                po.tenant_id, po.payout_override, po.cap_override, po.conversion_approval_percentage,
+                po.capping_budget_duration, po.capping_budget_amount, po.capping_conversions_duration,
+                po.capping_conversions_amount, po.callback_url, po.destination_url, po.status,
+                po.assigned_at, po.updated_at, po.notes, po.public_assignment_id,
                 p.public_publisher_id,
                 p.email as publisher_email,
                 p.first_name as publisher_first_name,
@@ -637,10 +639,12 @@ class OfferService {
       const [assignmentsRows] = await pool.query(query, params);
       const assignments = Array.isArray(assignmentsRows) ? assignmentsRows : [];
 
-      // Return public_assignment_id as id so getTrackingUrl(id) finds the correct assignment by public id (avoids wrong offer_id in tracking URL)
+      // Return public_assignment_id as id so getTrackingUrl(id) finds the correct assignment on this offer
       return assignments.map(assignment => ({
         id: assignment.public_assignment_id ?? assignment.id,
-        publisher_id: assignment.public_publisher_id ?? assignment.publisher_id,
+        assignment_id: assignment.public_assignment_id ?? assignment.id,
+        publisher_id: assignment.public_publisher_id,
+        internal_publisher_id: assignment.internal_publisher_id,
         publisher_email: assignment.publisher_email,
         publisher_first_name: assignment.publisher_first_name,
         publisher_company: assignment.publisher_company,
