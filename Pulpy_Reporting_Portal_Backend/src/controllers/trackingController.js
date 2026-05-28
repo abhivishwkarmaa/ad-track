@@ -18,7 +18,26 @@ export class TrackingController {
         return reply.type('text/html').code(200).send(result.html);
       }
 
-      // Redirect to offer URL if valid
+      // Layer 3: When fire-and-forget mode is enabled, trackClick returns a `persistAsync`
+      // thunk. We dispatch the redirect first, then schedule the Redis pipeline writes
+      // on the next tick via setImmediate so they never sit on the request critical path.
+      // Default mode (`persistAsync` undefined) is byte-identical to pre-Layer-3 behavior.
+      if (result.persistAsync) {
+        reply.redirect(result.redirect, 302);
+        setImmediate(() => {
+          result.persistAsync().catch((err) => {
+            logger.error({
+              error: err.message,
+              stack: err.stack,
+              click_id: result.clickId,
+              url: request.url
+            }, '[CLICK] Async persist failed (fire-and-forget)');
+          });
+        });
+        return reply;
+      }
+
+      // Default: redirect after persistence already completed inline
       return reply.redirect(result.redirect, 302);
     } catch (error) {
       // ✅ Log full error details server-side

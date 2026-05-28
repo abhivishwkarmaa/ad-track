@@ -466,6 +466,8 @@ class OfferService {
       }
 
       await cacheService.invalidateOffer(internalId, tenantId);
+      // Layer 2: also drop the public-id → internal-id cache so /click resolves freshly
+      await cacheService.invalidateOfferByPublicId(existingOffer.public_offer_id, tenantId);
 
       return this.getOfferById(internalId, tenantId);
     } catch (error) {
@@ -1260,6 +1262,9 @@ class OfferService {
       if (!result.affectedRows) {
         return null;
       }
+      // Layer 2: invalidate both cache entries so a fresh /click sees archived status
+      await cacheService.invalidateOffer(internalId, tenantId);
+      await cacheService.invalidateOfferByPublicId(offer.public_offer_id, tenantId);
       return { id: internalId, public_id: offer.public_offer_id, deleted: true };
     } catch (error) {
       logger.error('OfferService.deleteOffer error:', error);

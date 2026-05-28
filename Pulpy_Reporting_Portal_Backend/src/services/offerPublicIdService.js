@@ -9,6 +9,7 @@
 
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import cacheService from './cacheService.js';
 
 class OfferPublicIdService {
     /**
@@ -243,6 +244,14 @@ class OfferPublicIdService {
      */
     async archiveOffer(offerId, tenantId) {
         try {
+            // Layer 2: capture public_offer_id BEFORE update so we can invalidate the
+            // public-id → internal-id cache too (in addition to the internal-id row cache).
+            const [lookupRows] = await pool.query(
+                'SELECT public_offer_id FROM offers WHERE id = ? AND tenant_id = ? LIMIT 1',
+                [offerId, tenantId]
+            );
+            const publicOfferId = lookupRows?.[0]?.public_offer_id;
+
             const [result] = await pool.query(
                 `UPDATE offers 
          SET status = 'archived', updated_at = UTC_TIMESTAMP() 
@@ -251,6 +260,10 @@ class OfferPublicIdService {
             );
 
             if (result.affectedRows > 0) {
+                await cacheService.invalidateOffer(offerId, tenantId);
+                if (publicOfferId != null) {
+                    await cacheService.invalidateOfferByPublicId(publicOfferId, tenantId);
+                }
                 logger.info(`Archived offer ${offerId} for tenant ${tenantId}`);
                 return true;
             }

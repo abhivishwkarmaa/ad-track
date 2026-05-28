@@ -3,6 +3,7 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import trackingService from '../services/trackingService.js';
 import postbackService from '../services/postbackService.js';
+import { getISP } from '../utils/ispLookup.js';
 
 const BATCH_SIZE = 100; // Batch Insert Size
 const BATCH_TIMEOUT = 1000; // Wait max 1s to fill batch
@@ -397,6 +398,74 @@ async function recoverStuckMessages() {
     }
 }
 
+/**
+ * Enrich clicks with ISP info just before DB insert.
+ * Moved here from the click hot path (trackingService.js) so the user-visible
+ * 302 redirect does not wait on an external HTTP call.
+ *
+ * - Looks up ISP only for clicks that have a usable IP and no isp value yet.
+ * - Dedupes by IP so each unique IP is queried at most once per batch.
+ * - Caches results in Redis (`isp:{ip}`, 1 h TTL) to avoid re-hitting ip-api.com.
+ * - Skips lookup silently on errors; column stays NULL (same as old behavior on failure).
+ */
+async function enrichIspForClicks(clicks) {
+    const needsLookup = clicks.filter(c => {
+        if (c.isp && c.isp !== '' && c.isp !== 'null') return false;
+        const ip = c.ip;
+        if (!ip || ip === '127.0.0.1' || ip.includes(':')) return false;
+        return true;
+    });
+    if (needsLookup.length === 0) return;
+
+    // Group clicks by unique IP
+    const ipToClicks = new Map();
+    for (const c of needsLookup) {
+        if (!ipToClicks.has(c.ip)) ipToClicks.set(c.ip, []);
+        ipToClicks.get(c.ip).push(c);
+    }
+
+    const uniqueIps = [...ipToClicks.keys()];
+
+    // Try Redis cache first for all IPs
+    const cachePipeline = redis.pipeline();
+    uniqueIps.forEach(ip => cachePipeline.get(`isp:${ip}`));
+    const cacheResults = await cachePipeline.exec().catch(() => []);
+
+    const ipsToFetch = [];
+    for (let i = 0; i < uniqueIps.length; i++) {
+        const ip = uniqueIps[i];
+        const [err, cached] = cacheResults[i] || [];
+        if (!err && cached !== null && cached !== undefined) {
+            // Cached value present (may be empty string = negative cache)
+            if (cached) {
+                for (const click of ipToClicks.get(ip)) click.isp = cached;
+            }
+        } else {
+            ipsToFetch.push(ip);
+        }
+    }
+
+    if (ipsToFetch.length === 0) return;
+
+    // Fetch uncached IPs in parallel; cap to 1.5s overall to bound worker latency
+    const results = await Promise.allSettled(
+        ipsToFetch.map(ip => getISP(ip).then(isp => ({ ip, isp })))
+    );
+
+    const writePipeline = redis.pipeline();
+    for (const r of results) {
+        if (r.status !== 'fulfilled') continue;
+        const { ip, isp } = r.value;
+        const value = isp || '';
+        if (isp) {
+            for (const click of ipToClicks.get(ip)) click.isp = isp;
+        }
+        // Cache positive AND negative results for 1 h to dampen rate-limit hits
+        writePipeline.setex(`isp:${ip}`, 3600, value);
+    }
+    await writePipeline.exec().catch(() => {});
+}
+
 async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
     if (clicks.length === 0) return;
 
@@ -461,6 +530,14 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
     if (validClicks.length === 0) {
         logger.warn('❌ No valid clicks to insert after filtering');
         return;
+    }
+
+    // ✅ ISP enrichment moved from click hot path → worker (Layer 1 latency fix)
+    // Failures are non-fatal: isp column stays NULL on errors (same as old hot-path behavior).
+    try {
+        await enrichIspForClicks(validClicks);
+    } catch (e) {
+        logger.warn('[ISP] enrichIspForClicks failed; continuing insert with NULL isp', { error: e.message });
     }
 
     // ✅ Resolve publisher_offer_id FK: only use IDs that exist in publisher_offers (avoid ER_NO_REFERENCED_ROW_2)

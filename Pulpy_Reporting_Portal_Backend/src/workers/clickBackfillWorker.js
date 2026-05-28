@@ -13,6 +13,7 @@
 import redis from '../config/redis.js';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import { getISP } from '../utils/ispLookup.js';
 
 const BACKFILL_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
 const SCAN_COUNT = 100; // Scan in batches of 100 keys
@@ -181,9 +182,38 @@ async function backfillUnflushedClicks() {
 }
 
 /**
+ * Best-effort ISP fill for a single click before insert.
+ * Mirrors the worker behavior so backfilled rows are consistent with main flow.
+ * Failures are silent — column stays NULL, same as old hot-path on getISP failure.
+ */
+async function fillIspIfMissing(clickData) {
+    const currentIsp = clickData.isp;
+    if (currentIsp && currentIsp !== '' && currentIsp !== 'null') return;
+    const ip = clickData.ip;
+    if (!ip || ip === '127.0.0.1' || ip.includes(':')) return;
+
+    try {
+        const cacheKey = `isp:${ip}`;
+        const cached = await redis.get(cacheKey);
+        if (cached !== null && cached !== undefined) {
+            if (cached) clickData.isp = cached;
+            return;
+        }
+        const isp = await getISP(ip);
+        await redis.setex(cacheKey, 3600, isp || '');
+        if (isp) clickData.isp = isp;
+    } catch (e) {
+        // Silent: isp stays whatever it was (likely empty).
+    }
+}
+
+/**
  * Insert click into MySQL database
  */
 async function insertClickIntoDB(clickData) {
+    // Best-effort ISP enrichment (does not block on errors)
+    await fillIspIfMissing(clickData);
+
     // Parse fields
     const offerId = parseInt(clickData.offer_id) || 0;
     const publisherId = parseInt(clickData.publisher_id) || 0;

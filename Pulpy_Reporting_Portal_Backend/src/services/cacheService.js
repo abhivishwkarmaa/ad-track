@@ -43,6 +43,78 @@ export class CacheService {
         return offer;
     }
 
+    /**
+     * Cached variant of `offerService.getInternalOfferIdByPublicId`.
+     * Maps tenant-scoped public_offer_id → internal id. Positive results only
+     * (null/miss is not cached so newly-created offers are visible immediately).
+     */
+    async getInternalOfferIdByPublicId(publicOfferId, tenantId) {
+        if (publicOfferId == null || !tenantId) return null;
+        const key = `ref:publicOffer:${tenantId}:${publicOfferId}`;
+        try {
+            const cached = await redis.get(key);
+            if (cached) {
+                const n = parseInt(cached, 10);
+                if (!Number.isNaN(n) && n > 0) return n;
+            }
+        } catch (e) {
+            logger.warn(`Redis getInternalOfferIdByPublicId error: ${e.message}`);
+        }
+
+        const internalId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
+        if (internalId) {
+            try { await redis.setex(key, TTL.OFFER, String(internalId)); } catch (e) { /* ignore */ }
+        }
+        return internalId;
+    }
+
+    /**
+     * Cached variant of `offerService.getOfferById(id, tenantId, true)` — strict
+     * internal-id lookup, returns full offer row. Mirrors `getOffer` but always
+     * with `internalOnly=true` so we never accidentally match a public_offer_id
+     * when the caller already resolved to an internal id.
+     */
+    async getOfferByInternalId(internalId, tenantId) {
+        if (internalId == null || !tenantId) return null;
+        const key = `ref:offer:${tenantId}:${internalId}`;
+        try {
+            const cached = await redis.hgetall(key);
+            if (cached && cached.id) return this._deserialize(cached);
+        } catch (e) {
+            logger.warn(`Redis getOfferByInternalId error: ${e.message}`);
+        }
+
+        const offer = await offerService.getOfferById(internalId, tenantId, true);
+        if (offer) {
+            this._cacheObject(key, offer, TTL.OFFER);
+        }
+        return offer;
+    }
+
+    /**
+     * Cached variant of `offerPublicIdService.getPublisherByPublicId`.
+     * Tenant-scoped public_publisher_id → full publisher row.
+     * Uses dynamic import to avoid a top-level circular dependency with
+     * `offerPublicIdService` (rare cap-fallback paths import the latter).
+     */
+    async getPublisherByPublicId(publicPublisherId, tenantId) {
+        if (publicPublisherId == null || !tenantId) return null;
+        const key = `ref:publicPublisher:${tenantId}:${publicPublisherId}`;
+        try {
+            const cached = await redis.hgetall(key);
+            if (cached && cached.id) return this._deserialize(cached);
+        } catch (e) {
+            logger.warn(`Redis getPublisherByPublicId error: ${e.message}`);
+        }
+
+        const { default: offerPublicIdService } = await import('./offerPublicIdService.js');
+        const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+        if (publisher) {
+            this._cacheObject(key, publisher, TTL.PUBLISHER);
+        }
+        return publisher;
+    }
+
     async getPublisher(publisherId, tenantId = null) {
         // ✅ CRITICAL: Include tenant_id in cache key for tenant isolation
         const key = tenantId
@@ -387,11 +459,25 @@ export class CacheService {
         await redis.del(key);
     }
 
+    /** Invalidate the public_offer_id → internal id mapping for a tenant. */
+    async invalidateOfferByPublicId(publicOfferId, tenantId) {
+        if (publicOfferId == null || !tenantId) return;
+        const key = `ref:publicOffer:${tenantId}:${publicOfferId}`;
+        try { await redis.del(key); } catch (e) { /* ignore */ }
+    }
+
     async invalidatePublisher(publisherId, tenantId) {
         const key = tenantId
             ? `ref:publisher:${tenantId}:${publisherId}`
             : `ref:publisher:${publisherId}`;
         await redis.del(key);
+    }
+
+    /** Invalidate the public_publisher_id → publisher row cache for a tenant. */
+    async invalidatePublisherByPublicId(publicPublisherId, tenantId) {
+        if (publicPublisherId == null || !tenantId) return;
+        const key = `ref:publicPublisher:${tenantId}:${publicPublisherId}`;
+        try { await redis.del(key); } catch (e) { /* ignore */ }
     }
 
     async invalidateAssignment(publisherId, offerId, tenantId) {

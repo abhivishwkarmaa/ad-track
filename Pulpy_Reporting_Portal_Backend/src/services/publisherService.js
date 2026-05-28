@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 
 import offerPublicIdService from './offerPublicIdService.js';
+import cacheService from './cacheService.js';
 
 export class PublisherService {
   async create(data, tenantId = null) {
@@ -276,6 +277,9 @@ export class PublisherService {
     }
 
     await pool.query(query, params);
+    // Layer 2: invalidate both publisher caches (by internal id and by public id)
+    await cacheService.invalidatePublisher(internalId, tenantId);
+    await cacheService.invalidatePublisherByPublicId(existing.public_publisher_id, tenantId);
     // Return publisher without password_hash
     return this.findById(id, tenantId);
   }
@@ -475,6 +479,9 @@ export class PublisherService {
     if ((result.affectedRows || result.affectedRows === 0) && result.affectedRows === 0) {
       return null;
     }
+    // Layer 2: invalidate both publisher caches so suspension reflects on next /click
+    await cacheService.invalidatePublisher(internalId, tenantId);
+    await cacheService.invalidatePublisherByPublicId(existing.public_publisher_id, tenantId);
     return this.findById(id, tenantId);
   }
 }

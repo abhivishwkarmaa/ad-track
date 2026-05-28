@@ -4,13 +4,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
 import { parseDevice } from '../utils/deviceParser.js';
 import { getLocationFromIP, getCountryFromHeaders } from '../utils/countryLookup.js';
-import { getISP } from '../utils/ispLookup.js';
 import { extractDomain, appendClickParams, replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { generateOfferErrorPage } from '../utils/errorPage.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
 import assignmentService from './assignmentService.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { TenantRequiredError } from '../utils/secureErrors.js';
+import offerPublicIdService from './offerPublicIdService.js';
 
 import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
@@ -28,6 +29,13 @@ export class TrackingService {
   async trackClick(query, request) {
     // 1. Fail early if system is overloaded (Backpressure)
     // if (isOverloaded()) ... (Redis handles this better, skip for now or keep)
+
+    // Structured timing: cumulative ms from request entry to each checkpoint.
+    // Used to quantify Layer 1/2/3/4 gains and pinpoint future bottlenecks.
+    // Overhead is just Date.now() calls (~50ns each) — safe to leave in prod.
+    const _t0 = Date.now();
+    const _t = { start: 0 };
+    const _mark = (name) => { _t[name] = Date.now() - _t0; };
 
     try {
       // ============================================
@@ -54,8 +62,6 @@ export class TrackingService {
           public_offer_id: publicOfferId,
           public_publisher_id: publicPublisherId
         });
-        // ✅ Use secure error class - error handler will create minimal response
-        const { TenantRequiredError } = await import('../utils/secureErrors.js');
         throw new TenantRequiredError('Tenant required');
       }
 
@@ -75,7 +81,14 @@ export class TrackingService {
       // If we saw this exact same User+IP+Offer+Tenant in the last 5 seconds, 
       // return the cached redirect immediately without recording a new click.
       const cachedRedirect = await redis.get(redirectCacheKey);
+      _mark('dedup');
       if (cachedRedirect) {
+        _mark('total');
+        logger.info({
+          tenant_id: tenantId,
+          total_ms: _t.total,
+          dedup_ms: _t.dedup
+        }, '[CLICK_TIMING] dedup_hit');
         logger.info('[CLICK] Duplicate click detected - returning cached redirect', {
           tenant_id: tenantId,
           public_offer_id: publicOfferId,
@@ -101,15 +114,22 @@ export class TrackingService {
 
       // ============================================
       // STEP 2: RESOLVE — Public ID → Internal ID (sirf iske baad DB me internal id use karo)
+      // Layer 2: all three lookups flow through cacheService (Redis-cached, 5min TTL).
+      // Layer 4: internalOfferId + publisher fetched in parallel (independent reads) so we
+      // pay 1 Redis RTT instead of 2. getOfferByInternalId still runs sequentially because
+      // it depends on the resolved internalOfferId.
       // ============================================
-      const internalOfferId = await offerService.getInternalOfferIdByPublicId(publicOfferId, tenantId);
-      const offerPublicIdService = (await import('./offerPublicIdService.js')).default;
-      const publisher = await offerPublicIdService.getPublisherByPublicId(publicPublisherId, tenantId);
+      const [internalOfferId, publisher] = await Promise.all([
+        cacheService.getInternalOfferIdByPublicId(publicOfferId, tenantId),
+        cacheService.getPublisherByPublicId(publicPublisherId, tenantId)
+      ]);
+      _mark('resolve_ids');
       const internalPublisherId = publisher ? publisher.id : null;
 
       const offer = internalOfferId
-        ? await offerService.getOfferById(internalOfferId, tenantId, true)
+        ? await cacheService.getOfferByInternalId(internalOfferId, tenantId)
         : null;
+      _mark('resolve_offer');
 
       // ============================================
       // STEP 3: Validate — Offer & publisher mile, tenant match kare
@@ -195,14 +215,20 @@ export class TrackingService {
         throw new Error(`Security violation: Publisher ${publisher.id} belongs to tenant ${publisher.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
 
-      // ✅ STEP 5: Verify tenant exists in database (for foreign key integrity)
+      // ✅ STEP 5: Verify tenant exists (Redis-cached for hot path; falls back to DB on miss)
+      // Cache TTL = 1h. Cache key is tenant-scoped to keep multi-tenant isolation guarantees.
       try {
-        const [tenantRows] = await pool.query('SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
-        if (tenantRows.length === 0) {
-          logger.error(`❌ CRITICAL: Tenant ID ${tenantId} does not exist in tenants table!`);
-          throw new Error(`Tenant ${tenantId} does not exist in database`);
+        const tenantExistsKey = `tenant:exists:${tenantId}`;
+        const cachedExists = await redis.get(tenantExistsKey);
+        if (!cachedExists) {
+          const [tenantRows] = await pool.query('SELECT id, name FROM tenants WHERE id = ?', [tenantId]);
+          if (tenantRows.length === 0) {
+            logger.error(`❌ CRITICAL: Tenant ID ${tenantId} does not exist in tenants table!`);
+            throw new Error(`Tenant ${tenantId} does not exist in database`);
+          }
+          await redis.setex(tenantExistsKey, 3600, tenantRows[0].name || '1');
+          logger.debug(`✅ Tenant ${tenantId} verified: ${tenantRows[0].name}`);
         }
-        logger.debug(`✅ Tenant ${tenantId} verified: ${tenantRows[0].name}`);
       } catch (err) {
         if (err.message.includes('does not exist')) {
           throw err; // Re-throw tenant not found error
@@ -399,8 +425,17 @@ export class TrackingService {
       const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
       let isCapErr = false;
 
+      // Layer 4: Run offer + publisher cap status fetches in parallel (1 RTT vs 2).
+      // Processing/action logic below runs sequentially so the redirect/error precedence
+      // (offer-cap action takes priority over publisher-cap action) is byte-identical to
+      // the previous behavior. Both fetches are read-only Redis GETs — safe to issue together.
+      const [offerCapStatus, pubCapStatus] = await Promise.all([
+        cacheService.getCapStatus('offer', offer.id, offer, tenantId),
+        cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId)
+      ]);
+      _mark('cap_status');
+
       // 4A. Check Offer Cap
-      const offerCapStatus = await cacheService.getCapStatus('offer', offer.id, offer, tenantId);
       if (offerCapStatus.isHit) {
         logger.info(`[CAP] Offer Cap HIT`, {
           offer_id: offer.id,
@@ -435,9 +470,7 @@ export class TrackingService {
         };
       }
 
-      // 4B. Check Publisher Cap
-      // 4B. Check Publisher Cap
-      const pubCapStatus = await cacheService.getCapStatus('publisher', assignment.id, assignment, tenantId);
+      // 4B. Process Publisher Cap (status was fetched in parallel with offer cap above)
       if (pubCapStatus.isHit) {
         logger.info(`[CAP] Publisher Cap HIT`, {
           assignment_id: assignment.id,
@@ -483,13 +516,9 @@ export class TrackingService {
       const referrer = request.headers.referer || '';
       const domain = extractDomain(referrer);
 
-      // Geo & ISP Lookup (already performed country lookup earlier)
-
-      // Async ISP lookup (with timeout protection)
-      let isp = null;
-      try {
-        isp = await getISP(ip);
-      } catch (e) { /* ignore */ }
+      // Geo lookup already performed earlier. ISP lookup is performed by the worker
+      // (redisWorker.js) just before bulk insert to keep the click hot path free of
+      // external HTTP calls. clickData.isp is left empty here on purpose.
 
       // redirectUrl is already set above based on cap checks
 
@@ -537,7 +566,7 @@ export class TrackingService {
           region: location.region,
           country: country_final
         }) || '', // Store as JSON string
-        isp: isp || '',
+        isp: '', // Filled by worker (redisWorker.js / clickBackfillWorker.js) before insert
         domain: domain || '',
         device_type: deviceInfo.deviceType || '',
         browser: deviceInfo.browser || '',
@@ -555,163 +584,70 @@ export class TrackingService {
         )) ? 'true' : 'false'
       };
 
-      // DEBUG: Dump clickData to file to verify content
-      const fsDebug = await import('fs');
-      fsDebug.appendFileSync('debug_click_data.log', JSON.stringify({
-        time: new Date().toISOString(),
-        uuid: clickUuid,
-        clickData: clickData
-      }, null, 2) + '\n---\n');
+      // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
+      // This ensures clicks from different publishers on same offer are isolated
+      const redisKey = `click:${finalTenantId}:${offer.id}:${publisher.id}:${clickUuid}`;
 
-      try {
-        // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
-        // This ensures clicks from different publishers on same offer are isolated
-        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for Redis key
-        const redisKey = `click:${finalTenantId}:${offer.id}:${publisher.id}:${clickUuid}`;
+      logger.info('[CLICK] Click received', {
+        tenant_id: finalTenantId,
+        offer_id: offer.id,
+        public_offer_id: publicOfferId,
+        publisher_id: publisher.id,
+        public_publisher_id: publicPublisherId,
+        click_id: clickUuid,
+        redis_key: redisKey
+      });
 
-        // ✅ CRITICAL: Log click received
-        logger.info('[CLICK] Click received', {
-          tenant_id: finalTenantId,
-          offer_id: offer.id,
-          public_offer_id: publicOfferId,
-          publisher_id: publisher.id,
-          public_publisher_id: publicPublisherId,
+      const persistCtx = {
+        clickData,
+        redisKey,
+        redirectCacheKey,
+        redirectUrl,
+        finalTenantId,
+        offerId: offer.id,
+        publisherId: publisher.id,
+        publicOfferId,
+        publicPublisherId,
+        clickUuid
+      };
+
+      // Layer 3: Fire-and-forget gate. When `CLICK_FIRE_AND_FORGET=1` we return the
+      // redirect immediately and let the controller schedule _persistClickData via
+      // setImmediate after `reply.redirect` is on the wire. Default OFF preserves
+      // exact-current behavior (inline await).
+      const fireAndForget = process.env.CLICK_FIRE_AND_FORGET === '1';
+      if (fireAndForget) {
+        _mark('total');
+        logger.info({
+          tenant_id: tenantId,
           click_id: clickUuid,
-          redis_key: redisKey
-        });
-
-        // ✅ CRITICAL: Write click data ONLY ONCE to Redis HASH
-        // Use pipeline for atomicity - ensure hash is written before stream entry
-        const pipeline = redis.pipeline();
-        pipeline.hset(redisKey, clickData);
-        pipeline.expire(redisKey, 3600); // 1 hours TTL
-
-        // ✅ CRITICAL: tenant_id should always be set in strict multi-tenant system
-        const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
-        if (!tenantIdStr) {
-          logger.error('❌ CRITICAL: Attempting to add click to stream without tenant_id!', {
-            click_uuid: clickUuid,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-          throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
-        }
-
-        // 🔥 CHANGED: Use offer.id and publisher.id (internal DB IDs) for stream
-        pipeline.xadd('stream:clicks', '*',
-          'tenant_id', tenantIdStr,
-          'offer_id', String(offer.id),
-          'publisher_id', String(publisher.id),
-          'click_id', clickUuid
-        );
-
-        // ✅ OPTIONAL: Cache redirect URL for quick lookup (performance optimization, not blocking)
-        // This cache does NOT affect click counting or DB insertion
-        pipeline.setex(redirectCacheKey, 5, redirectUrl);
-
-        const results = await pipeline.exec();
-
-        // ✅ CRITICAL: Verify hash write succeeded (MANDATORY)
-        // Stream write failure is NON-FATAL - click is still in Redis hash and can be backfilled
-        let hashWriteSuccess = false;
-        let streamWriteSuccess = false;
-        let hashWriteError = null;
-        let streamWriteError = null;
-
-        for (let i = 0; i < results.length; i++) {
-          const [err, result] = results[i];
-          if (err) {
-            const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
-            logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
-
-            if (i === 0) {
-              // Hash write failure is FATAL - click data is lost
-              hashWriteError = err;
-              throw new Error(`Redis hash write failed: ${err.message}`);
-            } else if (i === 2) {
-              // Stream write failure is NON-FATAL - click is still in Redis hash
-              streamWriteError = err;
-              logger.warn(`⚠️ Redis stream enqueue failed - click stored in Redis hash, will be backfilled:`, {
-                error: err.message,
-                redis_key: redisKey,
-                click_id: clickUuid
-              });
-            }
-          } else {
-            if (i === 0) hashWriteSuccess = true; // Hash write
-            if (i === 2) streamWriteSuccess = true; // Stream add
-          }
-        }
-
-        // ✅ CRITICAL: Log Redis stored
-        if (hashWriteSuccess) {
-          logger.info('[CLICK] Redis stored', {
-            redis_key: redisKey,
-            click_id: clickUuid,
-            tenant_id: finalTenantId,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-        }
-
-        // ✅ CRITICAL: Log stream enqueued (or failed)
-        if (streamWriteSuccess) {
-          logger.info('[CLICK] Stream enqueued', {
-            stream: 'stream:clicks',
-            click_id: clickUuid,
-            tenant_id: finalTenantId,
-            offer_id: offer.id,
-            public_offer_id: publicOfferId,
-            publisher_id: publisher.id
-          });
-        } else if (streamWriteError) {
-          logger.warn('[CLICK] Stream enqueue failed - click will be backfilled', {
-            stream: 'stream:clicks',
-            error: streamWriteError.message,
-            redis_key: redisKey,
-            click_id: clickUuid
-          });
-        }
-
-        // Verify the hash was actually written (with retry in case of timing issue)
-        // redisKey already defined above
-        let hashCheck = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          hashCheck = await redis.hget(redisKey, 'offer_id');
-          if (hashCheck) break;
-          if (attempt < 2) await new Promise(r => setTimeout(r, 100)); // Wait 100ms before retry
-        }
-
-        if (hashCheck) {
-          logger.info(`✅ Verified click hash exists: ${redisKey} (offer_id: ${hashCheck})`);
-        } else {
-          logger.error(`❌ CRITICAL: Click hash was NOT written or was deleted! ${redisKey}`);
-          logger.error('   This will cause the worker to fail when processing this click.');
-          // Try to write it again as a fallback
-          try {
-            await redis.hset(redisKey, clickData);
-            await redis.expire(redisKey, 86400);
-            logger.info(`✅ Fallback: Re-wrote click hash: ${redisKey}`);
-          } catch (fallbackErr) {
-            logger.error(`❌ Fallback hash write also failed: ${fallbackErr.message}`);
-          }
-        }
-      } catch (err) {
-        logger.error('[CLICK] Redis Write Failed:', err);
-        throw err;
+          total_ms: _t.total,
+          dedup_ms: _t.dedup,
+          resolve_ids_ms: _t.resolve_ids,
+          resolve_offer_ms: _t.resolve_offer,
+          cap_status_ms: _t.cap_status
+        }, '[CLICK_TIMING] fresh_click_ff');
+        return {
+          redirect: redirectUrl,
+          clickId: clickUuid,
+          persistAsync: () => this._persistClickData(persistCtx)
+        };
       }
 
-      // DEBUG LOG TO FILE
-      const fs = await import('fs');
-      fs.appendFileSync('debug_clicks.log', JSON.stringify({
-        time: new Date().toISOString(),
-        uuid: clickUuid,
-        tenant: finalTenantId
-      }, null, 2) + '\n---\n');
-
-      // ✅ CRITICAL: Log that click was stored in Redis (already logged above, but keeping for compatibility)
+      // Default path: persist inline (identical to pre-Layer-3 behavior).
+      await this._persistClickData(persistCtx);
+      _mark('persist');
+      _mark('total');
+      logger.info({
+        tenant_id: tenantId,
+        click_id: clickUuid,
+        total_ms: _t.total,
+        dedup_ms: _t.dedup,
+        resolve_ids_ms: _t.resolve_ids,
+        resolve_offer_ms: _t.resolve_offer,
+        cap_status_ms: _t.cap_status,
+        persist_ms: _t.persist - (_t.cap_status || 0)
+      }, '[CLICK_TIMING] fresh_click');
 
       return {
         redirect: redirectUrl,
@@ -721,6 +657,115 @@ export class TrackingService {
     } catch (error) {
       logger.error({ message: error.message, stack: error.stack }, 'TrackingService.trackClick error:');
       throw error;
+    }
+  }
+
+  /**
+   * Persists a click to Redis (hash + stream + redirect-dedup cache) using a single pipeline.
+   * Extracted from the original inline block in trackClick so Layer 3 can run it either
+   * inline (default) or via setImmediate after the 302 response is sent (fire-and-forget).
+   *
+   * Behavior contract (unchanged from pre-Layer-3):
+   *  - Hash write failure → throws (FATAL: click data would be lost otherwise).
+   *  - Stream xadd failure → NON-FATAL: logs warn; the backfill worker will recover the click.
+   *  - All Redis keys, fields, and TTLs are byte-identical to the previous code.
+   */
+  async _persistClickData(ctx) {
+    const {
+      clickData,
+      redisKey,
+      redirectCacheKey,
+      redirectUrl,
+      finalTenantId,
+      offerId,
+      publisherId,
+      publicOfferId,
+      publicPublisherId,
+      clickUuid
+    } = ctx;
+
+    try {
+      const tenantIdStr = finalTenantId ? String(finalTenantId) : '';
+      if (!tenantIdStr) {
+        logger.error('❌ CRITICAL: Attempting to add click to stream without tenant_id!', {
+          click_uuid: clickUuid,
+          offer_id: offerId,
+          public_offer_id: publicOfferId,
+          publisher_id: publisherId
+        });
+        throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
+      }
+
+      const pipeline = redis.pipeline();
+      pipeline.hset(redisKey, clickData);
+      pipeline.expire(redisKey, 3600);
+      pipeline.xadd('stream:clicks', '*',
+        'tenant_id', tenantIdStr,
+        'offer_id', String(offerId),
+        'publisher_id', String(publisherId),
+        'click_id', clickUuid
+      );
+      pipeline.setex(redirectCacheKey, 5, redirectUrl);
+
+      const results = await pipeline.exec();
+
+      let hashWriteSuccess = false;
+      let streamWriteSuccess = false;
+      let streamWriteError = null;
+
+      for (let i = 0; i < results.length; i++) {
+        const [err, result] = results[i];
+        if (err) {
+          const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
+          logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
+
+          if (i === 0) {
+            throw new Error(`Redis hash write failed: ${err.message}`);
+          } else if (i === 2) {
+            streamWriteError = err;
+            logger.warn(`⚠️ Redis stream enqueue failed - click stored in Redis hash, will be backfilled:`, {
+              error: err.message,
+              redis_key: redisKey,
+              click_id: clickUuid
+            });
+          }
+        } else {
+          if (i === 0) hashWriteSuccess = true;
+          if (i === 2) streamWriteSuccess = true;
+        }
+      }
+
+      if (hashWriteSuccess) {
+        logger.info('[CLICK] Redis stored', {
+          redis_key: redisKey,
+          click_id: clickUuid,
+          tenant_id: finalTenantId,
+          offer_id: offerId,
+          public_offer_id: publicOfferId,
+          publisher_id: publisherId
+        });
+      }
+
+      if (streamWriteSuccess) {
+        logger.info('[CLICK] Stream enqueued', {
+          stream: 'stream:clicks',
+          click_id: clickUuid,
+          tenant_id: finalTenantId,
+          offer_id: offerId,
+          public_offer_id: publicOfferId,
+          publisher_id: publisherId
+        });
+      } else if (streamWriteError) {
+        logger.warn('[CLICK] Stream enqueue failed - click will be backfilled', {
+          stream: 'stream:clicks',
+          error: streamWriteError.message,
+          redis_key: redisKey,
+          click_id: clickUuid
+        });
+      }
+    } catch (err) {
+      logger.error('[CLICK] Redis Write Failed:', err);
+      throw err;
     }
   }
 
@@ -950,7 +995,7 @@ export class TrackingService {
         const publicPublisherId = assignment.public_publisher_id ||
           request.query.pub_id ||
           request.query.a ||
-          (await (await import('./offerPublicIdService.js')).default.getPublicPublisherId(assignment.publisher_id, tenantId));
+          (await offerPublicIdService.getPublicPublisherId(assignment.publisher_id, tenantId));
 
         const protocol = request.headers['x-forwarded-proto'] || 'http';
         const host = request.headers.host;
@@ -1025,7 +1070,7 @@ export class TrackingService {
         const publicPublisherId = assignment.public_publisher_id ||
           request.query.pub_id ||
           request.query.a ||
-          (await (await import('./offerPublicIdService.js')).default.getPublicPublisherId(assignment.publisher_id, tenantId));
+          (await offerPublicIdService.getPublicPublisherId(assignment.publisher_id, tenantId));
 
         const protocol = request.headers['x-forwarded-proto'] || 'http';
         const host = request.headers.host;
