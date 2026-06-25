@@ -919,7 +919,7 @@ export class DashboardService {
       const orderBy = filters.order_by || 'DESC';
 
       // Validate sort fields to prevent SQL injection
-      const allowedSortFields = ['clicks', 'conversions', 'approved_conversions', 'pending_conversions', 'affiliate_payout', 'advertiser_payout', 'profit', 'offer_name', 'conversion_ratio'];
+      const allowedSortFields = ['clicks', 'conversions', 'approved_conversions', 'pending_conversions', 'affiliate_payout', 'advertiser_payout', 'profit', 'offer_name', 'conversion_ratio', 'approved_conversion_ratio'];
       const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'clicks';
       const finalOrderBy = orderBy.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -950,7 +950,10 @@ export class DashboardService {
           COALESCE(conv.profit, 0) as profit,
           CASE WHEN COALESCE(c.total_clicks, 0) > 0 
                THEN (COALESCE(conv.total_conversions, 0) / COALESCE(c.total_clicks, 0) * 100) 
-               ELSE 0 END as conversion_ratio
+               ELSE 0 END as conversion_ratio,
+          CASE WHEN COALESCE(c.total_clicks, 0) > 0 
+               THEN (COALESCE(conv.approved_conversions, 0) / COALESCE(c.total_clicks, 0) * 100) 
+               ELSE 0 END as approved_conversion_ratio
         FROM offers o
         LEFT JOIN (
           SELECT offer_id, COUNT(*) as total_clicks FROM clicks 
@@ -984,7 +987,9 @@ export class DashboardService {
         data: rows.map(row => {
           const clicks = parseInt(row.clicks || 0);
           const conversions = parseInt(row.conversions || 0);
+          const approvedConversions = parseInt(row.approved_conversions || 0);
           const conversionRatio = clicks > 0 ? ((conversions / clicks) * 100).toFixed(2) : '0.00';
+          const approvedConversionRatio = clicks > 0 ? ((approvedConversions / clicks) * 100).toFixed(2) : '0.00';
 
           return {
             offer_id: row.offer_id,
@@ -992,9 +997,10 @@ export class DashboardService {
             offer_name: row.offer_name,
             clicks: clicks,
             conversions: conversions,
-            approved_conversions: parseInt(row.approved_conversions || 0),
+            approved_conversions: approvedConversions,
             pending_conversions: parseInt(row.pending_conversions || 0),
             conversion_ratio: parseFloat(conversionRatio),
+            approved_conversion_ratio: parseFloat(approvedConversionRatio),
             affiliate_payout: parseFloat(row.affiliate_payout || 0),
             advertiser_payout: parseFloat(row.advertiser_payout || 0),
             profit: parseFloat(row.profit || 0)

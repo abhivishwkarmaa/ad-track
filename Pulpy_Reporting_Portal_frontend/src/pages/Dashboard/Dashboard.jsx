@@ -972,7 +972,7 @@ function DashboardContent() {
                     ) : null}
                     <ProgressBar visible={loadingOfferStats} />
                     {loadingOfferStats && offerStatistics.length === 0 ? (
-                        <SkeletonTable rows={5} cols={8} className="stats-table stats-table-offer" />
+                        <SkeletonTable rows={5} cols={9} className="stats-table stats-table-offer" />
                     ) : offerStatistics && offerStatistics.length > 0 ? (
                         <>
                             <div className="activity-table stats-table stats-table-offer">
@@ -983,6 +983,7 @@ function DashboardContent() {
                                     <SortableHeader label="Approved" field="approved_conversions" currentSort={offerSort} onSort={handleOfferSort} align="center" />
                                     <SortableHeader label="Pending" field="pending_conversions" currentSort={offerSort} onSort={handleOfferSort} align="center" />
                                     <SortableHeader label="CR" field="conversion_ratio" currentSort={offerSort} onSort={handleOfferSort} align="center" />
+                                    <SortableHeader label="Approved CR" field="approved_conversion_ratio" currentSort={offerSort} onSort={handleOfferSort} align="center" />
                                     <SortableHeader label="Payout" field="affiliate_payout" currentSort={offerSort} onSort={handleOfferSort} align="center" />
                                     <SortableHeader label="Profit" field="profit" currentSort={offerSort} onSort={handleOfferSort} align="center" />
                                 </div>
@@ -1000,6 +1001,7 @@ function DashboardContent() {
                                         <span className="align-center" style={{ color: 'green' }}>{formatNumber(stat.approved_conversions || 0)}</span>
                                         <span className="align-center" style={{ color: '#ffb800' }}>{formatNumber(stat.pending_conversions || 0)}</span>
                                         <span className="align-center">{stat.conversion_ratio}%</span>
+                                        <span className="align-center" style={{ color: 'green' }}>{stat.approved_conversion_ratio ?? 0}%</span>
                                         <span className="align-center">{formatCurrency(stat.affiliate_payout)}</span>
                                         <span className="align-center" style={{ color: stat.profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontWeight: '600' }}>
                                             {formatCurrency(stat.profit)}
