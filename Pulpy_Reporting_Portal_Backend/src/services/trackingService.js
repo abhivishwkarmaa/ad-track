@@ -25,6 +25,54 @@ const getIstDateString = () => {
   return istTime.toISOString().split('T')[0];
 };
 
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** IST calendar cap window → UTC MySQL datetimes [start, endExclusive) for index-safe created_at filters. */
+function getIstCapCreatedAtRange(duration, now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const toMysqlUtc = (dt) => dt.toISOString().slice(0, 19).replace('T', ' ');
+  const shifted = new Date(now.getTime() + IST_OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const mo = shifted.getUTCMonth() + 1;
+  const d = shifted.getUTCDate();
+  const h = shifted.getUTCHours();
+
+  if (duration === 'hour') {
+    const start = new Date(`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(new Date(start.getTime() + 3600000)) };
+  }
+  if (duration === 'day') {
+    const start = new Date(`${y}-${pad(mo)}-${pad(d)}T00:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(new Date(start.getTime() + 86400000)) };
+  }
+  if (duration === 'week') {
+    const isoDow = shifted.getUTCDay() || 7;
+    const todayStart = new Date(`${y}-${pad(mo)}-${pad(d)}T00:00:00+05:30`);
+    const mondayStart = new Date(todayStart.getTime() - (isoDow - 1) * 86400000);
+    return {
+      start: toMysqlUtc(mondayStart),
+      endExclusive: toMysqlUtc(new Date(mondayStart.getTime() + 7 * 86400000)),
+    };
+  }
+  if (duration === 'month') {
+    const start = new Date(`${y}-${pad(mo)}-01T00:00:00+05:30`);
+    const nextY = mo === 12 ? y + 1 : y;
+    const nextMo = mo === 12 ? 1 : mo + 1;
+    const endExclusive = new Date(`${nextY}-${pad(nextMo)}-01T00:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(endExclusive) };
+  }
+  return null;
+}
+
+/** IST calendar day (YYYY-MM-DD) → UTC MySQL datetimes [start, endExclusive). */
+function getIstDayCreatedAtRange(ymd) {
+  const start = new Date(`${ymd}T00:00:00+05:30`);
+  return {
+    start: start.toISOString().slice(0, 19).replace('T', ' '),
+    endExclusive: new Date(start.getTime() + 86400000).toISOString().slice(0, 19).replace('T', ' '),
+  };
+}
+
 export class TrackingService {
   async trackClick(query, request) {
     // 1. Fail early if system is overloaded (Backpressure)
@@ -1264,27 +1312,15 @@ export class TrackingService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
-    let dateCondition = '';
-    if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-    } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
-    }
+    const capRange = getIstCapCreatedAtRange(duration);
+    if (!capRange) return false;
 
     const [rows] = await pool.query(
       `SELECT COALESCE(SUM(amount), 0) as total_revenue
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`,
-      [offerId, publisherId]
+       WHERE offer_id = ? AND publisher_id = ?
+         AND created_at >= ? AND created_at < ?`,
+      [offerId, publisherId, capRange.start, capRange.endExclusive]
     );
 
     const totalRevenue = parseFloat((Array.isArray(rows) ? rows[0] : rows).total_revenue || 0);
@@ -1300,27 +1336,15 @@ export class TrackingService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
-    let dateCondition = '';
-    if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-    } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
-    }
+    const capRange = getIstCapCreatedAtRange(duration);
+    if (!capRange) return false;
 
     const [rows] = await pool.query(
       `SELECT COUNT(*) as conversion_count
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND ${dateCondition}`,
-      [offerId, publisherId]
+       WHERE offer_id = ? AND publisher_id = ?
+         AND created_at >= ? AND created_at < ?`,
+      [offerId, publisherId, capRange.start, capRange.endExclusive]
     );
 
     const count = parseInt((Array.isArray(rows) ? rows[0] : rows).conversion_count || 0);
@@ -1329,9 +1353,9 @@ export class TrackingService {
 
   async updateDailyStats(offerId, publisherId, type, tenantId = null) {
     try {
-      // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
+      // UTC ENFORCEMENT: Store UTC in DB; IST day boundaries computed in Node for uniqueness checks.
       const today = getIstDateString();
+      const todayRange = getIstDayCreatedAtRange(today);
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {
@@ -1350,8 +1374,8 @@ export class TrackingService {
           let countQuery = `SELECT COUNT(*) as cnt FROM clicks
                  WHERE offer_id = ?
                    AND ip = ?
-                   AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-          const countParams = [offerId, clickIp, today];
+                   AND created_at >= ? AND created_at < ?`;
+          const countParams = [offerId, clickIp, todayRange.start, todayRange.endExclusive];
           if (tenantId) {
             countQuery += ' AND tenant_id = ?';
             countParams.push(tenantId);

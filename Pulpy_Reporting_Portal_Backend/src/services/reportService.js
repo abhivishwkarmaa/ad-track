@@ -43,8 +43,8 @@ export class ReportService {
     // 2. Payout  = SUM(payout)  — ONLY approved conversions
     // 3. Profit  = Revenue - Payout
     //
-    // ✅ PERFORMANCE: Independent scalar subqueries — no JOIN fanout, no temp tables.
-    // Each subquery hits (tenant_id, created_at) composite index directly.
+    // ✅ PERFORMANCE: Two fact-table scans (clicks + conversions) via CROSS JOIN of aggregates.
+    // Avoids repeating identical WHERE windows across multiple scalar subqueries.
     try {
       // ── Build WHERE fragments (no table alias — scalar subqueries use bare column names) ──
       const clickParams = [];
@@ -142,17 +142,32 @@ export class ReportService {
 
       const sql = `
         SELECT
-          (SELECT COUNT(DISTINCT publisher_id) FROM clicks      WHERE ${clickWhere}) AS affiliates,
-          (SELECT COUNT(*)                     FROM clicks      WHERE ${clickWhere}) AS unique_clicks,
-          (SELECT COUNT(*)                     FROM conversions WHERE ${convWhere})  AS conversions,
-          (SELECT COALESCE(SUM(amount), 0)     FROM conversions WHERE ${convWhere})  AS revenue,
-          (SELECT COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS payout,
-          (SELECT COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) FROM conversions WHERE ${convWhere}) AS profit,
+          click_agg.affiliates,
+          click_agg.unique_clicks,
+          conv_agg.conversions,
+          conv_agg.revenue,
+          conv_agg.payout,
+          conv_agg.profit,
           0 AS impressions
+        FROM (
+          SELECT
+            COUNT(DISTINCT publisher_id) AS affiliates,
+            COUNT(*) AS unique_clicks
+          FROM clicks
+          WHERE ${clickWhere}
+        ) click_agg
+        CROSS JOIN (
+          SELECT
+            COUNT(*) AS conversions,
+            COALESCE(SUM(amount), 0) AS revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout,
+            COALESCE(SUM(amount), 0) - COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS profit
+          FROM conversions
+          WHERE ${convWhere}
+        ) conv_agg
       `;
 
-      // Params: affiliates(c), unique_clicks(c), conversions(cv), revenue(cv), payout(cv), profit(cv)
-      const allParams = [...clickParams, ...clickParams, ...convParams, ...convParams, ...convParams, ...convParams];
+      const allParams = [...clickParams, ...convParams];
       const [rows] = await pool.query(sql, allParams);
 
       const summary = rows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
@@ -449,17 +464,25 @@ export class ReportService {
           if (wantsMetric('approved_payout')) selectParts.push('COALESCE(va.approved_payout, 0) as approved_payout');
           if (selectParts.length === 3) selectParts.push('COALESCE(ca.clicks, 0) as clicks');
 
-          const countQuery = `SELECT COUNT(DISTINCT c.publisher_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
+          const countQuery = `
+            SELECT COUNT(*) as total
+            FROM (
+              SELECT 1
+              FROM clicks c
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.publisher_id
+            ) grouped_publishers
+          `;
 
           // Export keeps full dataset behavior, but query is still pre-aggregated and avoids click_uuid joins.
           if (filters.export === 'csv' || filters.export === 'true') {
             let exportQuery = `
               SELECT
-                c.publisher_id as publisher_id,
-                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_name,
-                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', c.publisher_id, '@unknown')) as publisher_email,
-                COUNT(*) as clicks,
-                COUNT(DISTINCT c.ip) as unique_clicks
+                ca.publisher_id as publisher_id,
+                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', ca.publisher_id)) as publisher_name,
+                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', ca.publisher_id, '@unknown')) as publisher_email,
+                ca.clicks as clicks,
+                ca.unique_clicks as unique_clicks
                 ${needsConversionMetrics ? `,
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
@@ -470,8 +493,16 @@ export class ReportService {
                 COALESCE(va.profit, 0) as profit,
                 COALESCE(va.pending_payout, 0) as pending_payout,
                 COALESCE(va.approved_payout, 0) as approved_payout` : ''}
-              FROM clicks c
-              LEFT JOIN publishers p ON p.id = c.publisher_id
+              FROM (
+                SELECT
+                  c.publisher_id,
+                  COUNT(*) as clicks,
+                  COUNT(DISTINCT c.ip) as unique_clicks
+                FROM clicks c
+                WHERE ${clickWhere.join(' AND ')}
+                GROUP BY c.publisher_id
+              ) ca
+              LEFT JOIN publishers p ON p.id = ca.publisher_id
               ${needsConversionMetrics ? `
                 LEFT JOIN (
                   SELECT
@@ -488,12 +519,10 @@ export class ReportService {
                   FROM conversions conv
                   WHERE ${convWhere.join(' AND ')}
                   GROUP BY conv.publisher_id
-                ) va ON va.publisher_id = c.publisher_id` : ''}
-              WHERE ${clickWhere.join(' AND ')}
-              GROUP BY c.publisher_id, p.company_name, p.email
-              ORDER BY clicks DESC, c.publisher_id ASC
+                ) va ON va.publisher_id = ca.publisher_id` : ''}
+              ORDER BY ca.clicks DESC, ca.publisher_id ASC
             `;
-            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const exportParams = needsConversionMetrics ? [...clickParams, ...convParams] : [...clickParams];
             const [exportRows] = await pool.query(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
@@ -642,15 +671,23 @@ export class ReportService {
             wantsMetric('pending_payout') ||
             wantsMetric('approved_payout');
 
-          const countQuery = `SELECT COUNT(DISTINCT c.offer_id) as total FROM clicks c WHERE ${clickWhere.join(' AND ')}`;
+          const countQuery = `
+            SELECT COUNT(*) as total
+            FROM (
+              SELECT 1
+              FROM clicks c
+              WHERE ${clickWhere.join(' AND ')}
+              GROUP BY c.offer_id
+            ) grouped_offers
+          `;
 
           if (filters.export === 'csv' || filters.export === 'true') {
             let exportQuery = `
               SELECT
-                COALESCE(o.public_offer_id, CAST(c.offer_id AS CHAR)) as offer_id,
-                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', c.offer_id)) as offer_name,
-                COUNT(*) as clicks,
-                COUNT(DISTINCT c.ip) as unique_clicks
+                COALESCE(o.public_offer_id, CAST(ca.offer_id AS CHAR)) as offer_id,
+                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', ca.offer_id)) as offer_name,
+                ca.clicks as clicks,
+                ca.unique_clicks as unique_clicks
                 ${needsConversionMetrics ? `,
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
@@ -661,8 +698,16 @@ export class ReportService {
                 COALESCE(va.profit, 0) as profit,
                 COALESCE(va.pending_payout, 0) as pending_payout,
                 COALESCE(va.approved_payout, 0) as approved_payout` : ''}
-              FROM clicks c
-              LEFT JOIN offers o ON o.id = c.offer_id
+              FROM (
+                SELECT
+                  c.offer_id,
+                  COUNT(*) as clicks,
+                  COUNT(DISTINCT c.ip) as unique_clicks
+                FROM clicks c
+                WHERE ${clickWhere.join(' AND ')}
+                GROUP BY c.offer_id
+              ) ca
+              LEFT JOIN offers o ON o.id = ca.offer_id
               ${needsConversionMetrics ? `
                 LEFT JOIN (
                   SELECT
@@ -679,12 +724,10 @@ export class ReportService {
                   FROM conversions conv
                   WHERE ${convWhere.join(' AND ')}
                   GROUP BY conv.offer_id
-                ) va ON va.offer_id = c.offer_id` : ''}
-              WHERE ${clickWhere.join(' AND ')}
-              GROUP BY c.offer_id, o.public_offer_id, o.name
-              ORDER BY clicks DESC, c.offer_id ASC
+                ) va ON va.offer_id = ca.offer_id` : ''}
+              ORDER BY ca.clicks DESC, ca.offer_id ASC
             `;
-            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const exportParams = needsConversionMetrics ? [...clickParams, ...convParams] : [...clickParams];
             const [exportRows] = await pool.query(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
@@ -847,13 +890,13 @@ export class ReportService {
           if (filters.export === 'csv' || filters.export === 'true') {
             let exportQuery = `
               SELECT
-                c.publisher_id as publisher_id,
-                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', c.publisher_id)) as publisher_name,
-                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', c.publisher_id, '@unknown')) as publisher_email,
-                COALESCE(o.public_offer_id, CAST(c.offer_id AS CHAR)) as offer_id,
-                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', c.offer_id)) as offer_name,
-                COUNT(*) as clicks,
-                COUNT(DISTINCT c.ip) as unique_clicks
+                ca.publisher_id as publisher_id,
+                COALESCE(NULLIF(TRIM(p.company_name), ''), NULLIF(TRIM(p.email), ''), CONCAT('Publisher #', ca.publisher_id)) as publisher_name,
+                COALESCE(NULLIF(TRIM(p.email), ''), CONCAT('publisher-', ca.publisher_id, '@unknown')) as publisher_email,
+                COALESCE(o.public_offer_id, CAST(ca.offer_id AS CHAR)) as offer_id,
+                COALESCE(NULLIF(TRIM(o.name), ''), CONCAT('Offer #', ca.offer_id)) as offer_name,
+                ca.clicks as clicks,
+                ca.unique_clicks as unique_clicks
                 ${needsConversionMetrics ? `,
                 COALESCE(va.conversions, 0) as conversions,
                 COALESCE(va.approved_conversions, 0) as approved_conversions,
@@ -864,9 +907,18 @@ export class ReportService {
                 COALESCE(va.profit, 0) as profit,
                 COALESCE(va.pending_payout, 0) as pending_payout,
                 COALESCE(va.approved_payout, 0) as approved_payout` : ''}
-              FROM clicks c
-              LEFT JOIN publishers p ON p.id = c.publisher_id
-              LEFT JOIN offers o ON o.id = c.offer_id
+              FROM (
+                SELECT
+                  c.publisher_id,
+                  c.offer_id,
+                  COUNT(*) as clicks,
+                  COUNT(DISTINCT c.ip) as unique_clicks
+                FROM clicks c
+                WHERE ${clickWhere.join(' AND ')}
+                GROUP BY c.publisher_id, c.offer_id
+              ) ca
+              LEFT JOIN publishers p ON p.id = ca.publisher_id
+              LEFT JOIN offers o ON o.id = ca.offer_id
               ${needsConversionMetrics ? `
                 LEFT JOIN (
                   SELECT
@@ -884,12 +936,10 @@ export class ReportService {
                   FROM conversions conv
                   WHERE ${convWhere.join(' AND ')}
                   GROUP BY conv.publisher_id, conv.offer_id
-                ) va ON va.publisher_id = c.publisher_id AND va.offer_id = c.offer_id` : ''}
-              WHERE ${clickWhere.join(' AND ')}
-              GROUP BY c.publisher_id, c.offer_id, p.company_name, p.email, o.public_offer_id, o.name
-              ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
+                ) va ON va.publisher_id = ca.publisher_id AND va.offer_id = ca.offer_id` : ''}
+              ORDER BY ca.clicks DESC, ca.publisher_id ASC, ca.offer_id ASC
             `;
-            const exportParams = needsConversionMetrics ? [...convParams, ...clickParams] : [...clickParams];
+            const exportParams = needsConversionMetrics ? [...clickParams, ...convParams] : [...clickParams];
             const [exportRows] = await pool.query(exportQuery, exportParams);
             return { data: exportRows, isExport: true };
           }
@@ -1436,22 +1486,22 @@ export class ReportService {
     const fromDate = filters.date_from || todayIST;
     const toDate = filters.date_to || todayIST;
 
-    if (!allDates) {
-      const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcStart, utcEnd);
-    }
+    // ✅ HOUR filter — index-safe UTC hour window; replaces full-day BETWEEN (same intersection, narrower scan)
+    const hasHourFilter = !allDates && filters.hour !== undefined && filters.date_from;
 
-    // ✅ HOUR filter — index-safe: compute UTC boundaries in JS, use BETWEEN on raw column
-    // Old: HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) = ?  ← breaks index
-    // New: c.created_at BETWEEN <utc_hour_start> AND <utc_hour_end>  ← index-safe
-    if (!allDates && filters.hour !== undefined && filters.date_from) {
-      const h = parseInt(filters.hour, 10);
-      const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      clause += ' AND c.created_at BETWEEN ? AND ?';
-      params.push(utcHourStart, utcHourEnd);
+    if (!allDates) {
+      if (hasHourFilter) {
+        const h = parseInt(filters.hour, 10);
+        const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcHourEnd = new Date(`${fromDate}T${String(h).padStart(2, '0')}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(utcHourStart, utcHourEnd);
+      } else {
+        const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+        clause += ' AND c.created_at BETWEEN ? AND ?';
+        params.push(utcStart, utcEnd);
+      }
     }
 
     // NOTE: No referrer guard here — reports show ALL clicks, including direct traffic.
@@ -1559,19 +1609,41 @@ export class ReportService {
       const utcStart = new Date(`${fromDate}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
       const utcEnd = new Date(`${toDate}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
-      // ── 1. Pairs subquery — distinct (publisher, offer) combinations seen in date range ──
-      // params: tenantId, utcStart, utcEnd  (×2 for UNION)
-      const pairsQuery = `
-        SELECT DISTINCT publisher_id, offer_id FROM clicks
-          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
-        UNION
-        SELECT DISTINCT publisher_id, offer_id FROM conversions
-          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
-      `;
-      const pairsParams = [tenantId, utcStart, utcEnd, tenantId, utcStart, utcEnd];
-
-      // ── 2. Main query — subqueries use the same parameterized window ──
+      // ── CTE path: one grouped scan per fact table; pair keys derived from aggregates (not raw DISTINCT scans) ──
       const query = `
+        WITH
+        click_stats AS (
+          SELECT publisher_id, offer_id, COUNT(*) as total_clicks
+          FROM clicks
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+          GROUP BY publisher_id, offer_id
+        ),
+        conv_stats AS (
+          SELECT
+            publisher_id, offer_id,
+            COUNT(*)                                                                            AS total_conversions,
+            SUM(CASE WHEN status = 'approved'     THEN 1 ELSE 0 END)                         AS approved_conversions,
+            SUM(CASE WHEN status = 'pending'      THEN 1 ELSE 0 END)                         AS pending_conversions,
+            SUM(CASE WHEN status IN ('rejected','click_expired') THEN 1 ELSE 0 END)            AS rejected_conversions,
+            SUM(CASE WHEN status = 'rejected_cap' THEN 1 ELSE 0 END)                           AS rejected_cap_conversions,
+            COALESCE(SUM(amount), 0)                                                           AS total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout  ELSE 0 END), 0)             AS total_payout,
+            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount   ELSE 0 END), 0)             AS approved_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout   ELSE 0 END), 0)             AS approved_payout,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0)      AS approved_profit,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount   ELSE 0 END), 0)             AS pending_revenue,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN payout   ELSE 0 END), 0)             AS pending_payout,
+            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount - payout ELSE 0 END), 0)      AS pending_profit
+          FROM conversions
+          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+          GROUP BY publisher_id, offer_id
+        ),
+        pairs AS (
+          SELECT publisher_id, offer_id FROM click_stats
+          UNION
+          SELECT publisher_id, offer_id FROM conv_stats
+        )
         SELECT
           p.id as publisher_id,
           p.email as publisher_email,
@@ -1593,44 +1665,19 @@ export class ReportService {
           COALESCE(conv_stats.approved_payout, 0) as approved_payout,
           COALESCE(conv_stats.total_profit, 0) as total_profit,
           COALESCE(conv_stats.approved_profit, 0) as approved_profit
-        FROM (${pairsQuery}) as pairs
+        FROM pairs
         JOIN publishers  p ON pairs.publisher_id = p.id
         JOIN offers      o ON pairs.offer_id     = o.id
-        LEFT JOIN (
-          SELECT publisher_id, offer_id, COUNT(DISTINCT id) as total_clicks
-          FROM clicks
-          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
-          GROUP BY publisher_id, offer_id
-        ) click_stats ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
-        LEFT JOIN (
-          SELECT
-            publisher_id, offer_id,
-            COUNT(DISTINCT id)                                                                AS total_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'approved'     THEN id END)                    AS approved_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'pending'      THEN id END)                    AS pending_conversions,
-            COUNT(DISTINCT CASE WHEN status IN ('rejected','click_expired') THEN id END)     AS rejected_conversions,
-            COUNT(DISTINCT CASE WHEN status = 'rejected_cap' THEN id END)                    AS rejected_cap_conversions,
-            COALESCE(SUM(amount), 0)                                                         AS total_revenue,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout  ELSE 0 END), 0)          AS total_payout,
-            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount   ELSE 0 END), 0)         AS approved_revenue,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout   ELSE 0 END), 0)         AS approved_payout,
-            COALESCE(SUM(CASE WHEN status = 'approved' THEN amount - payout ELSE 0 END), 0)  AS approved_profit,
-            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount   ELSE 0 END), 0)         AS pending_revenue,
-            COALESCE(SUM(CASE WHEN status = 'pending'  THEN payout   ELSE 0 END), 0)         AS pending_payout,
-            COALESCE(SUM(CASE WHEN status = 'pending'  THEN amount - payout ELSE 0 END), 0)  AS pending_profit
-          FROM conversions
-          WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
-          GROUP BY publisher_id, offer_id
-        ) conv_stats ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
+        LEFT JOIN click_stats
+          ON click_stats.publisher_id = p.id AND click_stats.offer_id = o.id
+        LEFT JOIN conv_stats
+          ON conv_stats.publisher_id = p.id AND conv_stats.offer_id = o.id
         ORDER BY conv_stats.total_conversions DESC, conv_stats.approved_conversions DESC
       `;
 
-      // Params order: pairs(×6) + click_stats(tenantId, utcStart, utcEnd) + conv_stats(tenantId, utcStart, utcEnd)
       const finalParams = [
-        ...pairsParams,
-        tenantId, utcStart, utcEnd,  // click_stats subquery
-        tenantId, utcStart, utcEnd,  // conv_stats subquery
+        tenantId, utcStart, utcEnd,  // click_stats
+        tenantId, utcStart, utcEnd,  // conv_stats
       ];
 
       const [rows] = await pool.query(query, finalParams);

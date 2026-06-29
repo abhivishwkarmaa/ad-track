@@ -97,6 +97,46 @@ function checkOfferValidity(offer) {
 
 const CLICK_EXPIRY_WINDOW_MS = 1 * 60 * 60 * 1000;
 const CLICK_EXPIRED_STATUS = 'click_expired';
+
+const IST_OFFSET_MS = 330 * 60 * 1000;
+
+/** IST calendar cap window → UTC MySQL datetimes [start, endExclusive) for index-safe created_at filters. */
+function getIstCapCreatedAtRange(duration, now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const toMysqlUtc = (dt) => dt.toISOString().slice(0, 19).replace('T', ' ');
+  const shifted = new Date(now.getTime() + IST_OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const mo = shifted.getUTCMonth() + 1;
+  const d = shifted.getUTCDate();
+  const h = shifted.getUTCHours();
+
+  if (duration === 'hour') {
+    const start = new Date(`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(new Date(start.getTime() + 3600000)) };
+  }
+  if (duration === 'day') {
+    const start = new Date(`${y}-${pad(mo)}-${pad(d)}T00:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(new Date(start.getTime() + 86400000)) };
+  }
+  if (duration === 'week') {
+    const isoDow = shifted.getUTCDay() || 7;
+    const todayStart = new Date(`${y}-${pad(mo)}-${pad(d)}T00:00:00+05:30`);
+    const mondayStart = new Date(todayStart.getTime() - (isoDow - 1) * 86400000);
+    return {
+      start: toMysqlUtc(mondayStart),
+      endExclusive: toMysqlUtc(new Date(mondayStart.getTime() + 7 * 86400000)),
+    };
+  }
+  if (duration === 'month') {
+    const start = new Date(`${y}-${pad(mo)}-01T00:00:00+05:30`);
+    const nextY = mo === 12 ? y + 1 : y;
+    const nextMo = mo === 12 ? 1 : mo + 1;
+    const endExclusive = new Date(`${nextY}-${pad(nextMo)}-01T00:00:00+05:30`);
+    return { start: toMysqlUtc(start), endExclusive: toMysqlUtc(endExclusive) };
+  }
+  return null;
+}
+
 const APPROVAL_ELIGIBLE_STATUSES = new Set(['approved', 'pending']);
 const DETERMINISTIC_APPROVAL_VERSION = 'v2';
 const BOOTSTRAP_APPROVAL_TTL_SECONDS = 8 * 24 * 60 * 60;
@@ -1445,28 +1485,16 @@ export class PostbackService {
     const capAmount = parseFloat(assignment.capping_budget_amount);
     if (capAmount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
-    let dateCondition = '';
-    if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-    } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
-    }
+    const capRange = getIstCapCreatedAtRange(duration);
+    if (!capRange) return false;
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
     // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COALESCE(SUM(amount), 0) as total_revenue
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
-    const params = [offerId, publisherId];
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}'
+         AND created_at >= ? AND created_at < ?`;
+    const params = [offerId, publisherId, capRange.start, capRange.endExclusive];
 
     if (tenantId) {
       query += ' AND tenant_id = ?';
@@ -1488,28 +1516,16 @@ export class PostbackService {
     const capCount = parseInt(assignment.capping_conversions_amount);
     if (capCount <= 0) return false;
 
-    // Use IST (UTC+05:30) for timezone conversions
-    const tz = '+05:30';
-
-    let dateCondition = '';
-    if (duration === 'hour') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND HOUR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = HOUR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'day') {
-      dateCondition = `DATE(CONVERT_TZ(created_at, '+00:00', '${tz}')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else if (duration === 'week') {
-      dateCondition = `YEARWEEK(CONVERT_TZ(created_at, '+00:00', '${tz}'), 1) = YEARWEEK(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'), 1)`;
-    } else if (duration === 'month') {
-      dateCondition = `YEAR(CONVERT_TZ(created_at, '+00:00', '${tz}')) = YEAR(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}')) AND MONTH(CONVERT_TZ(created_at, '+00:00', '${tz}')) = MONTH(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '${tz}'))`;
-    } else {
-      return false;
-    }
+    const capRange = getIstCapCreatedAtRange(duration);
+    if (!capRange) return false;
 
     // ✅ CRITICAL: Add tenant_id filtering to cap check
     // ✅ CRITICAL: Exclude rejected conversions from cap
     let query = `SELECT COUNT(*) as conversion_count
        FROM conversions
-       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}' AND ${dateCondition}`;
-    const params = [offerId, publisherId];
+       WHERE offer_id = ? AND publisher_id = ? AND status != 'rejected' AND status != 'rejected_cap' AND status != '${CLICK_EXPIRED_STATUS}'
+         AND created_at >= ? AND created_at < ?`;
+    const params = [offerId, publisherId, capRange.start, capRange.endExclusive];
 
     if (tenantId) {
       query += ' AND tenant_id = ?';

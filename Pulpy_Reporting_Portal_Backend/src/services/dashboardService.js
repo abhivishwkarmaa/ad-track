@@ -126,7 +126,8 @@ export class DashboardService {
       );
 
       const [conversionsPrevious] = await pool.query(
-        `SELECT COUNT(*) as total
+        `SELECT COUNT(*) as total,
+          COALESCE(SUM(amount), 0) as revenue
         FROM conversions
         WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
@@ -165,26 +166,10 @@ export class DashboardService {
         [currentRange.start, currentRange.end, tenantId]
       );
 
-      // Get revenue (current and previous)
-      const [revenueCurrent] = await pool.query(
-        `SELECT 
-          COALESCE(SUM(amount), 0) as revenue,
-          COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-        FROM conversions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?
-        `,
-        [currentRange.start, currentRange.end, tenantId]
-      );
-
-      const [revenuePrevious] = await pool.query(
-        `SELECT COALESCE(SUM(amount), 0) as revenue
-        FROM conversions
-        WHERE created_at BETWEEN ? AND ?
-          AND tenant_id = ?
-        `,
-        [previousRange.start, previousRange.end, tenantId]
-      );
+      // Revenue/payout for current period already computed in conversionsCurrent (avoids duplicate scan).
+      const revTotal = parseFloat(conversionsCurrent[0]?.revenue || 0);
+      const payoutTotal = parseFloat(conversionsCurrent[0]?.payout || 0);
+      const revPrev = parseFloat(conversionsPrevious[0]?.revenue || 0);
 
       // Calculate conversion rate
       const totalClicks = parseInt(clicksCurrent[0]?.total || 0);
@@ -241,11 +226,11 @@ export class DashboardService {
           mtd: 0,
         },
         revenue: {
-          total: parseFloat(revenueCurrent[0]?.revenue || 0),
-          yesterday: parseFloat(revenuePrevious[0]?.revenue || 0),
+          total: revTotal,
+          yesterday: revPrev,
           mtd: 0,
-          profit: parseFloat((revenueCurrent[0]?.revenue || 0) - (revenueCurrent[0]?.payout || 0)),
-          payout: parseFloat(revenueCurrent[0]?.payout || 0),
+          profit: revTotal - payoutTotal,
+          payout: payoutTotal,
         },
         offers: {
           total: parseInt(offerStats[0]?.total || 0),
@@ -287,22 +272,29 @@ export class DashboardService {
         params.push(span.start, span.end);
       }
 
+      const convDateFilter = dateCondition
+        ? 'WHERE conv.tenant_id = ? AND conv.created_at BETWEEN ? AND ?'
+        : 'WHERE conv.tenant_id = ?';
+      const convParams = dateCondition ? [tenantId, ...params] : [tenantId];
+
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
           (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
           o.name as offer_name,
-          COUNT(DISTINCT conv.id) as conversions
-        FROM offers o
-        LEFT JOIN conversions conv ON conv.offer_id = o.id
-          ${dateCondition}
+          conv_agg.conversions
+        FROM (
+          SELECT conv.offer_id, COUNT(*) as conversions
+          FROM conversions conv
+          ${convDateFilter}
+          GROUP BY conv.offer_id
+        ) conv_agg
+        INNER JOIN offers o ON o.id = conv_agg.offer_id
         WHERE o.status != 'remove' AND o.tenant_id = ?
-        GROUP BY o.id, o.name
-        HAVING conversions > 0
-        ORDER BY conversions DESC
+        ORDER BY conv_agg.conversions DESC
         LIMIT ?
         `,
-        [...params, tenantId, limit]
+        [...convParams, tenantId, limit]
       );
 
       return rows.map(row => ({
@@ -415,23 +407,26 @@ export class DashboardService {
         to: dateTo,
       }));
 
-      // Get top affiliates
+      // Aggregate conversions first (index-friendly), then join to publishers.
       const [rows] = await pool.query(
         `SELECT 
           p.id as publisher_id,
           COALESCE(p.company_name, COALESCE(p.first_name, p.email, 'Unknown')) as publisher_name,
-          COUNT(DISTINCT conv.id) as conversions
-        FROM publishers p
-        LEFT JOIN conversions conv ON conv.publisher_id = p.id
-          AND conv.created_at BETWEEN ? AND ?
-          AND conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired'
+          conv_agg.conversions
+        FROM (
+          SELECT conv.publisher_id, COUNT(*) as conversions
+          FROM conversions conv
+          WHERE conv.created_at BETWEEN ? AND ?
+            AND conv.tenant_id = ?
+            AND conv.status != 'rejected' AND conv.status != 'rejected_cap' AND conv.status != 'click_expired'
+          GROUP BY conv.publisher_id
+        ) conv_agg
+        INNER JOIN publishers p ON p.id = conv_agg.publisher_id
         WHERE p.status != 'suspended' AND p.tenant_id = ?
-        GROUP BY p.id, p.company_name, p.first_name, p.email
-        HAVING conversions > 0
-        ORDER BY conversions DESC
+        ORDER BY conv_agg.conversions DESC
         LIMIT ?
         `,
-        [utcStart, utcEnd, tenantId, limit]
+        [utcStart, utcEnd, tenantId, tenantId, limit]
       );
 
       // Get total conversions for all affiliates
@@ -932,8 +927,14 @@ export class DashboardService {
       let searchClause = '';
       if (searchTerm.length >= 1) {
         const wildcard = `%${searchTerm}%`;
-        searchClause = ' AND (o.name LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)';
-        searchParams.push(wildcard, wildcard);
+        const numericId = /^\d+$/.test(searchTerm) ? parseInt(searchTerm, 10) : null;
+        if (numericId !== null) {
+          searchClause = ' AND (o.name LIKE ? OR o.public_offer_id = ?)';
+          searchParams.push(wildcard, numericId);
+        } else {
+          searchClause = ' AND (o.name LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)';
+          searchParams.push(wildcard, wildcard);
+        }
       }
 
       const [rows] = await pool.query(

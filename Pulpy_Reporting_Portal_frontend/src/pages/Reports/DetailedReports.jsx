@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
@@ -177,9 +177,6 @@ function DetailedReports() {
     /** Bumps only on Apply so filters refetch without double-invoking fetchReports + useEffect. */
     const [applyFetchKey, setApplyFetchKey] = useState(0);
 
-    /** Dedupe back-to-back identical fetches (React Strict Mode dev double-invoke + redundant effect runs). */
-    const lastFetchDedupRef = useRef({ key: '', at: 0 });
-
     useEffect(() => {
         if (datePreset === 'custom') return;
         const range = getDetailedReportsPresetRange(datePreset, reportTimezone);
@@ -318,13 +315,6 @@ function DetailedReports() {
 
     // Load / pagination / global refresh / Apply — filters refetch via applyFetchKey (not a second fetchReports in handleApply).
     useEffect(() => {
-        const key = `${pagination.page}|${pagination.limit}|${refreshKey}|${applyFetchKey}|${reportTimezone}|${timezoneRevision}`;
-        const now = Date.now();
-        if (lastFetchDedupRef.current.key === key && now - lastFetchDedupRef.current.at < 600) {
-            return undefined;
-        }
-        lastFetchDedupRef.current = { key, at: now };
-
         const controller = new AbortController();
         fetchReports(selectedDims, selectedMetrics, { signal: controller.signal });
         return () => controller.abort();

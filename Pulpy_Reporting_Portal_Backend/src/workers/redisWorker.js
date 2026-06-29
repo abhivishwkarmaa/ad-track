@@ -24,6 +24,15 @@ const getIstDateString = () => {
     return istTime.toISOString().split('T')[0];
 };
 
+/** IST calendar day (YYYY-MM-DD) → UTC MySQL datetimes [start, endExclusive). */
+function getIstDayCreatedAtRange(ymd) {
+    const start = new Date(`${ymd}T00:00:00+05:30`);
+    return {
+        start: start.toISOString().slice(0, 19).replace('T', ' '),
+        endExclusive: new Date(start.getTime() + 86400000).toISOString().slice(0, 19).replace('T', ' '),
+    };
+}
+
 function classifyError(err) {
     if (!err) return ERROR_TYPES.FATAL;
     const msg = (err.message || '').toLowerCase();
@@ -286,11 +295,15 @@ async function processBatch(buffer) {
                     const tenantId = g.tenantId;
                     const deltaClicks = g.clicks;
 
+                    const todayRange = getIstDayCreatedAtRange(today);
+
                     // Count distinct IPs for this offer+tenant for today
                     const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND DATE(CONVERT_TZ(created_at, '+00:00', '+05:30')) = ?`;
-                    const ipParams = tenantId ? [offerId, tenantId, today] : [offerId, today];
+                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at < ?`
+                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND created_at >= ? AND created_at < ?`;
+                    const ipParams = tenantId
+                        ? [offerId, tenantId, todayRange.start, todayRange.endExclusive]
+                        : [offerId, todayRange.start, todayRange.endExclusive];
                     const [ipRows] = await pool.query(ipCountQuery, ipParams);
                     const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
 
