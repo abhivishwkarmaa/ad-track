@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import trackingService from '../services/trackingService.js';
 import postbackService from '../services/postbackService.js';
 import { getISP } from '../utils/ispLookup.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 const BATCH_SIZE = 100; // Batch Insert Size
 const BATCH_TIMEOUT = 1000; // Wait max 1s to fill batch
@@ -298,14 +299,10 @@ async function processBatch(buffer) {
                     const todayRange = getIstDayCreatedAtRange(today);
 
                     // Count distinct IPs for this offer+tenant for today
-                    const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at < ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND created_at >= ? AND created_at < ?`;
-                    const ipParams = tenantId
-                        ? [offerId, tenantId, todayRange.start, todayRange.endExclusive]
-                        : [offerId, todayRange.start, todayRange.endExclusive];
-                    const [ipRows] = await pool.query(ipCountQuery, ipParams);
-                    const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
+                    const ipRow = await clickRepository.countDistinctIpsForOfferInRange(
+                        offerId, tenantId, todayRange.start, todayRange.endExclusive
+                    );
+                    const uniqToday = parseInt(ipRow?.uniq || 0);
 
                     // Upsert with calculated deltas
                     await pool.query(
@@ -579,15 +576,6 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
     // If UNIQUE constraint on click_uuid exists, ON DUPLICATE KEY UPDATE will prevent duplicates
     // If constraint doesn't exist yet, INSERT IGNORE will silently skip duplicates
     // We use ON DUPLICATE KEY UPDATE to be explicit about handling duplicates
-    const sql = `INSERT INTO clicks (
-        click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        ip, user_agent, referrer, country, region, city, isp, location, domain,
-        device_type, browser, os, os_version, device_brand, device_model,
-        source_id, device_id, google_id, android_id, rcid, tid,
-        timestamp, created_at
-    ) VALUES ?
-    ON DUPLICATE KEY UPDATE id = id`;
-
     // ✅ Log if we're about to insert clicks that might be duplicates
     const clickUuids = validClicks.map(c => c.click_uuid);
     logger.debug(`📝 Attempting to insert ${validClicks.length} clicks`, {
@@ -640,7 +628,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
     });
 
     try {
-        const result = await pool.query(sql, [values]);
+        const result = await clickRepository.bulkInsert(values);
         logger.info(`✅ Successfully inserted ${validClicks.length} clicks into database`, {
             affectedRows: result[0]?.affectedRows || 0,
             insertId: result[0]?.insertId || null,
@@ -660,7 +648,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             errno: err.errno,
             sqlState: err.sqlState,
             sqlMessage: err.sqlMessage,
-            sql: sql.substring(0, 200) + '...', // Truncate long SQL
+            sql: `INSERT INTO ${clickRepository.getTableName()} (...) VALUES ?`,
             valuesCount: values.length,
             firstValueSample: values[0] ? {
                 click_uuid: values[0][0],
@@ -695,7 +683,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             // Check which foreign key failed (check publisher_offer_id before offer_id since "publisher_offer_id" contains "offer_id")
             if (errText.includes('tenant_id') && !errText.includes('publisher_offer_id')) {
                 logger.error('   ❌ tenant_id does not exist in tenants table!');
-                logger.error('   Check: SELECT * FROM tenants WHERE id IN (SELECT DISTINCT tenant_id FROM clicks WHERE tenant_id IS NOT NULL);');
+                logger.error(`   Check: SELECT * FROM tenants WHERE id IN (SELECT DISTINCT tenant_id FROM ${clickRepository.getTableName()} WHERE tenant_id IS NOT NULL);`);
                 logger.error('   Problematic tenant_ids in batch:', validClicks.map(c => ({
                     click_uuid: c.click_uuid,
                     tenant_id: c.tenant_id,

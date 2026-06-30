@@ -1,4 +1,6 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
+import clickRepository from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -244,8 +246,8 @@ export class OfferService {
       // ✅ CRITICAL: Get statistics with tenant_id filtering in all subqueries
       const [statsRows] = await pool.query(
         `SELECT 
-          (SELECT COUNT(*) FROM clicks WHERE offer_id = o.id AND tenant_id = ?) as total_clicks,
-          (SELECT COUNT(DISTINCT publisher_id) FROM clicks WHERE offer_id = o.id AND tenant_id = ?) as unique_publishers,
+          (SELECT COUNT(*) FROM ${getClickTableName()} WHERE offer_id = o.id AND tenant_id = ?) as total_clicks,
+          (SELECT COUNT(DISTINCT publisher_id) FROM ${getClickTableName()} WHERE offer_id = o.id AND tenant_id = ?) as unique_publishers,
           (SELECT COUNT(*) FROM impressions WHERE offer_id = o.id AND tenant_id = ?) as total_impressions,
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND tenant_id = ?) as total_conversions,
           (SELECT COUNT(*) FROM conversions WHERE offer_id = o.id AND status = 'approved' AND tenant_id = ?) as approved_conversions,
@@ -271,7 +273,7 @@ export class OfferService {
         `SELECT c.id, c.offer_id, c.publisher_id, c.tenant_id, c.publisher_offer_id, c.ip, c.user_agent, c.referrer, c.click_uuid, c.country, c.region, c.city, c.isp, c.location, c.domain, c.device_type, c.browser, c.os, c.os_version, c.device_brand, c.device_model, c.source_id, c.device_id, c.google_id, c.android_id, c.rcid, c.tid, c.timestamp, c.created_at, c.extra_params, 
                 p.email as publisher_email,
                 p.company_name as publisher_company
-         FROM clicks c
+         FROM ${getClickTableName()} c
          LEFT JOIN publishers p ON c.publisher_id = p.id
          WHERE c.offer_id = ? AND c.tenant_id = ?
          ORDER BY c.created_at DESC
@@ -288,7 +290,7 @@ export class OfferService {
                 c.click_uuid
          FROM conversions conv
          LEFT JOIN publishers p ON conv.publisher_id = p.id
-         LEFT JOIN clicks c ON conv.click_uuid = c.click_uuid
+         LEFT JOIN ${getClickTableName()} c ON conv.click_uuid = c.click_uuid
          WHERE conv.offer_id = ? AND conv.tenant_id = ?
          ORDER BY conv.created_at DESC
          LIMIT 50`,
@@ -307,7 +309,7 @@ export class OfferService {
           -- FINANCIAL SEPARATION: Revenue (ALL), Payout (Approved Only)
           COALESCE(SUM(conv.amount), 0) as revenue,
           COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as payout
-        FROM clicks c
+        FROM ${getClickTableName()} c
         LEFT JOIN publishers p ON c.publisher_id = p.id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
         WHERE c.offer_id = ? AND c.tenant_id = ?
@@ -495,16 +497,8 @@ export class OfferService {
     const startUTC = new Date(`${todayStr}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
     const endUTC = new Date(`${todayStr}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
-    const [countRows] = await pool.query(
-      `SELECT COUNT(*) as count
-       FROM clicks
-       WHERE offer_id = ?
-         AND publisher_id = ?
-         AND created_at BETWEEN ? AND ?`,
-      [offerId, publisherId, startUTC, endUTC]
-    );
-
-    const count = parseInt((Array.isArray(countRows) ? countRows[0] : countRows).count || 0);
+    const countRow = await clickRepository.countClicksTodayForCap(offerId, publisherId, startUTC, endUTC);
+    const count = parseInt(countRow?.count || 0);
 
     return {
       capped: count >= capLimit,

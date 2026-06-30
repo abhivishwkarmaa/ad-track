@@ -9,6 +9,7 @@ import http from 'http';
 import crypto from 'crypto';
 
 import redis from '../config/redis.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 // ---------- In-file lookups (no external findById/getOfferById) ----------
 /** Get offer by internal id only. Returns row or null. */
@@ -485,11 +486,10 @@ export class PostbackService {
         // ✅ FAST PATH: Use 2-second timeout for initial lookup to prevent blocking
         if (tenantId) {
           try {
-            const [dbRows] = await queryWithTimeout(
-              'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-              [click_id, tenantId],
-              2000  // ✅ 2-second timeout for fast response
-            );
+            const dbRows = await clickRepository.findTenantOfferPublisherByClickUuid(click_id, tenantId, {
+              queryExecutor: (sql, params, timeoutMs) => queryWithTimeout(sql, params, timeoutMs),
+              timeoutMs: 2000,
+            });
             if (dbRows && dbRows.length > 0) {
               const dbClick = dbRows[0];
               // Try new format: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -765,13 +765,12 @@ export class PostbackService {
           // ✅ STRICT: Always filter by tenant_id (from subdomain)
           // 🔥 UPDATED: Look up by click_uuid OR tid (affiliate click ID)
           // ✅ Use ORDER BY id DESC LIMIT 1 so we get the same (latest) click as Strategy 1 and avoid wrong offer_id from duplicate rows
-          const query = 'SELECT id, offer_id, publisher_id, tenant_id, publisher_offer_id, ip, user_agent, referrer, click_uuid, country, region, city, isp, location, domain, device_type, browser, os, os_version, device_brand, device_model, source_id, device_id, google_id, android_id, rcid, tid, timestamp, created_at, extra_params FROM clicks WHERE (click_uuid = ? OR tid = ?) AND tenant_id = ? ORDER BY id DESC LIMIT 1';
-          const params = [click_id, click_id, tenantId];
-
           try {
             // ✅ QUERY TIMEOUT: 3 seconds max to prevent long waits (reduced from 5s)
-            const [clickRows] = await queryWithTimeout(query, params, 3000);
-            click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+            click = await clickRepository.findFullByClickUuidOrTid(click_id, tenantId, {
+              queryExecutor: (sql, params, timeoutMs) => queryWithTimeout(sql, params, timeoutMs),
+              timeoutMs: 3000,
+            });
 
             if (click) {
               // ✅ Validate click belongs to resolved tenant
@@ -973,12 +972,9 @@ export class PostbackService {
           offerId = convRows[0].offer_id;
         } else {
           // Try to find from click with this rcid (scoped by tenant)
-          const [clickRows] = await pool.query(
-            'SELECT offer_id FROM clicks WHERE rcid = ? AND tenant_id = ? LIMIT 1',
-            [rcid, tenantId]
-          );
-          if (clickRows && clickRows.length > 0) {
-            offerId = clickRows[0].offer_id;
+          const clickRow = await clickRepository.findOfferIdByRcid(rcid, tenantId);
+          if (clickRow) {
+            offerId = clickRow.offer_id;
           }
         }
       }
@@ -1949,11 +1945,7 @@ export class PostbackService {
       }
 
       // 1. Fetch Click Data
-      const [clickRows] = await pool.query(
-        'SELECT * FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
-        [clickUuid, tenantId]
-      );
-      const click = clickRows[0];
+      const click = await clickRepository.findByClickUuid(clickUuid, tenantId);
       if (!click) {
         throw new Error('Click not found');
       }

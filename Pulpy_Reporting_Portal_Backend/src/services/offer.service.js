@@ -1,4 +1,5 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime } from '../utils/mysqlUtcRange.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
@@ -748,7 +749,7 @@ class OfferService {
           COUNT(*) AS total_clicks,
           COUNT(DISTINCT click_uuid) AS unique_clicks,
           COUNT(DISTINCT publisher_id) AS unique_publishers
-         FROM clicks
+         FROM ${getClickTableName()}
          WHERE ${clicksWhere.clause}`,
         clicksWhere.params
       );
@@ -808,15 +809,15 @@ class OfferService {
       const usageTenantParams = tenantId ? [tenantId] : [];
 
       const [dailyUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+        `SELECT COUNT(*) AS used FROM ${getClickTableName()} WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
         [internalId, ...usageTenantParams, dayStart, dayEnd]
       );
       const [monthlyUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+        `SELECT COUNT(*) AS used FROM ${getClickTableName()} WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
         [internalId, ...usageTenantParams, monthStart, monthEnd]
       );
       const [totalUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause}`,
+        `SELECT COUNT(*) AS used FROM ${getClickTableName()} WHERE offer_id = ?${usageTenantClause}`,
         [internalId, ...usageTenantParams]
       );
 
@@ -866,7 +867,7 @@ class OfferService {
                 c.id, c.offer_id, c.publisher_id, c.tenant_id, c.publisher_offer_id, c.ip, c.user_agent, c.referrer, c.click_uuid, c.country, c.region, c.city, c.isp, c.location, c.domain, c.device_type, c.browser, c.os, c.os_version, c.device_brand, c.device_model, c.source_id, c.device_id, c.google_id, c.android_id, c.rcid, c.tid, c.timestamp, c.created_at, c.extra_params,
                 p.email as publisher_email,
                 p.company_name as publisher_company
-         FROM clicks c
+         FROM ${getClickTableName()} c
          LEFT JOIN publishers p ON c.publisher_id = p.id
          WHERE c.offer_id = ?`;
       const params = [internalId];
@@ -901,7 +902,7 @@ class OfferService {
                 c.click_uuid
          FROM conversions conv
          LEFT JOIN publishers p ON conv.publisher_id = p.id
-         LEFT JOIN clicks c ON conv.click_uuid = c.click_uuid
+         LEFT JOIN ${getClickTableName()} c ON conv.click_uuid = c.click_uuid
          WHERE conv.offer_id = ?`;
       const params = [internalId];
 
@@ -962,7 +963,7 @@ class OfferService {
           SELECT
             publisher_id,
             COUNT(*) as total_clicks
-          FROM clicks
+          FROM ${getClickTableName()}
           WHERE offer_id = ?`;
       const params = [internalId];
 
@@ -1068,7 +1069,7 @@ class OfferService {
         `SELECT 
            CAST(DATE(${dateExpression}) AS CHAR) as date, 
            COUNT(*) as count
-         FROM clicks 
+         FROM ${getClickTableName()} 
          WHERE offer_id = ?${tenantFilter}
            AND created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY)
          GROUP BY date

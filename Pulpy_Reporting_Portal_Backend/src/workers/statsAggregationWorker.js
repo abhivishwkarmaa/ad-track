@@ -18,6 +18,7 @@
 
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -65,17 +66,7 @@ async function aggregateDay(istDate) {
         // One row per (tenant_id, publisher_id, offer_id)
         // Uses (tenant_id, created_at) index — no function on indexed column
         // ─────────────────────────────────────────
-        const [clickRows] = await pool.query(`
-      SELECT
-        tenant_id,
-        publisher_id,
-        offer_id,
-        COUNT(*)          AS total_clicks,
-        COUNT(DISTINCT ip) AS unique_ips
-      FROM clicks
-      WHERE created_at BETWEEN ? AND ?
-      GROUP BY tenant_id, publisher_id, offer_id
-    `, [utcStart, utcEnd]);
+        const clickRows = await clickRepository.aggregateDailyByTenantPublisherOffer(utcStart, utcEnd);
 
         // ─────────────────────────────────────────
         // Step 2: Aggregate conversions for the day

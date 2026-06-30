@@ -1,4 +1,6 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
+import clickRepository from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import redis from '../config/redis.js';
 
@@ -44,28 +46,17 @@ export class TenantMetricsService {
       const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
 
       // Clicks metrics
-      const [clicksToday] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, todayStartUTC, todayEndUTC]
-      );
-
-      const [clicksPeriod] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, periodStartUTC, periodEndUTC]
-      );
+      const clicksToday = await clickRepository.countClicksForTenantInRange(tenantId, todayStartUTC, todayEndUTC);
+      const clicksPeriod = await clickRepository.countClicksForTenantInRange(tenantId, periodStartUTC, periodEndUTC);
 
       metrics.clicks = {
         today: {
-          total: parseInt(clicksToday[0]?.total || 0),
-          unique: parseInt(clicksToday[0]?.unique_clicks || 0),
+          total: parseInt(clicksToday?.total || 0),
+          unique: parseInt(clicksToday?.unique_clicks || 0),
         },
         period: {
-          total: parseInt(clicksPeriod[0]?.total || 0),
-          unique: parseInt(clicksPeriod[0]?.unique_clicks || 0),
+          total: parseInt(clicksPeriod?.total || 0),
+          unique: parseInt(clicksPeriod?.unique_clicks || 0),
         },
       };
 
@@ -178,7 +169,7 @@ export class TenantMetricsService {
            COUNT(DISTINCT c.id) as clicks,
            COUNT(DISTINCT conv.id) as conversions,
            COALESCE(SUM(conv.amount), 0) as revenue
-         FROM clicks c
+         FROM ${getClickTableName()} c
          LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid 
            AND conv.tenant_id = c.tenant_id
          WHERE c.tenant_id = ?
@@ -219,7 +210,7 @@ export class TenantMetricsService {
            COUNT(DISTINCT conv.id) as conversions,
            COALESCE(SUM(conv.amount), 0) as revenue
          FROM offers o
-         LEFT JOIN clicks c ON c.offer_id = o.id AND c.tenant_id = o.tenant_id
+         LEFT JOIN ${getClickTableName()} c ON c.offer_id = o.id AND c.tenant_id = o.tenant_id
            AND c.created_at BETWEEN ? AND ?
          LEFT JOIN conversions conv ON conv.offer_id = o.id AND conv.tenant_id = o.tenant_id
            AND conv.created_at BETWEEN ? AND ?

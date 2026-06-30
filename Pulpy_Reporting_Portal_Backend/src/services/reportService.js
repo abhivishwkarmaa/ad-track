@@ -1,4 +1,5 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import { summaryShouldUseDailyClickStats } from '../utils/reportDailyRollup.js';
@@ -153,7 +154,7 @@ export class ReportService {
           SELECT
             COUNT(DISTINCT publisher_id) AS affiliates,
             COUNT(*) AS unique_clicks
-          FROM clicks
+          FROM ${getClickTableName()}
           WHERE ${clickWhere}
         ) click_agg
         CROSS JOIN (
@@ -309,7 +310,7 @@ export class ReportService {
                 DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) as date_group,
                 COUNT(*) as clicks
                 ${needsUniqueClicksAgg ? ', COUNT(DISTINCT c.ip) as unique_clicks' : ''}
-              FROM clicks c
+              FROM ${getClickTableName()} c
               WHERE c.tenant_id = ?
               ${allDates ? '' : ' AND c.created_at BETWEEN ? AND ?'}
               ${predC.sql}
@@ -468,7 +469,7 @@ export class ReportService {
             SELECT COUNT(*) as total
             FROM (
               SELECT 1
-              FROM clicks c
+              FROM ${getClickTableName()} c
               WHERE ${clickWhere.join(' AND ')}
               GROUP BY c.publisher_id
             ) grouped_publishers
@@ -498,7 +499,7 @@ export class ReportService {
                   c.publisher_id,
                   COUNT(*) as clicks,
                   COUNT(DISTINCT c.ip) as unique_clicks
-                FROM clicks c
+                FROM ${getClickTableName()} c
                 WHERE ${clickWhere.join(' AND ')}
                 GROUP BY c.publisher_id
               ) ca
@@ -530,7 +531,7 @@ export class ReportService {
           // Paged strategy: get top publishers first, then fetch conversion aggregates only for those publishers.
           const topPublishersQuery = `
             SELECT c.publisher_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
-            FROM clicks c
+            FROM ${getClickTableName()} c
             WHERE ${clickWhere.join(' AND ')}
             GROUP BY c.publisher_id
             ORDER BY clicks DESC, c.publisher_id ASC
@@ -675,7 +676,7 @@ export class ReportService {
             SELECT COUNT(*) as total
             FROM (
               SELECT 1
-              FROM clicks c
+              FROM ${getClickTableName()} c
               WHERE ${clickWhere.join(' AND ')}
               GROUP BY c.offer_id
             ) grouped_offers
@@ -703,7 +704,7 @@ export class ReportService {
                   c.offer_id,
                   COUNT(*) as clicks,
                   COUNT(DISTINCT c.ip) as unique_clicks
-                FROM clicks c
+                FROM ${getClickTableName()} c
                 WHERE ${clickWhere.join(' AND ')}
                 GROUP BY c.offer_id
               ) ca
@@ -734,7 +735,7 @@ export class ReportService {
 
           const topOffersQuery = `
             SELECT c.offer_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
-            FROM clicks c
+            FROM ${getClickTableName()} c
             WHERE ${clickWhere.join(' AND ')}
             GROUP BY c.offer_id
             ORDER BY clicks DESC, c.offer_id ASC
@@ -882,7 +883,7 @@ export class ReportService {
             SELECT COUNT(*) as total
             FROM (
               SELECT 1
-              FROM clicks c
+              FROM ${getClickTableName()} c
               WHERE ${clickWhere.join(' AND ')}
               GROUP BY c.publisher_id, c.offer_id
             ) grouped_pairs
@@ -913,7 +914,7 @@ export class ReportService {
                   c.offer_id,
                   COUNT(*) as clicks,
                   COUNT(DISTINCT c.ip) as unique_clicks
-                FROM clicks c
+                FROM ${getClickTableName()} c
                 WHERE ${clickWhere.join(' AND ')}
                 GROUP BY c.publisher_id, c.offer_id
               ) ca
@@ -946,7 +947,7 @@ export class ReportService {
 
           const topPairsQuery = `
             SELECT c.publisher_id, c.offer_id, COUNT(*) as clicks, COUNT(DISTINCT c.ip) as unique_clicks
-            FROM clicks c
+            FROM ${getClickTableName()} c
             WHERE ${clickWhere.join(' AND ')}
             GROUP BY c.publisher_id, c.offer_id
             ORDER BY clicks DESC, c.publisher_id ASC, c.offer_id ASC
@@ -1157,7 +1158,7 @@ export class ReportService {
                 DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE)) as date_group,
                 COUNT(*) as clicks
                 ${needsUniqueClicksAgg ? ', COUNT(DISTINCT c.ip) as unique_clicks' : ''}
-              FROM clicks c
+              FROM ${getClickTableName()} c
               WHERE c.tenant_id = ?
               ${allDates ? '' : ' AND c.created_at BETWEEN ? AND ?'}
               ${predC.sql}
@@ -1304,7 +1305,7 @@ export class ReportService {
         }
 
         let query = `SELECT ${selects.join(', ')} 
-                     FROM clicks c
+                     FROM ${getClickTableName()} c
                      LEFT JOIN offers o ON c.offer_id = o.id
                      LEFT JOIN publishers p ON c.publisher_id = p.id
                      LEFT JOIN advertisers a ON a.id = o.advertiser_id
@@ -1349,7 +1350,7 @@ export class ReportService {
 
         let countBaseQuery = `
           SELECT 1
-          FROM clicks c
+          FROM ${getClickTableName()} c
           LEFT JOIN offers o ON c.offer_id = o.id
           LEFT JOIN publishers p ON c.publisher_id = p.id
           LEFT JOIN advertisers a ON a.id = o.advertiser_id
@@ -1426,7 +1427,7 @@ export class ReportService {
 
         let query = `
           SELECT ${selectClause}
-          FROM clicks c
+          FROM ${getClickTableName()} c
           LEFT JOIN offers o ON c.offer_id = o.id
           LEFT JOIN publishers p ON c.publisher_id = p.id
           LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
@@ -1435,7 +1436,7 @@ export class ReportService {
 
         const countQuery = `
           SELECT COUNT(*) as total
-          FROM clicks c
+          FROM ${getClickTableName()} c
           LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
           LEFT JOIN offers o ON c.offer_id = o.id
           WHERE 1=1
@@ -1614,7 +1615,7 @@ export class ReportService {
         WITH
         click_stats AS (
           SELECT publisher_id, offer_id, COUNT(*) as total_clicks
-          FROM clicks
+          FROM ${getClickTableName()}
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id, offer_id
         ),
@@ -1798,7 +1799,7 @@ export class ReportService {
         FROM conversions conv
         LEFT JOIN offers o ON conv.offer_id = o.id
         LEFT JOIN publishers p ON conv.publisher_id = p.id
-        LEFT JOIN clicks cl ON conv.click_uuid = cl.click_uuid
+        LEFT JOIN ${getClickTableName()} cl ON conv.click_uuid = cl.click_uuid
         WHERE 1=1
       `;
 

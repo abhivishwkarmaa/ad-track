@@ -14,6 +14,7 @@ import redis from '../config/redis.js';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getISP } from '../utils/ispLookup.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 const BACKFILL_INTERVAL_MS = 5 * 60 * 1000; // Run every 5 minutes
 const SCAN_COUNT = 100; // Scan in batches of 100 keys
@@ -230,16 +231,7 @@ async function insertClickIntoDB(clickData) {
 
     // ✅ CRITICAL: Use INSERT ... ON DUPLICATE KEY UPDATE for idempotency
     // UNIQUE constraint on (tenant_id, offer_id, publisher_id, click_id) prevents duplicates
-    const sql = `INSERT INTO clicks (
-        click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        ip, user_agent, referrer, country, region, city, isp, location, domain,
-        device_type, browser, os, os_version, device_brand, device_model,
-        source_id, device_id, google_id, android_id, rcid, tid,
-        timestamp, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE id = id`;
-
-    const values = [
+    await clickRepository.insertSingle([
         clickData.click_uuid, offerId, publisherId, publisherOfferId, tenantId,
         clickData.ip || '', clickData.user_agent || '', clickData.referrer || '',
         clickData.country || '', clickData.region || null, clickData.city || null,
@@ -251,9 +243,7 @@ async function insertClickIntoDB(clickData) {
         clickData.rcid || null, clickData.tid || null,
         clickData.timestamp ? new Date(clickData.timestamp) : new Date(),
         new Date()
-    ];
-
-    await pool.query(sql, [values]);
+    ]);
 }
 
 /**

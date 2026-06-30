@@ -1,4 +1,5 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import offerService from './offer.service.js';
@@ -140,7 +141,7 @@ export class DashboardService {
         `SELECT 
           COUNT(*) as total,
           COUNT(DISTINCT click_uuid) as unique_clicks
-        FROM clicks
+        FROM ${getClickTableName()}
         WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
@@ -149,7 +150,7 @@ export class DashboardService {
 
       const [clicksPrevious] = await pool.query(
         `SELECT COUNT(*) as total
-        FROM clicks
+        FROM ${getClickTableName()}
         WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         `,
@@ -350,7 +351,7 @@ export class DashboardService {
         `SELECT 
           ${dateSelect} as date_group,
           COUNT(*) as clicks
-        FROM clicks
+        FROM ${getClickTableName()}
         WHERE created_at BETWEEN ? AND ?
           AND tenant_id = ?
         GROUP BY ${dateGroup}
@@ -517,7 +518,7 @@ export class DashboardService {
           COUNT(DISTINCT c.id) as clicks,
           COUNT(DISTINCT conv.id) as conversions,
           COALESCE(SUM(conv.amount), 0) as revenue
-        FROM clicks c
+        FROM ${getClickTableName()} c
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
           AND conv.created_at BETWEEN ? AND ?
         WHERE c.created_at BETWEEN ? AND ?
@@ -610,7 +611,7 @@ export class DashboardService {
             0 as click_expired,
             0 as revenue,
             0 as payout
-          FROM clicks
+          FROM ${getClickTableName()}
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
 
           UNION ALL
@@ -654,7 +655,7 @@ export class DashboardService {
           SUM(CASE WHEN metric = 'impressions' THEN total ELSE 0 END) as impressions_total
         FROM (
           SELECT 'clicks' as metric, COUNT(*) as total, 0 as revenue, 0 as payout
-          FROM clicks
+          FROM ${getClickTableName()}
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
 
           UNION ALL
@@ -786,7 +787,7 @@ export class DashboardService {
       const [clicksResult, conversionsResult] = await Promise.all([
         pool.query(
           `SELECT COUNT(*) as unique_clicks
-           FROM clicks
+           FROM ${getClickTableName()}
            WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
           [currentRange.start, currentRange.end, tenantId]
         ),
@@ -865,7 +866,7 @@ export class DashboardService {
           p.first_name,
           conv.status as conversion_status,
           COALESCE(conv.amount, 0) as revenue
-        FROM clicks c
+        FROM ${getClickTableName()} c
         LEFT JOIN offers o ON c.offer_id = o.id
         LEFT JOIN publishers p ON c.publisher_id = p.id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid
@@ -957,7 +958,7 @@ export class DashboardService {
                ELSE 0 END as approved_conversion_ratio
         FROM offers o
         LEFT JOIN (
-          SELECT offer_id, COUNT(*) as total_clicks FROM clicks 
+          SELECT offer_id, COUNT(*) as total_clicks FROM ${getClickTableName()} 
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY offer_id
         ) c ON o.id = c.offer_id
@@ -1141,7 +1142,7 @@ export class DashboardService {
           COALESCE(conv.profit, 0) as profit
         FROM publishers p
         LEFT JOIN (
-          SELECT publisher_id, COUNT(*) as total_clicks FROM clicks 
+          SELECT publisher_id, COUNT(*) as total_clicks FROM ${getClickTableName()} 
           WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
           GROUP BY publisher_id
         ) c ON p.id = c.publisher_id

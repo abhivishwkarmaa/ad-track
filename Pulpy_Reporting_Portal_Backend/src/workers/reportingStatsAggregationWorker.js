@@ -6,6 +6,7 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 function getIstToday() {
   const now = new Date();
@@ -31,20 +32,7 @@ async function aggregateDay(istDate) {
   logger.info(`[ReportingRollup] Aggregating ${istDate} → ${rollupTable} (UTC: ${utcStart} → ${utcEnd})`);
 
   try {
-    const [clickRows] = await pool.query(
-      `
-      SELECT
-        tenant_id,
-        publisher_id,
-        offer_id,
-        COUNT(*) AS total_clicks,
-        COUNT(DISTINCT ip) AS unique_ips
-      FROM clicks
-      WHERE created_at BETWEEN ? AND ?
-      GROUP BY tenant_id, publisher_id, offer_id
-    `,
-      [utcStart, utcEnd]
-    );
+    const clickRows = await clickRepository.aggregateDailyByTenantPublisherOffer(utcStart, utcEnd);
 
     const [convRows] = await pool.query(
       `

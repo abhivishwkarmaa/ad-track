@@ -122,16 +122,14 @@ async function trackingRoutes(fastify, options) {
   fastify.get('/debug/worker-status', async (request, reply) => {
     try {
       const redis = (await import('../config/redis.js')).default;
-      const pool = (await import('../db/connection.js')).default;
+      const clickRepository = (await import('../repositories/clickRepository.js')).default;
       
       // Check Redis stream
       const streamLength = await redis.xlen('stream:clicks').catch(() => 0);
       const groupInfo = await redis.xinfo('GROUPS', 'stream:clicks').catch(() => null);
       
       // Check recent clicks in database
-      const [dbClicks] = await pool.query(
-        'SELECT click_uuid, offer_id, publisher_id, tenant_id, created_at FROM clicks ORDER BY created_at DESC LIMIT 5'
-      );
+      const dbClicks = await clickRepository.findRecentOrderedByCreatedAt(5);
       
       // Check if worker is processing (check for pending messages)
       let pendingCount = 0;

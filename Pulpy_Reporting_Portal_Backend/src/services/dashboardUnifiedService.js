@@ -1,4 +1,5 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
 
@@ -88,7 +89,7 @@ const dashboardUnifiedService = {
         SUM(CASE WHEN metric = 'conversions' THEN payout ELSE 0 END) AS payout
       FROM (
         SELECT 'clicks' AS metric, COUNT(*) AS total, 0 AS revenue, 0 AS payout
-        FROM clicks
+        FROM ${getClickTableName()}
         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
         UNION ALL
         SELECT 'conversions' AS metric, COUNT(*) AS total, COALESCE(SUM(amount), 0) AS revenue, COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout
@@ -152,7 +153,7 @@ const dashboardUnifiedService = {
           o.thumbnail_url AS offer_thumbnail,
           conv.status AS conversion_status,
           COALESCE(conv.amount, 0) AS revenue
-        FROM clicks c
+        FROM ${getClickTableName()} c
         LEFT JOIN offers o ON o.id = c.offer_id
         LEFT JOIN publishers p ON p.id = c.publisher_id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid

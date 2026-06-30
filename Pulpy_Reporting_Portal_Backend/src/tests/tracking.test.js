@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import Fastify from 'fastify';
 import trackingRoutes from '../routes/tracking.js';
 import pool from '../db/connection.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 describe('Tracking API Tests', () => {
   let app;
@@ -27,7 +28,7 @@ describe('Tracking API Tests', () => {
   afterAll(async () => {
     await app.close();
     // Cleanup
-    await pool.query('DELETE FROM clicks WHERE offer_id = $1', [offerId]);
+    await clickRepository.deleteByOfferId(offerId);
     await pool.query('DELETE FROM impressions WHERE offer_id = $1', [offerId]);
     await pool.query('DELETE FROM publisher_offers WHERE offer_id = $1', [offerId]);
     await pool.query('DELETE FROM offers WHERE id = $1', [offerId]);

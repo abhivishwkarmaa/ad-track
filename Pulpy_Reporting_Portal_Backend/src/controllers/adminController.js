@@ -1233,25 +1233,10 @@ export class AdminController {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Try to find the most recent click for this offer/publisher/tenant
+      const clickRepository = (await import('../repositories/clickRepository.js')).default;
       const pool = (await import('../db/connection.js')).default;
 
-      let clickQuery = `
-        SELECT id, offer_id, publisher_id, tenant_id, publisher_offer_id, ip, user_agent, referrer, click_uuid, country, region, city, isp, location, domain, device_type, browser, os, os_version, device_brand, device_model, source_id, device_id, google_id, android_id, rcid, tid, timestamp, created_at, extra_params
-        FROM clicks 
-        WHERE offer_id = ? AND publisher_id = ? AND tenant_id = ?
-      `;
-      const clickParams = [offerId, pubId, tenantId];
-
-      // If tid provided, try to find that specific click
-      if (tid) {
-        clickQuery += ' AND (tid = ? OR click_uuid = ?)';
-        clickParams.push(tid, tid);
-      }
-
-      clickQuery += ' ORDER BY created_at DESC LIMIT 1';
-
-      const [clickRows] = await pool.query(clickQuery, clickParams);
-      const click = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+      const click = await clickRepository.findLatestForTestConversion(offerId, pubId, tenantId, tid || null);
 
       if (!click) {
         return reply.code(404).send({

@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateClickId } from '../utils/urlGenerator.js';
 import cacheService from '../services/cacheService.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 const STREAM_KEY = 'stream:conversions';
 const GROUP_NAME = 'conversion_group';
@@ -133,15 +134,14 @@ async function processConversionBatch(entries) {
     }
 
     // 3. Bulk Check if Clicks Exists in DB
-    // Optimization: SELECT click_uuid FROM clicks WHERE click_uuid IN (...)
+    // Optimization: bulk check click_uuid existence via clickRepository
     // We can't insert conversion if click doesn't exist (Foreign Key).
 
     let existingClickUuids = new Set();
 
     try {
         // Chunk query if too large
-        const sql = `SELECT click_uuid FROM clicks WHERE click_uuid IN (?)`;
-        const [rows] = await pool.query(sql, [clickUuidsToCheck]);
+        const rows = await clickRepository.findClickUuidsInList(clickUuidsToCheck);
 
         rows.forEach(r => existingClickUuids.add(r.click_uuid));
 

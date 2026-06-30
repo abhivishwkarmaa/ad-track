@@ -5,6 +5,7 @@
  * - Paginate keys before dimension joins
  */
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 import { getIstTodayYmd, splitDateRangeForRollup } from '../utils/reportDailyRollup.js';
 import { istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
@@ -214,7 +215,7 @@ export async function runFourDimDetailedAggregated(ctx) {
     const todaySpan = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
     pushRawCaVa(cteParts, params, {
       alias: 'c',
-      table: 'clicks',
+      table: getClickTableName(),
       tenantId,
       utcStart: todaySpan.start,
       utcEnd: todaySpan.end,
@@ -241,7 +242,7 @@ export async function runFourDimDetailedAggregated(ctx) {
   if (needsFullRaw) {
     pushRawCaVa(cteParts, params, {
       alias: 'c',
-      table: 'clicks',
+      table: getClickTableName(),
       tenantId,
       utcStart: fullSpan.start,
       utcEnd: fullSpan.end,
@@ -269,7 +270,7 @@ export async function runFourDimDetailedAggregated(ctx) {
     const todaySpan = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
     pushRawCaVa(cteParts, params, {
       alias: 'c',
-      table: 'clicks',
+      table: getClickTableName(),
       tenantId,
       utcStart: todaySpan.start,
       utcEnd: todaySpan.end,

@@ -18,6 +18,7 @@ import redis from '../config/redis.js';
 
 import cacheService, { PUBLISHER_OFFERS_TRACKING_COLUMNS } from './cacheService.js';
 import postbackService from './postbackService.js';
+import clickRepository from '../repositories/clickRepository.js';
 
 const getIstDateString = () => {
   const now = new Date();
@@ -1359,29 +1360,15 @@ export class TrackingService {
 
       // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
       if (type === 'click') {
-        const [latestClickRows] = await pool.query(
-          `SELECT ip FROM clicks
-           WHERE offer_id = ? AND publisher_id = ?
-           ORDER BY created_at DESC LIMIT 1`,
-          [offerId, publisherId]
-        );
-
-        const latestClick = Array.isArray(latestClickRows) ? latestClickRows[0] : latestClickRows;
+        const latestClick = await clickRepository.findLatestIpByOfferPublisher(offerId, publisherId);
         const clickIp = latestClick?.ip || null;
 
         let isUnique = true;
         if (clickIp) {
-          let countQuery = `SELECT COUNT(*) as cnt FROM clicks
-                 WHERE offer_id = ?
-                   AND ip = ?
-                   AND created_at >= ? AND created_at < ?`;
-          const countParams = [offerId, clickIp, todayRange.start, todayRange.endExclusive];
-          if (tenantId) {
-            countQuery += ' AND tenant_id = ?';
-            countParams.push(tenantId);
-          }
-          const [countRows] = await pool.query(countQuery, countParams);
-          const cnt = (Array.isArray(countRows) ? countRows[0] : countRows).cnt;
+          const countRow = await clickRepository.countByOfferIpInRange(
+            offerId, clickIp, todayRange.start, todayRange.endExclusive, tenantId
+          );
+          const cnt = countRow?.cnt;
           isUnique = (cnt === 1);
         }
 

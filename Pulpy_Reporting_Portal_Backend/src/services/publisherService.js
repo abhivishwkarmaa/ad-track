@@ -1,4 +1,5 @@
 import pool from '../db/connection.js';
+import { getClickTableName } from '../repositories/clickRepository.js';
 import logger from '../utils/logger.js';
 import bcrypt from 'bcrypt';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
@@ -377,7 +378,7 @@ export class PublisherService {
              -- Pending Payout (For reference only, also included in Total Payout now)
             COALESCE(SUM(CASE WHEN conv.status = 'pending' THEN conv.payout ELSE 0 END), 0) as pending_payout
 
-          FROM clicks c
+          FROM ${getClickTableName()} c
           LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid ${dateCondition.replace('conv.', '')}
           WHERE c.tenant_id = ? 
           /* Date condition for clicks also needs to be applied if we want accurate click counts in range */
@@ -414,7 +415,7 @@ export class PublisherService {
           COALESCE(SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_payout,
           COALESCE(SUM(conv.amount) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END), 0) as total_profit
         FROM publishers p
-        LEFT JOIN clicks c ON c.publisher_id = p.id AND c.tenant_id = p.tenant_id
+        LEFT JOIN ${getClickTableName()} c ON c.publisher_id = p.id AND c.tenant_id = p.tenant_id
         LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid 
         ${dateCondition}
         ${whereClause} 
