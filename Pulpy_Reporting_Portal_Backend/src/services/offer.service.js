@@ -267,10 +267,10 @@ class OfferService {
         data.daily_cap ?? null,
         data.monthly_cap ?? null,
         data.total_cap ?? null,
-        (data.capping_type === 'conversion' && data.capping_amount) ? data.capping_amount : (data.conversion_cap ?? null),
+        (data.capping_type === 'conversion' && data.capping_amount != null) ? data.capping_amount : (data.conversion_cap ?? null),
         data.capping_conversions_duration || null,
 
-        (data.capping_type === 'budget' && data.capping_amount) ? data.capping_amount : (data.budget_cap ?? null),
+        (data.capping_type === 'budget' && data.capping_amount != null) ? data.capping_amount : (data.budget_cap ?? null),
         data.advertiser_capping_budget_duration || null,
         data.advertiser_capping_budget_amount ?? null,
 

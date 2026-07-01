@@ -432,7 +432,9 @@ function NewOffer() {
                 capping_type: formData.capping_type,
                 capping_duration: formData.capping_duration,
                 capping_action: formData.capping_action,
-                capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+                capping_amount: formData.capping_type !== 'none' && formData.capping_amount !== '' && formData.capping_amount != null
+                    ? parseFloat(formData.capping_amount)
+                    : null,
 
                 // Fallback
                 fallback_type: formData.fallback_type,
@@ -1234,6 +1236,11 @@ function NewOffer() {
                                             placeholder={formData.capping_type === 'budget' ? "1000.00" : "100"}
                                             required
                                         />
+                                        {formData.capping_action === 'fallback' && (
+                                            <small className="form-text text-muted">
+                                                Set to 0 with Fallback action to redirect all traffic immediately.
+                                            </small>
+                                        )}
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Action if Exceeded</label>

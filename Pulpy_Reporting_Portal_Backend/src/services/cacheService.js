@@ -219,7 +219,19 @@ export class CacheService {
             }
         }
 
-        if (!capType || capType === 'none' || !duration || limit <= 0) {
+        if (!capType || capType === 'none' || !duration) {
+            return { isHit: false, current: 0, limit: 0 };
+        }
+
+        if (limit === 0) {
+            const action = o.capping_action || 'stop';
+            if (action === 'fallback') {
+                return { isHit: true, current: 0, limit: 0 };
+            }
+            return { isHit: false, current: 0, limit: 0 };
+        }
+
+        if (limit < 0) {
             return { isHit: false, current: 0, limit: 0 };
         }
 

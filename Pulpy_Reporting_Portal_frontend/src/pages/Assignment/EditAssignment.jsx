@@ -186,7 +186,9 @@ function EditAssignment() {
                 capping_type: formData.capping_type,
                 capping_duration: formData.capping_duration,
                 capping_action: formData.capping_action,
-                capping_amount: formData.capping_type !== 'none' && formData.capping_amount ? parseFloat(formData.capping_amount) : null,
+                capping_amount: formData.capping_type !== 'none' && formData.capping_amount !== '' && formData.capping_amount != null
+                    ? parseFloat(formData.capping_amount)
+                    : null,
                 fallback_type: formData.capping_action === 'fallback' ? formData.fallback_type : null,
                 fallback_url: formData.capping_action === 'fallback' && formData.fallback_type === 'custom' ? (formData.fallback_url || null) : null,
                 fallback_offer_id: formData.capping_action === 'fallback' && formData.fallback_type === 'offer' && formData.fallback_offer_id

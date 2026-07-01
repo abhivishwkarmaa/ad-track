@@ -641,6 +641,57 @@ function OfferDetail() {
         return `${offer.offer_currency} ${amount.toFixed(2)}`;
     };
 
+    const formatCappingType = (type) => {
+        const map = {
+            none: 'No Capping',
+            budget: 'Budget Cap (Revenue)',
+            conversion: 'Conversion Cap (Count)',
+        };
+        return map[type] || type || 'No Capping';
+    };
+
+    const formatCappingAction = (action) => {
+        const map = {
+            stop: 'Stop Traffic (404)',
+            reject: 'Reject (Payout 0)',
+            fallback: 'Fallback (Redirect)',
+        };
+        return map[action] || action || '-';
+    };
+
+    const formatCappingDuration = (duration) => {
+        if (!duration) return '-';
+        return duration.charAt(0).toUpperCase() + duration.slice(1);
+    };
+
+    const getOfferCapAmount = (offerObj) => {
+        if (!offerObj || !offerObj.capping_type || offerObj.capping_type === 'none') return null;
+        if (offerObj.capping_type === 'budget') {
+            return offerObj.budget_cap != null && offerObj.budget_cap !== '' ? offerObj.budget_cap : null;
+        }
+        if (offerObj.capping_type === 'conversion') {
+            return offerObj.conversion_cap != null && offerObj.conversion_cap !== '' ? offerObj.conversion_cap : null;
+        }
+        return null;
+    };
+
+    const getFallbackOfferLabel = (offerObj) => {
+        if (!offerObj?.fallback_offer_id) return null;
+        const fallbackOffer = offers.find((o) =>
+            String(o.id) === String(offerObj.fallback_offer_id) ||
+            String(o.public_offer_id) === String(offerObj.fallback_offer_id)
+        );
+        if (!fallbackOffer) return `Offer #${offerObj.fallback_offer_id}`;
+        return `${fallbackOffer.name} (${fallbackOffer.public_offer_id || fallbackOffer.display_id || fallbackOffer.id})`;
+    };
+
+    const capAmount = getOfferCapAmount(offer);
+    const isInstantRedirect = offer.capping_action === 'fallback'
+        && capAmount != null
+        && Number(capAmount) === 0
+        && offer.capping_type
+        && offer.capping_type !== 'none';
+
     const statsCards = [
         { key: 'clicks', label: 'Total Clicks', value: formatNumber(stats?.total_clicks), className: 'stat-item-purple', icon: <ClickIcon /> },
         { key: 'conversions', label: 'Total Conversions', value: formatNumber(stats?.total_conversions), className: 'stat-item-teal', icon: <ConversionIcon /> },
@@ -769,11 +820,11 @@ function OfferDetail() {
                 )}
             </div>
 
-            <div className="offer-two-column-grid">
+            <div className="offer-detail-info-layout">
                 {/* Basic Information */}
-                <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Basic Information</h2>
-                    <div className="detail-grid" style={{ display: 'grid', gap: '15px' }}>
+                <div className="offer-detail-section offer-detail-info-card">
+                    <h2 className="offer-detail-info-title">Basic Information</h2>
+                    <div className="offer-detail-fields">
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Name:</span>
                             <span className="detail-value" style={{ fontWeight: '500' }}>{offer.name}</span>
@@ -821,10 +872,11 @@ function OfferDetail() {
                     </div>
                 </div>
 
+                <div className="offer-detail-side-stack">
                 {/* Pricing Information */}
-                <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-                    <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: '600' }}>Pricing Information</h2>
-                    <div className="detail-grid" style={{ display: 'grid', gap: '15px' }}>
+                <div className="offer-detail-section offer-detail-info-card offer-detail-card-compact">
+                    <h2 className="offer-detail-info-title">Pricing Information</h2>
+                    <div className="offer-detail-fields">
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Advertiser Model:</span>
                             <span className="detail-value">{offer.advertiser_model}</span>
@@ -860,6 +912,80 @@ function OfferDetail() {
                             </span>
                         </div>
                     </div>
+                </div>
+
+                {/* Capping Information */}
+                <div className="offer-detail-section offer-detail-info-card offer-detail-card-compact">
+                    <h2 className="offer-detail-info-title">Capping Information</h2>
+                    <div className="offer-detail-fields">
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Capping Type:</span>
+                            <span className="detail-value">{formatCappingType(offer.capping_type)}</span>
+                        </div>
+
+                        {offer.capping_type && offer.capping_type !== 'none' ? (
+                            <>
+                                <div className="detail-item">
+                                    <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Duration:</span>
+                                    <span className="detail-value">{formatCappingDuration(offer.capping_duration)}</span>
+                                </div>
+                                <div className="detail-item">
+                                    <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>
+                                        {offer.capping_type === 'budget' ? 'Budget Amount:' : 'Conversion Limit:'}
+                                    </span>
+                                    <span className="detail-value" style={{ fontWeight: '600' }}>
+                                        {capAmount != null
+                                            ? (offer.capping_type === 'budget'
+                                                ? `${offer.offer_currency || 'USD'} ${Number(capAmount).toFixed(2)}`
+                                                : formatNumber(capAmount))
+                                            : '-'}
+                                    </span>
+                                    {isInstantRedirect && (
+                                        <span className="offer-capping-badge">Instant redirect active</span>
+                                    )}
+                                </div>
+                                <div className="detail-item">
+                                    <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Action if Exceeded:</span>
+                                    <span className="detail-value">{formatCappingAction(offer.capping_action)}</span>
+                                </div>
+
+                                {offer.capping_action === 'fallback' && (
+                                    <>
+                                        <div className="detail-item">
+                                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Fallback Type:</span>
+                                            <span className="detail-value">
+                                                {offer.fallback_type === 'custom' ? 'Custom URL' : offer.fallback_type === 'offer' ? 'Fallback Offer' : '-'}
+                                            </span>
+                                        </div>
+                                        {offer.fallback_type === 'custom' && (
+                                            <div className="detail-item">
+                                                <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Fallback URL:</span>
+                                                <span className="detail-value">
+                                                    {offer.fallback_url ? (
+                                                        <a href={offer.fallback_url} target="_blank" rel="noopener noreferrer" style={{ color: '#2196F3', wordBreak: 'break-all' }}>
+                                                            {offer.fallback_url}
+                                                        </a>
+                                                    ) : '-'}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {offer.fallback_type === 'offer' && (
+                                            <div className="detail-item">
+                                                <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Fallback Offer:</span>
+                                                <span className="detail-value">{getFallbackOfferLabel(offer) || '-'}</span>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </>
+                        ) : (
+                            <div className="detail-item">
+                                <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Status:</span>
+                                <span className="detail-value" style={{ color: '#64748b' }}>No capping configured</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
                 </div>
             </div>
 
@@ -1391,7 +1517,9 @@ function OfferDetail() {
                                             conversion_approval_percentage: assignment.conversion_approval_percentage ? parseFloat(assignment.conversion_approval_percentage) : null,
                                             capping_type: assignment.capping_type,
                                             capping_duration: assignment.capping_duration,
-                                            capping_amount: assignment.capping_amount ? parseFloat(assignment.capping_amount) : null,
+                                            capping_amount: assignment.capping_amount !== '' && assignment.capping_amount != null
+                                                ? parseFloat(assignment.capping_amount)
+                                                : null,
                                             capping_action: assignment.capping_action,
                                             callback_url: assignment.callback_url || null,
                                             offer_url: assignment.offer_url || null,
