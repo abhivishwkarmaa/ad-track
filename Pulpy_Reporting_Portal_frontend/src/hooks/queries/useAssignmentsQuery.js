@@ -3,7 +3,7 @@ import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/rea
 import { assignmentsAPI } from '../../services/api';
 import { queryKeys } from '../../lib/queryKeys';
 import { unwrapApiData } from '../../lib/apiQuery';
-import { referenceDataQueryDefaults } from '../../lib/queryClient';
+import { referenceDataQueryDefaults, listQueryDefaults } from '../../lib/queryClient';
 import {
     invalidateListCaches,
     patchAssignmentsListCaches,
@@ -14,6 +14,7 @@ import {
 export function useAssignmentsList(params = {}, options = {}) {
     const { enabled = true } = options;
     return useQuery({
+        ...listQueryDefaults,
         queryKey: queryKeys.assignments.list(params),
         queryFn: ({ signal }) =>
             unwrapApiData(assignmentsAPI.getAssignments(params, { signal })),

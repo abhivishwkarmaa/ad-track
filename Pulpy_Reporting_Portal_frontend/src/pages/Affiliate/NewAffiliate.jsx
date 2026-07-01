@@ -1,26 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import { useCreatePublisher } from '../../hooks/queries/usePublishersQuery';
+import { ADVERTISER_COUNTRY_OPTIONS } from '../../utils/countries';
 import './Affiliate.css';
-
-const countries = [
-    { code: 'US', name: 'United States' },
-    { code: 'UK', name: 'United Kingdom' },
-    { code: 'CA', name: 'Canada' },
-    { code: 'DE', name: 'Germany' },
-    { code: 'FR', name: 'France' },
-    { code: 'IN', name: 'India' },
-    { code: 'AU', name: 'Australia' },
-    { code: 'JP', name: 'Japan' },
-    { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' }
-];
 
 function NewAffiliate() {
     const navigate = useNavigate();
-    const { addAffiliate } = useData();
     const toast = useToast();
     const createPublisherMutation = useCreatePublisher();
     const [loading, setLoading] = useState(false);
@@ -159,7 +145,7 @@ function NewAffiliate() {
                                     value={formData.country}
                                     onChange={handleChange}
                                 >
-                                    {countries.map(country => (
+                                    {ADVERTISER_COUNTRY_OPTIONS.filter((c) => c.code !== 'CUSTOM').map(country => (
                                         <option key={country.code} value={country.code}>{country.name}</option>
                                     ))}
                                 </select>

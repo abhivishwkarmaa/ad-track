@@ -8,57 +8,22 @@ import {
     useUpdateOfferStatus,
 } from '../../hooks/queries/useOffersQuery';
 import { formatDateIST } from '../../utils/dateTime';
-import { SkeletonPage } from '../../components/Skeleton/Skeleton';
-import './Offer.css';
-
-// Icons
-const SearchIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-);
-
-const ClearIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <line x1="18" y1="6" x2="6" y2="18" />
-        <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-);
-
-const PlusIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-        <line x1="12" y1="5" x2="12" y2="19" />
-        <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-);
-
-const EditIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-);
-
-const TrashIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="3 6 5 6 21 6" />
-        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-        <line x1="10" y1="11" x2="10" y2="17" />
-        <line x1="14" y1="11" x2="14" y2="17" />
-    </svg>
-);
-
-const AlertIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-        <line x1="12" y1="9" x2="12" y2="13" />
-        <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-);
+import { useEntityListQueryState } from '../../hooks/useEntityListQueryState';
+import ConfirmModal from '../../shared/ui/ConfirmModal';
+import {
+    EntityListPage,
+    EntityListHeader,
+    EntityListToolbar,
+    EntityListSearch,
+    EntityListFilterSelect,
+    EntityListBody,
+    EntityListTableWrap,
+    EntityListEmpty,
+    EntityListPagination,
+} from '../../shared/ui/EntityList';
+import { PlusIcon, EditIcon, TrashIcon, EyeIcon } from '../../shared/ui/icons';
 
 function OfferList() {
-
     const toast = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
@@ -78,20 +43,13 @@ function OfferList() {
         return params;
     }, [currentPage, effectiveSearch, statusFilter]);
 
-    const {
-        data: offersResult,
-        isLoading,
-        isFetching,
-        error: queryError,
-    } = useOffersList(listParams);
+    const offersQuery = useOffersList(listParams);
+    const { isInitialLoad, isRefreshing, error, refetch } = useEntityListQueryState(offersQuery);
     const deleteOfferMutation = useDeleteOffer();
     const updateOfferStatusMutation = useUpdateOfferStatus();
 
-    const offers = offersResult?.data ?? [];
-    const pagination = offersResult?.pagination ?? { total: 0, totalPages: 1 };
-    const loading = isLoading;
-    const isRefreshing = isFetching && !isLoading;
-    const error = queryError?.message ?? null;
+    const offers = offersQuery.data?.data ?? [];
+    const pagination = offersQuery.data?.pagination ?? { total: 0, totalPages: 1 };
 
     useEffect(() => {
         const t = setTimeout(() => setSearchDebounced(searchTerm), 400);
@@ -110,7 +68,7 @@ function OfferList() {
                 return next;
             }, { replace: true });
         }
-    }, [effectiveSearch, statusFilter]);
+    }, [effectiveSearch, statusFilter, setSearchParams]);
 
     const { total, totalPages } = pagination;
 
@@ -150,66 +108,35 @@ function OfferList() {
         }
     };
 
-    if (loading) {
-        return (
-            <div className="offer-page">
-                <SkeletonPage tableRows={8} tableCols={10} />
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="offer-page">
-                <div className="error-state" style={{ textAlign: 'center', padding: '50px' }}>
-                    <p style={{ color: '#F44336', marginBottom: '20px' }}>Error: {error}</p>
-                    <button
-                        className="btn btn-primary"
-                        onClick={() => window.location.reload()}
-                    >
-                        Retry
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    const handlePageChange = (page) => {
+        setSearchParams((p) => {
+            const next = new URLSearchParams(p);
+            next.set('page', String(page));
+            return next;
+        }, { replace: page === currentPage });
+    };
 
     return (
-        <div className="offer-page">
-            <div className="offer-header">
-                <div className="offer-header-left">
-                    <h1>Offer List</h1>
-                    <p>Manage all your offers in one place</p>
-                </div>
-                <Link to="/offer/new" className="btn btn-primary" style={{ whiteSpace: 'nowrap', minWidth: '140px', maxWidth: '100%', justifyContent: 'center' }}>
-                    <PlusIcon />
-                    <span>New Offer</span>
-                </Link>
-            </div>
+        <EntityListPage>
+            <EntityListHeader
+                title="Offer List"
+                subtitle="Manage all your offers in one place"
+                action={(
+                    <Link to="/offer/new" className="btn btn-primary">
+                        <PlusIcon />
+                        <span>New Offer</span>
+                    </Link>
+                )}
+            />
 
-            <div className="offer-filters">
-                <div className="offer-search">
-                    <SearchIcon />
-                    <input
-                        type="text"
-                        placeholder="Search offers (min 3 characters)..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                    {searchTerm && (
-                        <button
-                            type="button"
-                            className="offer-search-clear"
-                            onClick={() => setSearchTerm('')}
-                            aria-label="Clear search"
-                            title="Clear search"
-                        >
-                            <ClearIcon />
-                        </button>
-                    )}
-                </div>
-                <select
-                    className="form-control offer-filter-select"
+            <EntityListToolbar>
+                <EntityListSearch
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search offers (min 3 characters)..."
+                    onClear={() => setSearchTerm('')}
+                />
+                <EntityListFilterSelect
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
                 >
@@ -218,199 +145,147 @@ function OfferList() {
                     <option value="live">Live</option>
                     <option value="paused">Paused</option>
                     <option value="archived">Archived</option>
-                </select>
-            </div>
+                </EntityListFilterSelect>
+            </EntityListToolbar>
 
-            {isRefreshing && <div className="offer-search-glow-line" />}
-
-            <div className="offer-table-container">
-                <table className="offer-table">
-                    <thead>
-                        <tr>
-                            <th>Offer Name</th>
-                            <th>Advertiser</th>
-                            <th>Category</th>
-                            <th>Country</th>
-                            <th>Revenue</th>
-                            <th>Payout</th>
-                            <th>Start Date</th>
-                            <th>End Date</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {offers.length === 0 ? (
+            <EntityListBody
+                isInitialLoad={isInitialLoad}
+                isRefreshing={isRefreshing}
+                error={error}
+                onRetry={() => refetch()}
+                tableRows={8}
+                tableCols={10}
+            >
+                <EntityListTableWrap>
+                    <table className="entity-list-table">
+                        <thead>
                             <tr>
-                                <td colSpan="10" style={{ textAlign: 'center', padding: '40px' }}>
-                                    No offers found
-                                </td>
+                                <th>Offer Name</th>
+                                <th>Advertiser</th>
+                                <th>Category</th>
+                                <th>Country</th>
+                                <th>Revenue</th>
+                                <th>Payout</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
                             </tr>
-                        ) : (
-                            offers.map((offer) => (
-                                <tr key={offer.id}>
-                                    <td>
-                                        <Link to={`/offer/detail/${offer.public_offer_id || offer.display_id}`} className="offer-row-link" style={{ position: 'absolute', width: '100%', height: '100%', left: 0, top: 0, opacity: 0, zIndex: 1 }}></Link>
-                                        <div className="offer-name">{offer.name}</div>
-                                        <div className="offer-id">ID: {offer.public_offer_id || offer.display_id}</div>
-                                    </td>
-                                    <td>
-                                        <div className="advertiser-name">{offer.advertiser_name || '-'}</div>
-                                        <div className="advertiser-id" style={{ fontSize: '12px', color: '#666' }}>
-                                            ID: {offer.public_advertiser_id || offer.advertiser_id || '-'}
-                                        </div>
-                                    </td>
-                                    <td>{offer.category || '-'}</td>
-                                    <td>{offer.country || '-'}</td>
-                                    <td>{offer.offer_currency} {offer.advertiser_amount || '0.00'}</td>
-                                    <td>{offer.offer_currency} {offer.affiliate_amount || '0.00'}</td>
-                                    <td>{offer.start_date ? formatDateIST(offer.start_date) : '-'}</td>
-                                    <td>{offer.end_date ? formatDateIST(offer.end_date) : '-'}</td>
-                                    <td>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            {offer.status.toLowerCase() === 'archived' ? (
-                                                <span className="offer-status-badge archived">
-                                                    Archived
-                                                </span>
-                                            ) : (
-                                                <select
-                                                    className={`offer-status-select ${offer.status.toLowerCase()}`}
-                                                    value={offer.status.toLowerCase()}
-                                                    onChange={(e) => handleStatusChange(offer.id, e.target.value)}
-                                                    disabled={updatingStatus[offer.id]}
-                                                    style={{ position: 'relative', zIndex: 2 }}
-                                                >
-                                                    <option value="draft">Draft</option>
-                                                    <option value="live">Live</option>
-                                                    <option value="paused">Paused</option>
-                                                </select>
-                                            )}
-                                            {updatingStatus[offer.id] && (
-                                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                                    Updating...
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div className="offer-actions">
-                                            <Link
-                                                to={`/offer/detail/${offer.public_offer_id || offer.display_id}`}
-                                                className="offer-action-btn"
-                                                title="View Details"
-                                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', position: 'relative', zIndex: 2 }}
-                                            >
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
-                                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                                    <circle cx="12" cy="12" r="3" />
-                                                </svg>
-                                            </Link>
-                                            <Link
-                                                to={`/offer/edit/${offer.public_offer_id || offer.display_id}`}
-                                                className="offer-action-btn"
-                                                title="Edit"
-                                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', position: 'relative', zIndex: 2 }}
-                                            >
-                                                <EditIcon />
-                                            </Link>
-                                            <button
-                                                className="offer-action-btn delete"
-                                                title="Archive"
-                                                onClick={() => handleDelete(offer)}
-                                                disabled={offer.status.toLowerCase() === 'archived'}
-                                                style={{ opacity: offer.status.toLowerCase() === 'archived' ? 0.5 : 1, position: 'relative', zIndex: 2 }}
-                                            >
-                                                <TrashIcon />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {offers.length === 0 ? (
+                                <EntityListEmpty colSpan={10} message="No offers found" />
+                            ) : (
+                                offers.map((offer) => {
+                                    const offerPath = `/offer/detail/${offer.public_offer_id || offer.display_id}`;
+                                    const isArchived = offer.status.toLowerCase() === 'archived';
 
-                {total > 0 && (
-                    <div className="offer-pagination">
-                        <div className="offer-pagination-info">
-                            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, total)} of {total} entries
-                        </div>
-                        <div className="offer-pagination-buttons">
-                            <button
-                                className="offer-pagination-btn"
-                                disabled={currentPage === 1}
-                                onClick={() => setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('page', String(currentPage - 1));
-                                    return next;
-                                }, { replace: false })}
-                            >
-                                Previous
-                            </button>
-                            {Array.from({ length: Math.min(totalPages, 10) }, (_, i) => {
-                                let page;
-                                if (totalPages <= 10) page = i + 1;
-                                else if (currentPage <= 5) page = i + 1;
-                                else if (currentPage >= totalPages - 4) page = totalPages - 9 + i;
-                                else page = currentPage - 5 + i;
-                                return (
-                                    <button
-                                        key={page}
-                                        className={`offer-pagination-btn ${currentPage === page ? 'active' : ''}`}
-                                        onClick={() => setSearchParams((p) => {
-                                            const next = new URLSearchParams(p);
-                                            next.set('page', String(page));
-                                            return next;
-                                        }, { replace: false })}
-                                    >
-                                        {page}
-                                    </button>
-                                );
-                            })}
-                            <button
-                                className="offer-pagination-btn"
-                                disabled={currentPage === totalPages}
-                                onClick={() => setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('page', String(currentPage + 1));
-                                    return next;
-                                }, { replace: false })}
-                            >
-                                Next
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
+                                    return (
+                                        <tr key={offer.id}>
+                                            <td>
+                                                <Link to={offerPath} className="entity-list-row-link" aria-label={`View ${offer.name}`} />
+                                                <div className="entity-list-cell-primary">{offer.name}</div>
+                                                <div className="entity-list-cell-meta">
+                                                    ID: {offer.public_offer_id || offer.display_id}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="entity-list-cell-primary">{offer.advertiser_name || '—'}</div>
+                                                <div className="entity-list-cell-meta">
+                                                    ID: {offer.public_advertiser_id || offer.advertiser_id || '—'}
+                                                </div>
+                                            </td>
+                                            <td className="entity-list-cell-sub">{offer.category || '—'}</td>
+                                            <td className="entity-list-cell-sub">{offer.country || '—'}</td>
+                                            <td className="entity-list-cell-sub">
+                                                {offer.offer_currency} {offer.advertiser_amount || '0.00'}
+                                            </td>
+                                            <td className="entity-list-cell-sub">
+                                                {offer.offer_currency} {offer.affiliate_amount || '0.00'}
+                                            </td>
+                                            <td className="entity-list-cell-sub">
+                                                {offer.start_date ? formatDateIST(offer.start_date) : '—'}
+                                            </td>
+                                            <td className="entity-list-cell-sub">
+                                                {offer.end_date ? formatDateIST(offer.end_date) : '—'}
+                                            </td>
+                                            <td>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    {isArchived ? (
+                                                        <span className="entity-list-status-badge archived">
+                                                            Archived
+                                                        </span>
+                                                    ) : (
+                                                        <select
+                                                            className={`entity-list-status-select ${offer.status.toLowerCase()}`}
+                                                            value={offer.status.toLowerCase()}
+                                                            onChange={(e) => handleStatusChange(offer.id, e.target.value)}
+                                                            disabled={updatingStatus[offer.id]}
+                                                        >
+                                                            <option value="draft">Draft</option>
+                                                            <option value="live">Live</option>
+                                                            <option value="paused">Paused</option>
+                                                        </select>
+                                                    )}
+                                                    {updatingStatus[offer.id] && (
+                                                        <span className="entity-list-cell-meta">Updating…</span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div className="entity-list-actions">
+                                                    <Link
+                                                        to={offerPath}
+                                                        className="entity-list-action-btn"
+                                                        title="View Details"
+                                                    >
+                                                        <EyeIcon size={16} />
+                                                    </Link>
+                                                    <Link
+                                                        to={`/offer/edit/${offer.public_offer_id || offer.display_id}`}
+                                                        className="entity-list-action-btn"
+                                                        title="Edit"
+                                                    >
+                                                        <EditIcon />
+                                                    </Link>
+                                                    <button
+                                                        type="button"
+                                                        className="entity-list-action-btn delete"
+                                                        title="Archive"
+                                                        onClick={() => handleDelete(offer)}
+                                                        disabled={isArchived}
+                                                    >
+                                                        <TrashIcon />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </EntityListTableWrap>
 
-            {/* Delete Confirmation Modal */}
-            {deleteModal.open && (
-                <div className="modal-overlay" onClick={() => setDeleteModal({ open: false, offer: null })}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-body">
-                            <div className="delete-modal">
-                                <div className="delete-modal-icon">
-                                    <AlertIcon />
-                                </div>
-                                <h3>Archive Offer?</h3>
-                                <p>Are you sure you want to archive "{deleteModal.offer?.name}"? The offer will be hidden but tracking URLs will remain valid. You can view archived offers using the status filter.</p>
-                                <div className="delete-modal-actions">
-                                    <button
-                                        className="btn btn-secondary"
-                                        onClick={() => setDeleteModal({ open: false, offer: null })}
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button className="btn btn-danger" onClick={confirmDelete}>
-                                        Archive
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+                <EntityListPagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    total={total}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={handlePageChange}
+                />
+            </EntityListBody>
+
+            <ConfirmModal
+                open={deleteModal.open}
+                onClose={() => setDeleteModal({ open: false, offer: null })}
+                onConfirm={confirmDelete}
+                title="Archive Offer?"
+                message={`Are you sure you want to archive "${deleteModal.offer?.name}"? The offer will be hidden but tracking URLs will remain valid. You can view archived offers using the status filter.`}
+                confirmText="Archive"
+                loading={deleteOfferMutation.isPending}
+            />
+        </EntityListPage>
     );
 }
 

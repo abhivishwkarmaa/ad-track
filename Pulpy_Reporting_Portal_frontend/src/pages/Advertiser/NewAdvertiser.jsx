@@ -1,37 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import { useCreateAdvertiser } from '../../hooks/queries/useAdvertisersQuery';
+import { ADVERTISER_COUNTRY_OPTIONS } from '../../utils/countries';
 import './Advertiser.css';
-
-const countries = [
-    { code: 'US', name: 'United States' },
-    { code: 'UK', name: 'United Kingdom' },
-    { code: 'CA', name: 'Canada' },
-    { code: 'DE', name: 'Germany' },
-    { code: 'FR', name: 'France' },
-    { code: 'IN', name: 'India' },
-    { code: 'AU', name: 'Australia' },
-    { code: 'JP', name: 'Japan' },
-    { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' },
-    { code: 'CN', name: 'China' },
-    { code: 'RU', name: 'Russia' },
-    { code: 'IT', name: 'Italy' },
-    { code: 'ES', name: 'Spain' },
-    { code: 'NL', name: 'Netherlands' },
-    { code: 'SE', name: 'Sweden' },
-    { code: 'CH', name: 'Switzerland' },
-    { code: 'SG', name: 'Singapore' },
-    { code: 'MX', name: 'Mexico' },
-    { code: 'ZA', name: 'South Africa' },
-    { code: 'CUSTOM', name: 'Custom' }
-];
 
 function NewAdvertiser() {
     const navigate = useNavigate();
-    const { addAdvertiser } = useData();
     const toast = useToast();
     const createAdvertiserMutation = useCreateAdvertiser();
     const [loading, setLoading] = useState(false);
@@ -173,7 +148,7 @@ function NewAdvertiser() {
                                             }
                                         }}
                                     >
-                                        {countries.map(country => (
+                                        {ADVERTISER_COUNTRY_OPTIONS.map(country => (
                                             <option key={country.code} value={country.code}>{country.name}</option>
                                         ))}
                                     </select>

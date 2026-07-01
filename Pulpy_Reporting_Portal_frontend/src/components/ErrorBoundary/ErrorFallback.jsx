@@ -1,9 +1,10 @@
-import { useNavigate } from 'react-router-dom';
 import './ErrorFallback.css';
 
-const ErrorFallback = ({ error, resetError, type = 'general' }) => {
-    const navigate = useNavigate();
+function goTo(path) {
+    window.location.assign(path);
+}
 
+const ErrorFallback = ({ error, resetError, type = 'general' }) => {
     const getErrorContent = () => {
         const errorMessage = error?.message || error?.toString() || 'An unexpected error occurred';
 
@@ -16,7 +17,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 suggestion: 'Please access via your tenant subdomain (e.g., yourcompany.domain.com)',
                 action: () => {
                     localStorage.removeItem('track-myads_user');
-                    window.location.href = '/login';
+                    goTo('/login');
                 },
                 actionText: 'Logout & Login Again'
             };
@@ -31,7 +32,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 suggestion: 'Please contact support for assistance.',
                 action: () => {
                     localStorage.removeItem('track-myads_user');
-                    window.location.href = '/login';
+                    goTo('/login');
                 },
                 actionText: 'Logout'
             };
@@ -46,7 +47,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 suggestion: 'Please login again to continue.',
                 action: () => {
                     localStorage.removeItem('track-myads_user');
-                    navigate('/login');
+                    goTo('/login');
                 },
                 actionText: 'Go to Login'
             };
@@ -61,7 +62,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 suggestion: 'Please login to continue.',
                 action: () => {
                     localStorage.removeItem('track-myads_user');
-                    navigate('/login');
+                    goTo('/login');
                 },
                 actionText: 'Go to Login'
             };
@@ -74,7 +75,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 title: 'Access Denied',
                 message: 'You do not have permission to access this resource.',
                 suggestion: 'Please contact your administrator if you believe this is an error.',
-                action: () => navigate('/'),
+                action: () => goTo('/'),
                 actionText: 'Go to Dashboard'
             };
         }
@@ -88,7 +89,7 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 suggestion: 'Please access via admin.domain.com',
                 action: () => {
                     localStorage.removeItem('track-myads_user');
-                    window.location.href = '/login';
+                    goTo('/login');
                 },
                 actionText: 'Logout & Login Again'
             };
@@ -126,8 +127,8 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 <h1 className="error-fallback-title">{errorContent.title}</h1>
                 <p className="error-fallback-message">{errorContent.message}</p>
                 <p className="error-fallback-suggestion">{errorContent.suggestion}</p>
-                
-                {process.env.NODE_ENV === 'development' && error?.stack && (
+
+                {import.meta.env.DEV && error?.stack && (
                     <details className="error-fallback-details">
                         <summary>Error Details (Development Only)</summary>
                         <pre>{error.stack}</pre>
@@ -135,11 +136,11 @@ const ErrorFallback = ({ error, resetError, type = 'general' }) => {
                 )}
 
                 <div className="error-fallback-actions">
-                    <button className="btn btn-primary" onClick={errorContent.action}>
+                    <button type="button" className="btn btn-primary" onClick={errorContent.action}>
                         {errorContent.actionText}
                     </button>
                     {resetError && resetError !== errorContent.action && (
-                        <button className="btn btn-outline" onClick={() => navigate('/')}>
+                        <button type="button" className="btn btn-outline" onClick={() => goTo('/')}>
                             Go to Home
                         </button>
                     )}

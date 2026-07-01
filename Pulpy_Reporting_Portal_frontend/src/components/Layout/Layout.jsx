@@ -3,7 +3,6 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import SubscriptionExpiryModal from './SubscriptionExpiryModal';
-import { DataProvider } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { subscriptionAPI } from '../../services/api';
 import { formatDateTimeIST } from '../../utils/dateTime';
@@ -209,7 +208,7 @@ function Layout() {
     }
 
     return (
-        <DataProvider>
+        <>
             <div className={`layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
                 <Sidebar
                     collapsed={sidebarCollapsed}
@@ -234,7 +233,7 @@ function Layout() {
                 open={isExpired && showExpiryModal}
                 onClose={handleCloseExpiryModal}
             />
-        </DataProvider>
+        </>
     );
 }
 

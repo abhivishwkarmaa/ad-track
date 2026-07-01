@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { advertisersAPI } from '../../services/api';
 import { queryKeys } from '../../lib/queryKeys';
 import { unwrapApiData } from '../../lib/apiQuery';
+import { listQueryDefaults } from '../../lib/queryClient';
 import {
     invalidateListCaches,
     patchAdvertisersListCaches,
@@ -12,6 +13,7 @@ import {
 export function useAdvertisersList(params = {}, options = {}) {
     const { enabled = true } = options;
     return useQuery({
+        ...listQueryDefaults,
         queryKey: queryKeys.advertisers.list(params),
         queryFn: ({ signal }) =>
             unwrapApiData(advertisersAPI.getAdvertisers(params, { signal })),

@@ -11,79 +11,49 @@ import { useOffersList } from '../../hooks/queries/useOffersQuery';
 import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateIST } from '../../utils/dateTime';
-import { SkeletonPage } from '../../components/Skeleton/Skeleton';
-import './Assignment.css';
+import { useEntityListQueryState } from '../../hooks/useEntityListQueryState';
+import ConfirmModal from '../../shared/ui/ConfirmModal';
+import {
+    EntityListPage,
+    EntityListHeader,
+    EntityListToolbar,
+    EntityListSearch,
+    EntityListFilterSelect,
+    EntityListFilterActions,
+    EntityListBody,
+    EntityListTableWrap,
+    EntityListEmpty,
+    StatusBadge,
+} from '../../shared/ui/EntityList';
+import {
+    PlusIcon,
+    EditIcon,
+    EyeIcon,
+    CopyIcon,
+    LinkIcon,
+    TrashIcon,
+    PauseIcon,
+    PlayIcon,
+} from '../../shared/ui/icons';
 
-// Icons
-const SearchIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-);
+const DEFAULT_FILTERS = { offer: 'all', publisher: 'all', status: 'all' };
 
-const PlusIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '18px', height: '18px', flexShrink: 0 }}>
-        <line x1="12" y1="5" x2="12" y2="19" />
-        <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-);
+function getOfferFilterId(offer) {
+    return String(offer.public_offer_id || offer.display_id || offer.id);
+}
 
-const EditIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-);
-
-const EyeIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-        <circle cx="12" cy="12" r="3" />
-    </svg>
-);
-
-const CopyIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-    </svg>
-);
-
-const LinkIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
-    </svg>
-);
-
-const TrashIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polyline points="3 6 5 6 21 6" />
-        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-    </svg>
-);
-
-const PauseIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="6" y="4" width="4" height="16" />
-        <rect x="14" y="4" width="4" height="16" />
-    </svg>
-);
-
-const PlayIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-);
+function getPublisherFilterId(publisher) {
+    return String(publisher.public_publisher_id || publisher.id);
+}
 
 function ManageAssignment() {
     const toast = useToast();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
-    const [offerFilter, setOfferFilter] = useState('all');
-    const [publisherFilter, setPublisherFilter] = useState('all');
-    const [statusFilter, setStatusFilter] = useState('all');
+    const [draftOfferFilter, setDraftOfferFilter] = useState('all');
+    const [draftPublisherFilter, setDraftPublisherFilter] = useState('all');
+    const [draftStatusFilter, setDraftStatusFilter] = useState('all');
+    const [appliedFilters, setAppliedFilters] = useState(DEFAULT_FILTERS);
     const [trackingUrls, setTrackingUrls] = useState({});
     const [loadingTrackingUrls, setLoadingTrackingUrls] = useState({});
     const [deleteModal, setDeleteModal] = useState({ open: false, assignment: null });
@@ -95,26 +65,32 @@ function ManageAssignment() {
 
     const listParams = useMemo(() => {
         const params = { page: 1, limit: 100 };
-        if (offerFilter !== 'all') params.public_offer_id = offerFilter;
-        if (publisherFilter !== 'all') params.public_publisher_id = publisherFilter;
-        if (statusFilter !== 'all') params.status = statusFilter;
+        if (appliedFilters.offer !== 'all') params.offer_id = appliedFilters.offer;
+        if (appliedFilters.publisher !== 'all') params.publisher_id = appliedFilters.publisher;
+        if (appliedFilters.status !== 'all') params.status = appliedFilters.status;
         return params;
-    }, [offerFilter, publisherFilter, statusFilter]);
+    }, [appliedFilters]);
 
+    const assignmentsQuery = useAssignmentsList(listParams);
     const {
-        data: assignmentsResult,
-        isLoading: loading,
-        error: queryError,
-    } = useAssignmentsList(listParams);
+        isInitialLoad,
+        isRefreshing,
+        error,
+        refetch,
+    } = useEntityListQueryState(assignmentsQuery);
     const deleteAssignmentMutation = useDeleteAssignment();
     const updateAssignmentMutation = useUpdateAssignment();
 
-    const assignments = assignmentsResult?.data ?? [];
+    const assignments = assignmentsQuery.data?.data ?? [];
     const offers = offersResult?.data ?? [];
     const publishers = publishersResult?.data ?? [];
-    const error = queryError?.message ?? null;
 
-    const filteredAssignments = assignments.filter(assignment => {
+    const filtersDirty =
+        draftOfferFilter !== appliedFilters.offer
+        || draftPublisherFilter !== appliedFilters.publisher
+        || draftStatusFilter !== appliedFilters.status;
+
+    const filteredAssignments = assignments.filter((assignment) => {
         const matchesSearch =
             assignment.offer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             assignment.publisher_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -122,15 +98,29 @@ function ManageAssignment() {
         return matchesSearch;
     });
 
+    const handleApplyFilters = () => {
+        setAppliedFilters({
+            offer: draftOfferFilter,
+            publisher: draftPublisherFilter,
+            status: draftStatusFilter,
+        });
+    };
+
+    const handleResetFilters = () => {
+        setDraftOfferFilter('all');
+        setDraftPublisherFilter('all');
+        setDraftStatusFilter('all');
+        setAppliedFilters(DEFAULT_FILTERS);
+    };
+
     const handleGetTrackingUrl = async (assignmentId) => {
         try {
-            setLoadingTrackingUrls(prev => ({ ...prev, [assignmentId]: true }));
+            setLoadingTrackingUrls((prev) => ({ ...prev, [assignmentId]: true }));
             const response = await assignmentsAPI.getTrackingUrl(assignmentId);
             if (response.success && response.data) {
                 const trackingUrl = response.data.tracking_url || '';
-                setTrackingUrls(prev => ({ ...prev, [assignmentId]: trackingUrl }));
+                setTrackingUrls((prev) => ({ ...prev, [assignmentId]: trackingUrl }));
 
-                // Copy to clipboard
                 if (trackingUrl) {
                     await navigator.clipboard.writeText(trackingUrl);
                     toast.success('Tracking URL copied to clipboard!');
@@ -144,7 +134,7 @@ function ManageAssignment() {
             console.error('Error fetching tracking URL:', err);
             toast.error('Failed to fetch tracking URL');
         } finally {
-            setLoadingTrackingUrls(prev => ({ ...prev, [assignmentId]: false }));
+            setLoadingTrackingUrls((prev) => ({ ...prev, [assignmentId]: false }));
         }
     };
 
@@ -194,240 +184,203 @@ function ManageAssignment() {
         }
     };
 
-    if (loading) {
-        return (
-            <div className="assignment-page">
-                <SkeletonPage tableRows={8} tableCols={6} />
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="assignment-page">
-                <div className="error-state" style={{ textAlign: 'center', padding: '50px' }}>
-                    <p style={{ color: '#F44336', marginBottom: '20px' }}>Error: {error}</p>
-                    <button
-                        className="btn btn-primary"
-                        onClick={() => window.location.reload()}
-                    >
-                        Retry
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
     return (
-        <div className="assignment-page">
-            <div className="assignment-header">
-                <div className="assignment-header-left">
-                    <h1>Manage Assignments</h1>
-                    <p>View and manage offer-to-publisher assignments</p>
-                </div>
-                <Link to="/assignment/new" className="btn btn-primary" style={{ whiteSpace: 'nowrap', minWidth: '140px', maxWidth: '100%', justifyContent: 'center' }}>
-                    <PlusIcon />
-                    <span>New Assignment</span>
-                </Link>
-            </div>
+        <EntityListPage>
+            <EntityListHeader
+                title="Manage Assignments"
+                subtitle="View and manage offer-to-publisher assignments"
+                action={(
+                    <Link to="/assignment/new" className="btn btn-primary">
+                        <PlusIcon />
+                        <span>New Assignment</span>
+                    </Link>
+                )}
+            />
 
-            <div className="assignment-filters">
-                <div className="assignment-search">
-                    <SearchIcon />
-                    <input
-                        type="text"
-                        placeholder="Search assignments..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
-                <select
-                    className="form-control assignment-filter-select"
-                    value={offerFilter}
-                    onChange={(e) => setOfferFilter(e.target.value)}
-                    style={{ minWidth: '150px' }}
+            <EntityListToolbar>
+                <EntityListSearch
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search assignments..."
+                    onClear={() => setSearchTerm('')}
+                />
+                <EntityListFilterSelect
+                    value={draftOfferFilter}
+                    onChange={(e) => setDraftOfferFilter(e.target.value)}
                 >
                     <option value="all">All Offers</option>
-                    {offers.map(offer => (
-                        <option key={offer.id} value={offer.id}>{offer.name}</option>
+                    {offers.map((offer) => (
+                        <option key={offer.id} value={getOfferFilterId(offer)}>
+                            {offer.name}
+                        </option>
                     ))}
-                </select>
-                <select
-                    className="form-control assignment-filter-select"
-                    value={publisherFilter}
-                    onChange={(e) => setPublisherFilter(e.target.value)}
-                    style={{ minWidth: '150px' }}
+                </EntityListFilterSelect>
+                <EntityListFilterSelect
+                    value={draftPublisherFilter}
+                    onChange={(e) => setDraftPublisherFilter(e.target.value)}
                 >
                     <option value="all">All Publishers</option>
-                    {publishers.map(publisher => (
-                        <option key={publisher.id} value={publisher.id}>
+                    {publishers.map((publisher) => (
+                        <option key={publisher.id} value={getPublisherFilterId(publisher)}>
                             {publisher.first_name} ({publisher.email})
                         </option>
                     ))}
-                </select>
-                <select
-                    className="form-control assignment-filter-select"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    style={{ minWidth: '150px' }}
+                </EntityListFilterSelect>
+                <EntityListFilterSelect
+                    value={draftStatusFilter}
+                    onChange={(e) => setDraftStatusFilter(e.target.value)}
                 >
                     <option value="all">All Status</option>
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
-                </select>
-            </div>
+                </EntityListFilterSelect>
+                <EntityListFilterActions
+                    onApply={handleApplyFilters}
+                    onReset={handleResetFilters}
+                    applyDisabled={!filtersDirty || isRefreshing}
+                />
+            </EntityListToolbar>
 
-            <div className="assignment-table-container">
-                <table className="assignment-table">
-                    <thead>
-                        <tr>
-                            <th>Offer</th>
-                            <th>Publisher</th>
-                            <th>Payout Override</th>
-                            <th>Status</th>
-                            <th>Assigned At</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredAssignments.length === 0 ? (
+            <EntityListBody
+                isInitialLoad={isInitialLoad}
+                isRefreshing={isRefreshing}
+                error={error}
+                onRetry={() => refetch()}
+                tableRows={8}
+                tableCols={6}
+            >
+                <EntityListTableWrap>
+                    <table className="entity-list-table">
+                        <thead>
                             <tr>
-                                <td colSpan="6" style={{ textAlign: 'center', padding: '40px' }}>
-                                    No assignments found
-                                </td>
+                                <th>Offer</th>
+                                <th>Publisher</th>
+                                <th>Payout Override</th>
+                                <th>Status</th>
+                                <th>Assigned At</th>
+                                <th>Actions</th>
                             </tr>
-                        ) : (
-                            filteredAssignments.map((assignment) => (
-                                <tr key={assignment.id}>
-                                    <td>
-                                        <div className="assignment-name">{assignment.offer_name || `Offer #${assignment.offer_id}`}</div>
-                                        {/* <div className="assignment-id" style={{ fontSize: '12px', color: '#888' }}>ID: {assignment.id}</div> */}
-                                        <div className="assignment-category">{assignment.offer_category || '-'}</div>
-                                    </td>
-                                    <td>
-                                        <div className="assignment-name">{assignment.publisher_email || `Publisher #${assignment.publisher_id}`}</div>
-                                        <div className="assignment-email">{assignment.publisher_company || '-'}</div>
-                                    </td>
-                                    <td>{assignment.payout_override ? `$${assignment.payout_override}` : '-'}</td>
-                                    <td>
-                                        <span className={`assignment-status ${assignment.status?.toLowerCase()}`}>
-                                            {assignment.status}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {assignment.assigned_at
-                                            ? formatDateIST(assignment.assigned_at)
-                                            : '-'
-                                        }
-                                    </td>
-                                    <td>
-                                        <div className="assignment-actions">
-                                            <button
-                                                className="assignment-action-btn"
-                                                title={assignment.status === 'active' ? 'Pause' : 'Activate'}
-                                                onClick={() => handleToggleStatus(assignment)}
-                                                style={{ color: assignment.status === 'active' ? '#ff9800' : '#4CAF50' }}
-                                                disabled={togglingStatus[assignment.id]}
-                                            >
-                                                {togglingStatus[assignment.id] ? (
-                                                    <span style={{ fontSize: '10px' }}>...</span>
-                                                ) : (
-                                                    assignment.status === 'active' ? <PauseIcon /> : <PlayIcon />
-                                                )}
-                                            </button>
-                                            <button
-                                                className="assignment-action-btn"
-                                                title="View Details"
-                                                onClick={() => navigate(`/assignment/edit/${assignment.id}`)}
-                                            >
-                                                <EyeIcon />
-                                            </button>
-                                            <button
-                                                className="assignment-action-btn"
-                                                title="Edit"
-                                                onClick={() => navigate(`/assignment/edit/${assignment.id}`)}
-                                            >
-                                                <EditIcon />
-                                            </button>
-                                            {trackingUrls[assignment.id] ? (
+                        </thead>
+                        <tbody>
+                            {filteredAssignments.length === 0 ? (
+                                <EntityListEmpty colSpan={6} message="No assignments found" />
+                            ) : (
+                                filteredAssignments.map((assignment) => (
+                                    <tr key={assignment.id}>
+                                        <td>
+                                            <div className="entity-list-cell-primary">
+                                                {assignment.offer_name || `Offer #${assignment.offer_id}`}
+                                            </div>
+                                            <div className="entity-list-cell-meta">
+                                                {assignment.offer_category || '—'}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div className="entity-list-cell-primary">
+                                                {assignment.publisher_email || `Publisher #${assignment.publisher_id}`}
+                                            </div>
+                                            <div className="entity-list-cell-meta">
+                                                {assignment.publisher_company || '—'}
+                                            </div>
+                                        </td>
+                                        <td className="entity-list-cell-sub">
+                                            {assignment.payout_override ? `$${assignment.payout_override}` : '—'}
+                                        </td>
+                                        <td>
+                                            <StatusBadge status={assignment.status} />
+                                        </td>
+                                        <td className="entity-list-cell-sub">
+                                            {assignment.assigned_at
+                                                ? formatDateIST(assignment.assigned_at)
+                                                : '—'}
+                                        </td>
+                                        <td>
+                                            <div className="entity-list-actions">
                                                 <button
-                                                    className="assignment-action-btn"
-                                                    title="Copy Tracking URL"
-                                                    onClick={() => handleCopyTrackingUrl(trackingUrls[assignment.id])}
-                                                    style={{ color: '#4CAF50' }}
+                                                    type="button"
+                                                    className={`entity-list-action-btn ${assignment.status === 'active' ? 'warn' : 'success'}`}
+                                                    title={assignment.status === 'active' ? 'Pause' : 'Activate'}
+                                                    onClick={() => handleToggleStatus(assignment)}
+                                                    disabled={togglingStatus[assignment.id]}
                                                 >
-                                                    <CopyIcon />
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    className="assignment-action-btn"
-                                                    title="Get Tracking URL"
-                                                    onClick={() => handleGetTrackingUrl(assignment.id)}
-                                                    disabled={loadingTrackingUrls[assignment.id]}
-                                                    style={{
-                                                        opacity: loadingTrackingUrls[assignment.id] ? 0.6 : 1,
-                                                        cursor: loadingTrackingUrls[assignment.id] ? 'not-allowed' : 'pointer'
-                                                    }}
-                                                >
-                                                    {loadingTrackingUrls[assignment.id] ? (
-                                                        <span style={{ fontSize: '12px' }}>...</span>
+                                                    {togglingStatus[assignment.id] ? (
+                                                        <span style={{ fontSize: 10 }}>…</span>
+                                                    ) : assignment.status === 'active' ? (
+                                                        <PauseIcon />
                                                     ) : (
-                                                        <LinkIcon />
+                                                        <PlayIcon />
                                                     )}
                                                 </button>
-                                            )}
-                                            <button
-                                                className="assignment-action-btn"
-                                                title="Delete Assignment"
-                                                onClick={() => handleDelete(assignment)}
-                                                style={{ color: '#F44336' }}
-                                            >
-                                                <TrashIcon />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                                                <button
+                                                    type="button"
+                                                    className="entity-list-action-btn"
+                                                    title="View Details"
+                                                    onClick={() => navigate(`/assignment/edit/${assignment.id}`)}
+                                                >
+                                                    <EyeIcon />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="entity-list-action-btn"
+                                                    title="Edit"
+                                                    onClick={() => navigate(`/assignment/edit/${assignment.id}`)}
+                                                >
+                                                    <EditIcon />
+                                                </button>
+                                                {trackingUrls[assignment.id] ? (
+                                                    <button
+                                                        type="button"
+                                                        className="entity-list-action-btn success"
+                                                        title="Copy Tracking URL"
+                                                        onClick={() => handleCopyTrackingUrl(trackingUrls[assignment.id])}
+                                                    >
+                                                        <CopyIcon />
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        className="entity-list-action-btn"
+                                                        title="Get Tracking URL"
+                                                        onClick={() => handleGetTrackingUrl(assignment.id)}
+                                                        disabled={loadingTrackingUrls[assignment.id]}
+                                                    >
+                                                        {loadingTrackingUrls[assignment.id] ? (
+                                                            <span style={{ fontSize: 12 }}>…</span>
+                                                        ) : (
+                                                            <LinkIcon />
+                                                        )}
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    className="entity-list-action-btn delete"
+                                                    title="Delete Assignment"
+                                                    onClick={() => handleDelete(assignment)}
+                                                >
+                                                    <TrashIcon />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </EntityListTableWrap>
+            </EntityListBody>
 
-            {/* Delete Confirmation Modal */}
-            {deleteModal.open && (
-                <div className="modal-overlay" onClick={() => !deleting && setDeleteModal({ open: false, assignment: null })}>
-                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                        <h2>Delete Assignment</h2>
-                        <p>
-                            Are you sure you want to delete the assignment between{' '}
-                            <strong>{deleteModal.assignment?.offer_name || `Offer #${deleteModal.assignment?.offer_id}`}</strong> and{' '}
-                            <strong>{deleteModal.assignment?.publisher_email || `Publisher #${deleteModal.assignment?.publisher_id}`}</strong>?
-                        </p>
-                        <p style={{ color: '#F44336', fontSize: '14px', marginTop: '10px' }}>
-                            This action cannot be undone.
-                        </p>
-                        <div className="modal-actions">
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => setDeleteModal({ open: false, assignment: null })}
-                                disabled={deleting}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="btn btn-danger"
-                                onClick={confirmDelete}
-                                disabled={deleting}
-                            >
-                                {deleting ? 'Deleting...' : 'Delete'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+            <ConfirmModal
+                open={deleteModal.open}
+                onClose={() => !deleting && setDeleteModal({ open: false, assignment: null })}
+                onConfirm={confirmDelete}
+                title="Delete Assignment"
+                message={`Are you sure you want to delete the assignment between ${deleteModal.assignment?.offer_name || `Offer #${deleteModal.assignment?.offer_id}`} and ${deleteModal.assignment?.publisher_email || `Publisher #${deleteModal.assignment?.publisher_id}`}? This action cannot be undone.`}
+                confirmText="Delete"
+                loading={deleting}
+                variant="simple"
+            />
+        </EntityListPage>
     );
 }
 
 export default ManageAssignment;
-

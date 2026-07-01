@@ -1,0 +1,20 @@
+.query-error-state {
+    text-align: center;
+    padding: 50px;
+}
+
+.query-error-state-message {
+    color: var(--danger-color);
+    margin-bottom: 20px;
+}
+
+.confirm-modal-simple h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.confirm-modal-simple p {
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+}

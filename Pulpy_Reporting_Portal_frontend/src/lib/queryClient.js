@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, keepPreviousData } from '@tanstack/react-query';
 
 /** Default options for reference data (offers, advertisers, etc.) */
 export const referenceDataQueryDefaults = {
@@ -8,6 +8,12 @@ export const referenceDataQueryDefaults = {
     refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+};
+
+/** List pages — keep previous rows visible while filters/pagination refetch */
+export const listQueryDefaults = {
+    ...referenceDataQueryDefaults,
+    placeholderData: keepPreviousData,
 };
 
 /** Offer detail stats: short cache to avoid refetch on quick back-navigation. */

@@ -2,12 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { offersAPI } from '../../services/api';
 import { queryKeys } from '../../lib/queryKeys';
 import { unwrapApiData } from '../../lib/apiQuery';
-import { offerStatsQueryDefaults } from '../../lib/queryClient';
+import { listQueryDefaults, offerStatsQueryDefaults } from '../../lib/queryClient';
 import { patchOffersListCaches, setOfferDetailCache, removeOfferFromListCaches, invalidateListCaches } from '../../lib/queryCacheUtils';
 
 export function useOffersList(params = {}, options = {}) {
     const { enabled = true } = options;
     return useQuery({
+        ...listQueryDefaults,
         queryKey: queryKeys.offers.list(params),
         queryFn: ({ signal }) =>
             unwrapApiData(offersAPI.getOffers(params, { signal })),

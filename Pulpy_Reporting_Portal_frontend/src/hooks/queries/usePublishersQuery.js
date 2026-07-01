@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { publishersAPI } from '../../services/api';
 import { queryKeys } from '../../lib/queryKeys';
 import { unwrapApiData } from '../../lib/apiQuery';
+import { listQueryDefaults } from '../../lib/queryClient';
 import {
     invalidateListCaches,
     patchPublishersListCaches,
@@ -12,6 +13,7 @@ import {
 export function usePublishersList(params = {}, options = {}) {
     const { enabled = true } = options;
     return useQuery({
+        ...listQueryDefaults,
         queryKey: queryKeys.publishers.list(params),
         queryFn: ({ signal }) =>
             unwrapApiData(publishersAPI.getPublishers(params, { signal })),

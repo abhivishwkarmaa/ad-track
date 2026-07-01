@@ -1,31 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import {
     usePublisherDetail,
     useUpdatePublisher,
 } from '../../hooks/queries/usePublishersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
+import { ADVERTISER_COUNTRY_OPTIONS } from '../../utils/countries';
 import './Affiliate.css';
-
-const countries = [
-    { code: 'US', name: 'United States' },
-    { code: 'UK', name: 'United Kingdom' },
-    { code: 'CA', name: 'Canada' },
-    { code: 'DE', name: 'Germany' },
-    { code: 'FR', name: 'France' },
-    { code: 'IN', name: 'India' },
-    { code: 'AU', name: 'Australia' },
-    { code: 'JP', name: 'Japan' },
-    { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' }
-];
 
 function EditAffiliate() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { updateAffiliate } = useData();
     const toast = useToast();
     const updatePublisherMutation = useUpdatePublisher();
     const [loading, setLoading] = useState(false);
@@ -76,7 +62,6 @@ function EditAffiliate() {
             }
 
             await updatePublisherMutation.mutateAsync({ id, data: formData });
-            updateAffiliate(id, formData);
             toast.success('Publisher updated successfully!');
             navigate('/affiliate/manage');
         } catch (error) {
@@ -161,7 +146,7 @@ function EditAffiliate() {
                                     value={formData.country}
                                     onChange={handleChange}
                                 >
-                                    {countries.map(country => (
+                                    {ADVERTISER_COUNTRY_OPTIONS.filter((c) => c.code !== 'CUSTOM').map(country => (
                                         <option key={country.code} value={country.code}>{country.name}</option>
                                     ))}
                                 </select>

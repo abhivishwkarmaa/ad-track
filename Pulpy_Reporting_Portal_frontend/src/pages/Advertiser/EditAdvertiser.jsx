@@ -1,42 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
 import {
     useAdvertiserDetail,
     useUpdateAdvertiser,
 } from '../../hooks/queries/useAdvertisersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
+import { ADVERTISER_COUNTRY_OPTIONS } from '../../utils/countries';
 import './Advertiser.css';
-
-const countries = [
-    { code: 'US', name: 'United States' },
-    { code: 'UK', name: 'United Kingdom' },
-    { code: 'CA', name: 'Canada' },
-    { code: 'DE', name: 'Germany' },
-    { code: 'FR', name: 'France' },
-    { code: 'IN', name: 'India' },
-    { code: 'AU', name: 'Australia' },
-    { code: 'JP', name: 'Japan' },
-    { code: 'BR', name: 'Brazil' },
-    { code: 'AE', name: 'United Arab Emirates' },
-    { code: 'CN', name: 'China' },
-    { code: 'RU', name: 'Russia' },
-    { code: 'IT', name: 'Italy' },
-    { code: 'ES', name: 'Spain' },
-    { code: 'NL', name: 'Netherlands' },
-    { code: 'SE', name: 'Sweden' },
-    { code: 'CH', name: 'Switzerland' },
-    { code: 'SG', name: 'Singapore' },
-    { code: 'MX', name: 'Mexico' },
-    { code: 'ZA', name: 'South Africa' },
-    { code: 'CUSTOM', name: 'Custom' }
-];
 
 function EditAdvertiser() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { updateAdvertiser } = useData();
     const toast = useToast();
     const updateAdvertiserMutation = useUpdateAdvertiser();
     const [loading, setLoading] = useState(false);
@@ -71,7 +46,7 @@ function EditAdvertiser() {
             notes: advertiser.notes || '',
             status: advertiser.status || 'active',
         });
-        const isStandardCountry = countries.some((c) => c.code === (advertiser.country || 'US'));
+        const isStandardCountry = ADVERTISER_COUNTRY_OPTIONS.some((c) => c.code === (advertiser.country || 'US'));
         if (!isStandardCountry && advertiser.country) {
             setShowCustomCountry(true);
         }
@@ -94,7 +69,6 @@ function EditAdvertiser() {
             }
 
             await updateAdvertiserMutation.mutateAsync({ id, data: formData });
-            updateAdvertiser(id, formData);
             toast.success('Advertiser updated successfully!');
             navigate('/advertiser/manage');
         } catch (error) {
@@ -187,7 +161,7 @@ function EditAdvertiser() {
                                             }
                                         }}
                                     >
-                                        {countries.map(country => (
+                                        {ADVERTISER_COUNTRY_OPTIONS.map(country => (
                                             <option key={country.code} value={country.code}>{country.name}</option>
                                         ))}
                                     </select>

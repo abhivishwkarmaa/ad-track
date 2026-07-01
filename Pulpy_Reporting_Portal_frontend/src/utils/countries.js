@@ -25,3 +25,28 @@ function buildCountryList() {
 
 export const OFFER_COUNTRIES = buildCountryList();
 
+/** Short list for advertiser / publisher forms (subset + custom). */
+export const ADVERTISER_COUNTRY_OPTIONS = [
+    { code: 'US', name: 'United States' },
+    { code: 'UK', name: 'United Kingdom' },
+    { code: 'CA', name: 'Canada' },
+    { code: 'DE', name: 'Germany' },
+    { code: 'FR', name: 'France' },
+    { code: 'IN', name: 'India' },
+    { code: 'AU', name: 'Australia' },
+    { code: 'JP', name: 'Japan' },
+    { code: 'BR', name: 'Brazil' },
+    { code: 'AE', name: 'United Arab Emirates' },
+    { code: 'CN', name: 'China' },
+    { code: 'RU', name: 'Russia' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'SE', name: 'Sweden' },
+    { code: 'CH', name: 'Switzerland' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'MX', name: 'Mexico' },
+    { code: 'ZA', name: 'South Africa' },
+    { code: 'CUSTOM', name: 'Custom' },
+];
+
