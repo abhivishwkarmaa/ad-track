@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { tenantsAPI } from '../../services/api';
+import {
+    useTenantsList,
+    useSuspendTenant,
+    useResumeTenant,
+    useDeleteTenant,
+} from '../../hooks/queries/useTenantsQuery';
 import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
@@ -82,59 +86,34 @@ const getStatusClass = (status) => {
 function ManageTenant() {
     const toast = useToast();
     const navigate = useNavigate();
-    const { refreshKey } = useRefresh();
-    const [tenants, setTenants] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [actionModal, setActionModal] = useState({ open: false, type: null, tenant: null });
 
-    // Fetch tenants data
-    useEffect(() => {
-        fetchTenants();
-    }, [statusFilter, refreshKey]);
+    const listParams = useMemo(() => {
+        const params = { page: 1, limit: 100 };
+        if (statusFilter !== 'all') params.status = statusFilter;
+        return params;
+    }, [statusFilter]);
 
-    const fetchTenants = async () => {
-        try {
-            setLoading(true);
-            setError(null);
+    const {
+        data: tenantsResult,
+        isLoading: loading,
+        error: queryError,
+        refetch,
+    } = useTenantsList(listParams);
+    const suspendTenantMutation = useSuspendTenant();
+    const resumeTenantMutation = useResumeTenant();
+    const deleteTenantMutation = useDeleteTenant();
 
-            const params = {
-                page: 1,
-                limit: 100
-            };
-
-            if (statusFilter !== 'all') {
-                params.status = statusFilter;
-            }
-
-            const response = await tenantsAPI.getTenants(params);
-            if (response.success) {
-                setTenants(response.data || []);
-            } else {
-                setError('Failed to load tenants');
-                toast.error('Failed to load tenants');
-            }
-        } catch (err) {
-            console.error('Fetch tenants error:', err);
-            setError('Failed to load tenants');
-            toast.error(err.message || 'Failed to load tenants');
-        } finally {
-            setLoading(false);
-        }
-    };
+    const tenants = tenantsResult?.data ?? [];
+    const error = queryError?.message ?? null;
 
     const handleSuspend = async (tenant) => {
         try {
-            const response = await tenantsAPI.suspendTenant(tenant.id);
-            if (response.success) {
-                toast.success(`Tenant "${tenant.name}" has been suspended`);
-                fetchTenants();
-                setActionModal({ open: false, type: null, tenant: null });
-            } else {
-                toast.error(response.message || 'Failed to suspend tenant');
-            }
+            await suspendTenantMutation.mutateAsync(tenant.id);
+            toast.success(`Tenant "${tenant.name}" has been suspended`);
+            setActionModal({ open: false, type: null, tenant: null });
         } catch (err) {
             console.error('Suspend tenant error:', err);
             toast.error(err.message || 'Failed to suspend tenant');
@@ -143,14 +122,9 @@ function ManageTenant() {
 
     const handleResume = async (tenant) => {
         try {
-            const response = await tenantsAPI.resumeTenant(tenant.id);
-            if (response.success) {
-                toast.success(`Tenant "${tenant.name}" has been resumed`);
-                fetchTenants();
-                setActionModal({ open: false, type: null, tenant: null });
-            } else {
-                toast.error(response.message || 'Failed to resume tenant');
-            }
+            await resumeTenantMutation.mutateAsync(tenant.id);
+            toast.success(`Tenant "${tenant.name}" has been resumed`);
+            setActionModal({ open: false, type: null, tenant: null });
         } catch (err) {
             console.error('Resume tenant error:', err);
             toast.error(err.message || 'Failed to resume tenant');
@@ -159,21 +133,16 @@ function ManageTenant() {
 
     const handleDelete = async (tenant) => {
         try {
-            const response = await tenantsAPI.deleteTenant(tenant.id, false);
-            if (response.success) {
-                toast.success(`Tenant "${tenant.name}" has been deleted`);
-                fetchTenants();
-                setActionModal({ open: false, type: null, tenant: null });
-            } else {
-                toast.error(response.message || 'Failed to delete tenant');
-            }
+            await deleteTenantMutation.mutateAsync({ id: tenant.id, hardDelete: false });
+            toast.success(`Tenant "${tenant.name}" has been deleted`);
+            setActionModal({ open: false, type: null, tenant: null });
         } catch (err) {
             console.error('Delete tenant error:', err);
             toast.error(err.message || 'Failed to delete tenant');
         }
     };
 
-    const filteredTenants = tenants.filter(tenant => {
+    const filteredTenants = tenants.filter((tenant) => {
         const matchesSearch =
             tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             tenant.slug.toLowerCase().includes(searchTerm.toLowerCase());
@@ -202,7 +171,7 @@ function ManageTenant() {
             <div className="tenant-container">
                 <div className="error-state">
                     <p>{error}</p>
-                    <button onClick={fetchTenants} style={{ marginTop: '16px', padding: '10px 20px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
+                    <button onClick={() => refetch()} style={{ marginTop: '16px', padding: '10px 20px', background: '#6366f1', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>
                         Retry
                     </button>
                 </div>

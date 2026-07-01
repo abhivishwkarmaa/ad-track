@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { publishersAPI, dashboardAPI } from '../../services/api';
+import { dashboardAPI } from '../../services/api';
+import { usePublisherDetail } from '../../hooks/queries/usePublishersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Affiliate.css';
 
@@ -11,32 +12,11 @@ function AffiliateDetail() {
     const navigate = useNavigate();
     const toast = useToast();
     const { refreshKey } = useRefresh();
-    const [fetchLoading, setFetchLoading] = useState(true);
     const [statsLoading, setStatsLoading] = useState(true);
     const [offerStats, setOfferStats] = useState([]);
-
-    const [publisher, setPublisher] = useState(null);
+    const { data: publisher, isLoading: fetchLoading } = usePublisherDetail(id);
 
     useEffect(() => {
-        const fetchPublisher = async () => {
-            try {
-                setFetchLoading(true);
-                const response = await publishersAPI.getPublisher(id);
-                if (response.success && response.data) {
-                    setPublisher(response.data);
-                } else {
-                    toast.error('Publisher not found');
-                    navigate('/affiliate/manage');
-                }
-            } catch (error) {
-                console.error('Fetch publisher error:', error);
-                toast.error('Failed to load publisher data');
-                navigate('/affiliate/manage');
-            } finally {
-                setFetchLoading(false);
-            }
-        };
-
         const fetchStats = async () => {
             try {
                 setStatsLoading(true);
@@ -51,9 +31,8 @@ function AffiliateDetail() {
             }
         };
 
-        fetchPublisher();
-        fetchStats();
-    }, [id, navigate, toast, refreshKey]);
+        if (id) fetchStats();
+    }, [id, refreshKey]);
 
     if (fetchLoading) {
         return (

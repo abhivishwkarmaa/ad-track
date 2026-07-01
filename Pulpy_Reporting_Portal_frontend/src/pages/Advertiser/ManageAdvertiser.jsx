@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { advertisersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import {
+    useAdvertisersList,
+    useDeleteAdvertiser,
+    useUpdateAdvertiser,
+} from '../../hooks/queries/useAdvertisersQuery';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
@@ -70,54 +72,28 @@ const PlayIcon = () => (
 function ManageAdvertiser() {
     const { deleteAdvertiser } = useData();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
     const navigate = useNavigate();
-    const [advertisers, setAdvertisers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [deleteModal, setDeleteModal] = useState({ open: false, advertiser: null });
+    const [togglingStatus, setTogglingStatus] = useState({});
 
-    // Fetch advertisers data
-    useEffect(() => {
-        const controller = new AbortController();
+    const listParams = useMemo(() => {
+        const params = { page: 1, limit: 100 };
+        if (statusFilter !== 'all') params.status = statusFilter;
+        return params;
+    }, [statusFilter]);
 
-        const fetchAdvertisers = async () => {
-            try {
-                setLoading(true);
-                setError(null);
+    const {
+        data: advertisersResult,
+        isLoading: loading,
+        error: queryError,
+    } = useAdvertisersList(listParams);
+    const deleteAdvertiserMutation = useDeleteAdvertiser();
+    const updateAdvertiserMutation = useUpdateAdvertiser();
 
-                // Prepare API parameters
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-
-                // Only add status filter if it's not 'all'
-                if (statusFilter !== 'all') {
-                    params.status = statusFilter;
-                }
-
-                const response = await advertisersAPI.getAdvertisers(params, { signal: controller.signal });
-                if (response.success) {
-                    setAdvertisers(response.data);
-                } else {
-                    setError('Failed to load advertisers');
-                }
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Advertisers fetch error:', err);
-                setError(err.message || 'Failed to load advertisers');
-            } finally {
-                if (controller.signal.aborted) return;
-                setLoading(false);
-            }
-        };
-
-        fetchAdvertisers();
-        return () => controller.abort();
-    }, [statusFilter, refreshKey]);
+    const advertisers = advertisersResult?.data ?? [];
+    const error = queryError?.message ?? null;
 
     const filteredAdvertisers = advertisers.filter(advertiser => {
         const matchesSearch =
@@ -130,28 +106,20 @@ function ManageAdvertiser() {
         return matchesSearch && matchesStatus;
     });
 
-    const [togglingStatus, setTogglingStatus] = useState({});
-
     const handleToggleStatus = async (advertiser) => {
         const newStatus = advertiser.status === 'active' ? 'inactive' : 'active';
         try {
-            setTogglingStatus(prev => ({ ...prev, [advertiser.id]: true }));
-            const response = await advertisersAPI.updateAdvertiser(advertiser.id, { status: newStatus });
-
-            if (response.success) {
-                toast.success(`Advertiser ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
-                // Update local state
-                setAdvertisers(prev => prev.map(a =>
-                    a.id === advertiser.id ? { ...a, status: newStatus } : a
-                ));
-            } else {
-                toast.error(response.message || 'Failed to update status');
-            }
+            setTogglingStatus((prev) => ({ ...prev, [advertiser.id]: true }));
+            await updateAdvertiserMutation.mutateAsync({
+                id: advertiser.id,
+                data: { status: newStatus },
+            });
+            toast.success(`Advertiser ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
         } catch (err) {
             console.error('Update status error:', err);
             toast.error('Failed to update status');
         } finally {
-            setTogglingStatus(prev => ({ ...prev, [advertiser.id]: false }));
+            setTogglingStatus((prev) => ({ ...prev, [advertiser.id]: false }));
         }
     };
 
@@ -160,31 +128,15 @@ function ManageAdvertiser() {
     };
 
     const confirmDelete = async () => {
-        if (deleteModal.advertiser) {
-            try {
-                await advertisersAPI.deleteAdvertiser(deleteModal.advertiser.id);
-                toast.success('Advertiser deleted successfully');
-                setDeleteModal({ open: false, advertiser: null });
-
-                // Refresh advertisers data after deletion with current filter
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-
-                // Only add status filter if it's not 'all'
-                if (statusFilter !== 'all') {
-                    params.status = statusFilter;
-                }
-
-                const response = await advertisersAPI.getAdvertisers(params);
-                if (response.success) {
-                    setAdvertisers(response.data);
-                }
-            } catch (err) {
-                console.error('Delete error:', err);
-                toast.error('Failed to delete advertiser');
-            }
+        if (!deleteModal.advertiser) return;
+        try {
+            await deleteAdvertiserMutation.mutateAsync(deleteModal.advertiser.id);
+            deleteAdvertiser(deleteModal.advertiser.id);
+            toast.success('Advertiser deleted successfully');
+            setDeleteModal({ open: false, advertiser: null });
+        } catch (err) {
+            console.error('Delete error:', err);
+            toast.error('Failed to delete advertiser');
         }
     };
 

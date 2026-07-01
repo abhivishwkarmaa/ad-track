@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import { assignmentsAPI } from '../../services/api';
+import {
+    useAssignmentDetail,
+    useAssignmentsList,
+    useUpdateAssignment,
+} from '../../hooks/queries/useAssignmentsQuery';
+import { useOffersList } from '../../hooks/queries/useOffersQuery';
+import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Assignment.css';
 
@@ -12,7 +17,7 @@ function EditAssignment() {
     const navigate = useNavigate();
     const location = useLocation();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const updateAssignmentMutation = useUpdateAssignment();
     const returnToFromQuery = new URLSearchParams(location.search).get('returnTo');
     const returnToFromState = location.state?.returnTo;
     const returnTo = returnToFromQuery || returnToFromState;
@@ -29,11 +34,6 @@ function EditAssignment() {
         navigate('/assignment/manage');
     }, [navigate, returnTo]);
     const [loading, setLoading] = useState(false);
-    const [loadingAssignment, setLoadingAssignment] = useState(true);
-    const [assignment, setAssignment] = useState(null);
-    const [offers, setOffers] = useState([]);
-    const [publishers, setPublishers] = useState([]);
-    /** Internal offer_ids this publisher already has an active assignment for (for fallback-offer picker). */
     const [publisherAssignedOfferIds, setPublisherAssignedOfferIds] = useState([]);
     const [formData, setFormData] = useState({
         offer_id: '',
@@ -53,119 +53,74 @@ function EditAssignment() {
         status: 'active',
         tracking_url: ''
     });
+    const { data: assignment, isLoading: loadingAssignment, error: assignmentError } = useAssignmentDetail(id);
+    const { data: offersResult } = useOffersList({ limit: 100 });
+    const { data: publishersResult } = usePublishersList({ limit: 100 });
+    const { data: publisherAssignmentsResult } = useAssignmentsList(
+        { publisher_id: formData.publisher_id, status: 'active' },
+        { enabled: Boolean(formData.publisher_id) }
+    );
+
+    const offers = offersResult?.data ?? [];
+    const publishers = publishersResult?.data ?? [];
 
     useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchData = async () => {
-            try {
-                const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }, { signal }),
-                    publishersAPI.getPublishers({ limit: 100 }, { signal })
-                ]);
-                if (signal.aborted) return;
-                if (offersRes.success) setOffers(offersRes.data);
-                if (publishersRes.success) setPublishers(publishersRes.data);
-            } catch (err) {
-                if (!isAbortError(err)) {
-                    console.error('Error fetching data:', err);
-                }
-            }
-        };
-        fetchData();
-        return () => controller.abort();
-    }, [refreshKey]);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const loadPublisherAssignments = async () => {
-            const pubId = formData.publisher_id;
-            if (!pubId) {
-                setPublisherAssignedOfferIds([]);
-                return;
-            }
-            try {
-                const res = await assignmentsAPI.getAssignments(
-                    { publisher_id: pubId, status: 'active' },
-                    { signal }
-                );
-                if (signal.aborted) return;
-                if (res.success && Array.isArray(res.data)) {
-                    setPublisherAssignedOfferIds(res.data.map(a => String(a.offer_id)));
-                } else {
-                    setPublisherAssignedOfferIds([]);
-                }
-            } catch (err) {
-                if (!isAbortError(err)) {
-                    console.error('Error loading publisher assignments for fallback offers:', err);
-                    setPublisherAssignedOfferIds([]);
-                }
-            }
-        };
-        loadPublisherAssignments();
-        return () => controller.abort();
-    }, [formData.publisher_id, refreshKey]);
-
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchAssignment = async () => {
-            try {
-                setLoadingAssignment(true);
-                const response = await assignmentsAPI.getAssignment(id, { signal });
-                if (response.success && response.data) {
-                    const data = response.data;
-                    setAssignment(data);
-                    setFormData({
-                        offer_id: data.offer_id?.toString() || '',
-                        publisher_id: data.publisher_id?.toString() || '',
-                        payout_override: data.payout_override || '',
-                        conversion_approval_percentage: data.conversion_approval_percentage || '',
-                        capping_type: data.capping_type || 'none',
-                        capping_duration: data.capping_duration || 'daily',
-                        capping_action: data.capping_action || 'stop',
-                        fallback_type: data.fallback_type || 'offer',
-                        fallback_url: data.fallback_url || '',
-                        fallback_offer_id: data.fallback_offer_id?.toString() || '',
-                        capping_amount: data.capping_type !== 'none' ? data.capping_amount : '',
-                        callback_url: data.callback_url || '',
-                        offer_url: data.offer_url || '',
-                        notes: data.notes || '',
-                        status: data.status || 'active',
-                        tracking_url: ''
-                    });
-
-                    // Fetch tracking URL
-                    try {
-                        const trackingResponse = await assignmentsAPI.getTrackingUrl(id);
-                        if (trackingResponse.success) {
-                            setFormData(prev => ({ ...prev, tracking_url: trackingResponse.data.tracking_url }));
-                        }
-                    } catch (err) {
-                        console.error('Error fetching tracking URL:', err);
-                    }
-                }
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Error fetching assignment:', err);
-                toast.error('Failed to load assignment');
-                goBackToOrigin();
-            } finally {
-                if (!signal.aborted) {
-                    setLoadingAssignment(false);
-                }
-            }
-        };
-
-        if (id) {
-            fetchAssignment();
+        if (assignmentError) {
+            toast.error('Failed to load assignment');
+            goBackToOrigin();
         }
-        return () => controller.abort();
-    }, [id, toast, refreshKey, goBackToOrigin]);
+    }, [assignmentError, goBackToOrigin, toast]);
+
+    useEffect(() => {
+        const rows = publisherAssignmentsResult?.data ?? [];
+        if (!formData.publisher_id) {
+            setPublisherAssignedOfferIds([]);
+            return;
+        }
+        setPublisherAssignedOfferIds(rows.map((a) => String(a.offer_id)));
+    }, [formData.publisher_id, publisherAssignmentsResult?.data]);
+
+    useEffect(() => {
+        if (!assignment) return;
+
+        setFormData({
+            offer_id: assignment.offer_id?.toString() || '',
+            publisher_id: assignment.publisher_id?.toString() || '',
+            payout_override: assignment.payout_override || '',
+            conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+            capping_type: assignment.capping_type || 'none',
+            capping_duration: assignment.capping_duration || 'daily',
+            capping_action: assignment.capping_action || 'stop',
+            fallback_type: assignment.fallback_type || 'offer',
+            fallback_url: assignment.fallback_url || '',
+            fallback_offer_id: assignment.fallback_offer_id?.toString() || '',
+            capping_amount: assignment.capping_type !== 'none' ? assignment.capping_amount : '',
+            callback_url: assignment.callback_url || '',
+            offer_url: assignment.offer_url || '',
+            notes: assignment.notes || '',
+            status: assignment.status || 'active',
+            tracking_url: '',
+        });
+
+        let cancelled = false;
+        const loadTrackingUrl = async () => {
+            try {
+                const trackingResponse = await assignmentsAPI.getTrackingUrl(id);
+                if (!cancelled && trackingResponse.success) {
+                    setFormData((prev) => ({
+                        ...prev,
+                        tracking_url: trackingResponse.data.tracking_url,
+                    }));
+                }
+            } catch (err) {
+                console.error('Error fetching tracking URL:', err);
+            }
+        };
+        loadTrackingUrl();
+        return () => {
+            cancelled = true;
+        };
+    }, [assignment, id]);
 
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }));
@@ -205,7 +160,7 @@ function EditAssignment() {
             // (assignment.id might be Public ID string)
             const targetId = assignment?.internal_id || id;
 
-            await assignmentsAPI.updateAssignment(targetId, assignmentData);
+            await updateAssignmentMutation.mutateAsync({ id: targetId, data: assignmentData });
             toast.success('Assignment updated successfully!');
             goBackToOrigin();
         } catch (error) {

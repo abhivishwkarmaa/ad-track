@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import { queryClient } from './lib/queryClient';
 import Layout from './components/Layout/Layout';
 import Login from './pages/Login/Login';
 import ForgotPassword from './pages/Login/ForgotPassword';
@@ -197,20 +199,22 @@ function App() {
   }
 
   return (
-    <Router>
-      <ThemeProvider>
-        <AuthProvider>
-          <ToastProvider>
-            <RefreshProvider>
-              <ReportTimezoneProvider>
-                <AppRoutes />
-                <RefreshButton />
-              </ReportTimezoneProvider>
-            </RefreshProvider>
-          </ToastProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </Router>
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <ThemeProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <RefreshProvider>
+                <ReportTimezoneProvider>
+                  <AppRoutes />
+                  <RefreshButton />
+                </ReportTimezoneProvider>
+              </RefreshProvider>
+            </ToastProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </Router>
+    </QueryClientProvider>
   );
 }
 

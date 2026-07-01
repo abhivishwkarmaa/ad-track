@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { publishersAPI } from '../../services/api';
+import { useCreatePublisher } from '../../hooks/queries/usePublishersQuery';
 import './Affiliate.css';
 
 const countries = [
@@ -22,6 +22,7 @@ function NewAffiliate() {
     const navigate = useNavigate();
     const { addAffiliate } = useData();
     const toast = useToast();
+    const createPublisherMutation = useCreatePublisher();
     const [loading, setLoading] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -81,7 +82,7 @@ function NewAffiliate() {
 
         try {
             const { confirmPassword, ...publisherData } = formData;
-            await publishersAPI.createPublisher(publisherData);
+            await createPublisherMutation.mutateAsync(publisherData);
             toast.success('Publisher created successfully!');
             navigate('/affiliate/manage');
         } catch (error) {

@@ -1,9 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import { assignmentsAPI } from '../../services/api';
+import {
+    useAssignmentsList,
+    useDeleteAssignment,
+    useUpdateAssignment,
+} from '../../hooks/queries/useAssignmentsQuery';
+import { useOffersList } from '../../hooks/queries/useOffersQuery';
+import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
@@ -75,12 +80,6 @@ const PlayIcon = () => (
 function ManageAssignment() {
     const toast = useToast();
     const navigate = useNavigate();
-    const { refreshKey } = useRefresh();
-    const [assignments, setAssignments] = useState([]);
-    const [offers, setOffers] = useState([]);
-    const [publishers, setPublishers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [offerFilter, setOfferFilter] = useState('all');
     const [publisherFilter, setPublisherFilter] = useState('all');
@@ -89,74 +88,31 @@ function ManageAssignment() {
     const [loadingTrackingUrls, setLoadingTrackingUrls] = useState({});
     const [deleteModal, setDeleteModal] = useState({ open: false, assignment: null });
     const [deleting, setDeleting] = useState(false);
+    const [togglingStatus, setTogglingStatus] = useState({});
 
-    // Fetch offers and publishers for filters
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
+    const { data: offersResult } = useOffersList({ limit: 100 });
+    const { data: publishersResult } = usePublishersList({ limit: 100 });
 
-        const fetchData = async () => {
-            try {
-                const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }, { signal }),
-                    publishersAPI.getPublishers({ limit: 100 }, { signal })
-                ]);
-                if (signal.aborted) return;
-                if (offersRes.success) setOffers(offersRes.data);
-                if (publishersRes.success) setPublishers(publishersRes.data);
-            } catch (err) {
-                if (!isAbortError(err)) {
-                    console.error('Error fetching filter data:', err);
-                }
-            }
-        };
-        fetchData();
-        return () => controller.abort();
-    }, []);
+    const listParams = useMemo(() => {
+        const params = { page: 1, limit: 100 };
+        if (offerFilter !== 'all') params.public_offer_id = offerFilter;
+        if (publisherFilter !== 'all') params.public_publisher_id = publisherFilter;
+        if (statusFilter !== 'all') params.status = statusFilter;
+        return params;
+    }, [offerFilter, publisherFilter, statusFilter]);
 
-    // Fetch assignments data
-    useEffect(() => {
-        const controller = new AbortController();
+    const {
+        data: assignmentsResult,
+        isLoading: loading,
+        error: queryError,
+    } = useAssignmentsList(listParams);
+    const deleteAssignmentMutation = useDeleteAssignment();
+    const updateAssignmentMutation = useUpdateAssignment();
 
-        const fetchAssignments = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-
-                if (offerFilter !== 'all') {
-                    params.public_offer_id = offerFilter;
-                }
-                if (publisherFilter !== 'all') {
-                    params.public_publisher_id = publisherFilter;
-                }
-                if (statusFilter !== 'all') {
-                    params.status = statusFilter;
-                }
-
-                const response = await assignmentsAPI.getAssignments(params, { signal: controller.signal });
-                if (response.success) {
-                    setAssignments(response.data);
-                } else {
-                    setError('Failed to load assignments');
-                }
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Assignments fetch error:', err);
-                setError(err.message || 'Failed to load assignments');
-            } finally {
-                if (controller.signal.aborted) return;
-                setLoading(false);
-            }
-        };
-
-        fetchAssignments();
-        return () => controller.abort();
-    }, [offerFilter, publisherFilter, statusFilter, refreshKey]);
+    const assignments = assignmentsResult?.data ?? [];
+    const offers = offersResult?.data ?? [];
+    const publishers = publishersResult?.data ?? [];
+    const error = queryError?.message ?? null;
 
     const filteredAssignments = assignments.filter(assignment => {
         const matchesSearch =
@@ -210,35 +166,9 @@ function ManageAssignment() {
 
         try {
             setDeleting(true);
-            const response = await assignmentsAPI.deleteAssignment(deleteModal.assignment.id);
-
-            if (response.success) {
-                toast.success('Assignment deleted successfully');
-
-                // Update local state immediately
-                setAssignments(prev => prev.filter(a => a.id !== deleteModal.assignment.id));
-
-                setDeleteModal({ open: false, assignment: null });
-
-                // Refresh assignments list to ensure consistency
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-                if (offerFilter !== 'all') params.offer_id = offerFilter;
-                if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
-                if (statusFilter !== 'all') params.status = statusFilter;
-
-                // We can fetch in background without blocking
-                assignmentsAPI.getAssignments(params).then(refreshResponse => {
-                    if (refreshResponse.success) {
-                        setAssignments(refreshResponse.data);
-                    }
-                }).catch(err => console.error('Background refresh failed:', err));
-
-            } else {
-                toast.error(response.message || 'Failed to delete assignment');
-            }
+            await deleteAssignmentMutation.mutateAsync(deleteModal.assignment.id);
+            toast.success('Assignment deleted successfully');
+            setDeleteModal({ open: false, assignment: null });
         } catch (err) {
             console.error('Delete assignment error:', err);
             toast.error('Failed to delete assignment');
@@ -247,28 +177,20 @@ function ManageAssignment() {
         }
     };
 
-    const [togglingStatus, setTogglingStatus] = useState({});
-
     const handleToggleStatus = async (assignment) => {
         const newStatus = assignment.status === 'active' ? 'inactive' : 'active';
         try {
-            setTogglingStatus(prev => ({ ...prev, [assignment.id]: true }));
-            const response = await assignmentsAPI.updateAssignment(assignment.id, { status: newStatus });
-
-            if (response.success) {
-                toast.success(`Assignment ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
-                // Update local state
-                setAssignments(prev => prev.map(a =>
-                    a.id === assignment.id ? { ...a, status: newStatus } : a
-                ));
-            } else {
-                toast.error(response.message || 'Failed to update status');
-            }
+            setTogglingStatus((prev) => ({ ...prev, [assignment.id]: true }));
+            await updateAssignmentMutation.mutateAsync({
+                id: assignment.id,
+                data: { status: newStatus },
+            });
+            toast.success(`Assignment ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
         } catch (err) {
             console.error('Update status error:', err);
             toast.error('Failed to update status');
         } finally {
-            setTogglingStatus(prev => ({ ...prev, [assignment.id]: false }));
+            setTogglingStatus((prev) => ({ ...prev, [assignment.id]: false }));
         }
     };
 

@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { offersAPI, publishersAPI, assignmentsAPI } from '../../services/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { offersAPI } from '../../services/api';
 import { isAbortError } from '../../hooks/useAbortableRequest';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
+import { useOfferDetail, useOffersList, useOfferAssignments, useOfferStats, useOfferPublisherStats } from '../../hooks/queries/useOffersQuery';
+import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
+import {
+    useCreateOrUpdateAssignments,
+    useAssignmentsTrackingUrls,
+    getAssignmentTrackingUrlQueryOptions,
+} from '../../hooks/queries/useAssignmentsQuery';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateTimeInTimeZone, parseDate } from '../../utils/dateTime';
@@ -164,26 +171,31 @@ function OfferDetail() {
     const navigate = useNavigate();
     const location = useLocation();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
-    const { reportTimezone, timezoneRevision } = useReportTimezone();
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [offer, setOffer] = useState(null);
-    const [publishers, setPublishers] = useState([]);
-    const [loadingPublishers, setLoadingPublishers] = useState(false);
-    const [offers, setOffers] = useState([]);
-    const [, setAssignments] = useState([]);
-    const [loadingAssignments, setLoadingAssignments] = useState(false);
+    const queryClient = useQueryClient();
+    const { reportTimezone } = useReportTimezone();
+    const createOrUpdateAssignmentsMutation = useCreateOrUpdateAssignments();
+
+    const {
+        data: offer,
+        isLoading: loading,
+        error: offerQueryError,
+    } = useOfferDetail(id);
+    const { data: publishersResult, isLoading: loadingPublishers } = usePublishersList({ status: 'active', limit: 100 });
+    const { data: offersResult } = useOffersList({ limit: 100 });
+    const {
+        data: assignmentRows = [],
+        isLoading: loadingAssignments,
+        refetch: refetchAssignments,
+    } = useOfferAssignments(id, { enabled: Boolean(id) });
+
+    const publishers = publishersResult?.data ?? [];
+    const offers = offersResult?.data ?? [];
+    const error = offerQueryError?.message ?? null;
+
     const [publisherAssignments, setPublisherAssignments] = useState([]);
     const [editingAssignmentIndex, setEditingAssignmentIndex] = useState(null);
     const [savingAssignments, setSavingAssignments] = useState(false);
-    const [loadingTrackingUrls, setLoadingTrackingUrls] = useState({});
 
-    // New states for granular data
-    const [stats, setStats] = useState(null);
-    const [loadingStats, setLoadingStats] = useState(false);
-    const [publisherStats, setPublisherStats] = useState([]);
-    const [loadingPublisherStats, setLoadingPublisherStats] = useState(false);
     const [selectedRange, setSelectedRange] = useState('today');
     const [customRange, setCustomRange] = useState({ from: '', to: '' });
     const [copiedId, setCopiedId] = useState(null); // Feedback state for copy button
@@ -193,8 +205,6 @@ function OfferDetail() {
     const [searchLoading, setSearchLoading] = useState(false);
     const [showSearchResults, setShowSearchResults] = useState(false);
     const searchContainerRef = useRef(null);
-    const statsRequestRef = useRef(0);
-    const publisherStatsRequestRef = useRef(0);
     const selectedTimelineRange = useMemo(() => {
         if (selectedRange === 'since_created') {
             const toUserYmd = formatYmdInTimeZone(new Date(), reportTimezone);
@@ -254,111 +264,62 @@ function OfferDetail() {
         return buildDashboardApiParams(base, reportTimezone);
     }, [statsApiRange.date_from, statsApiRange.date_to, statsUtcRange, reportTimezone]);
 
+    const statsQueryEnabled = Boolean(id) && !(
+        selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)
+    );
+
+    const { data: stats = null, isLoading: loadingStats } = useOfferStats(
+        id,
+        offerStatsQueryParams,
+        { enabled: statsQueryEnabled }
+    );
+    const { data: publisherStats = [], isLoading: loadingPublisherStats } = useOfferPublisherStats(
+        id,
+        offerStatsQueryParams,
+        { enabled: statsQueryEnabled }
+    );
+
+    const trackingUrlParams = useMemo(
+        () => ({ for_offer_public_id: id }),
+        [id]
+    );
+    const assignmentIdsForTracking = useMemo(
+        () => publisherAssignments.map((assignment) => assignment.assignment_id).filter(Boolean),
+        [publisherAssignments]
+    );
+    const { byAssignmentId: trackingUrlByAssignmentId, loadingByAssignmentId: loadingTrackingUrls } =
+        useAssignmentsTrackingUrls(assignmentIdsForTracking, trackingUrlParams, { enabled: Boolean(id) });
+
+    const resolveAssignmentTrackingUrl = (assignment) =>
+        trackingUrlByAssignmentId[assignment.assignment_id] ?? assignment.tracking_url ?? '';
+
     useEffect(() => {
-        if (!id) return undefined;
-
-        const controller = new AbortController();
-
-        const fetchOfferDetails = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                const response = await offersAPI.getOffer(id, { signal: controller.signal });
-                if (response.success && response.data) {
-                    setOffer(response.data);
-                } else {
-                    setError('Offer not found');
-                }
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Fetch offer error:', err);
-                setError(err.message || 'Failed to load offer details');
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            }
-        };
-
-        fetchOfferDetails();
-        return () => controller.abort();
-    }, [id, refreshKey]);
-
-    useEffect(() => {
-        if (!id) return;
-        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
-            setStats(null);
-            return;
+        if (!id || !assignmentRows.length) {
+            setPublisherAssignments([]);
+            return undefined;
         }
 
-        const controller = new AbortController();
-        const timer = setTimeout(async () => {
-            const requestId = ++statsRequestRef.current;
-            try {
-                setLoadingStats(true);
-                setStats(null);
+        const initialAssignments = assignmentRows.map((assignment) => ({
+            offer_id: assignment.offer_id?.toString() || '',
+            publisher_id: assignment.publisher_id,
+            publisher_email: assignment.publisher_email,
+            payout_override: assignment.payout_override ?? null,
+            conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+            capping_type: assignment.capping_type || 'none',
+            capping_duration: assignment.capping_duration || 'daily',
+            capping_amount: assignment.capping_amount || '',
+            capping_action: assignment.capping_action || 'stop',
+            callback_url: assignment.callback_url || '',
+            offer_url: assignment.destination_url || assignment.offer_url || '',
+            notes: assignment.notes || '',
+            status: assignment.status || 'active',
+            assignment_id: assignment.id,
+            tracking_url: '',
+            selectedTokens: [],
+        }));
 
-                const response = await offersAPI.getOfferStats(id, offerStatsQueryParams, { signal: controller.signal });
-
-                if (requestId !== statsRequestRef.current || controller.signal.aborted) return;
-                if (response.success) {
-                    setStats(response.data || null);
-                } else {
-                    setStats(null);
-                }
-            } catch (statsError) {
-                if (requestId !== statsRequestRef.current || isAbortError(statsError)) return;
-                console.error('Error fetching offer stats:', statsError);
-                setStats(null);
-            } finally {
-                if (requestId === statsRequestRef.current && !controller.signal.aborted) {
-                    setLoadingStats(false);
-                }
-            }
-        }, 250);
-
-        return () => {
-            clearTimeout(timer);
-            controller.abort();
-        };
-    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
-
-    useEffect(() => {
-        if (!id) return;
-        if (selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)) {
-            setPublisherStats([]);
-            return;
-        }
-
-        const controller = new AbortController();
-        const timer = setTimeout(async () => {
-            const requestId = ++publisherStatsRequestRef.current;
-            try {
-                setLoadingPublisherStats(true);
-                const response = await offersAPI.getOfferPublisherStats(id, offerStatsQueryParams, { signal: controller.signal });
-
-                if (requestId !== publisherStatsRequestRef.current || controller.signal.aborted) return;
-                if (response.success) {
-                    setPublisherStats(Array.isArray(response.data) ? response.data : []);
-                } else {
-                    setPublisherStats([]);
-                }
-            } catch (publisherStatsError) {
-                if (requestId !== publisherStatsRequestRef.current || isAbortError(publisherStatsError)) return;
-                console.error('Error fetching offer publisher stats:', publisherStatsError);
-                setPublisherStats([]);
-            } finally {
-                if (requestId === publisherStatsRequestRef.current && !controller.signal.aborted) {
-                    setLoadingPublisherStats(false);
-                }
-            }
-        }, 250);
-
-        return () => {
-            clearTimeout(timer);
-            controller.abort();
-        };
-    }, [id, refreshKey, selectedRange, offerStatsQueryParams, reportTimezone, timezoneRevision]);
+        setPublisherAssignments(initialAssignments);
+    }, [id, assignmentRows]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -417,108 +378,6 @@ function OfferDetail() {
         return () => document.removeEventListener('mousedown', onDocumentClick);
     }, []);
 
-    // Fetch publishers
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchPublishers = async () => {
-            try {
-                setLoadingPublishers(true);
-                const [publishersRes, offersRes] = await Promise.all([
-                    publishersAPI.getPublishers({ status: 'active', limit: 100 }, { signal }),
-                    offersAPI.getOffers({ limit: 100 }, { signal })
-                ]);
-                if (signal.aborted) return;
-                if (publishersRes.success && publishersRes.data) {
-                    setPublishers(publishersRes.data);
-                }
-                if (offersRes.success && Array.isArray(offersRes.data)) {
-                    setOffers(offersRes.data);
-                }
-            } catch (error) {
-                if (isAbortError(error)) return;
-                console.error('Error fetching publishers or offers:', error);
-                toast.error('Failed to load publishers or offers');
-            } finally {
-                if (!signal.aborted) {
-                    setLoadingPublishers(false);
-                }
-            }
-        };
-
-        fetchPublishers();
-        return () => controller.abort();
-    }, [toast, refreshKey]);
-
-    // Fetch assignments for this offer only (use offer-specific endpoint so we only get this offer's assignments and correct tracking URLs)
-    useEffect(() => {
-        if (!id) return undefined;
-
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchAssignments = async () => {
-            try {
-                setLoadingAssignments(true);
-                const response = await offersAPI.getOfferAssignments(id, { signal });
-                if (signal.aborted) return;
-                if (response.success && response.data) {
-                    setAssignments(response.data);
-                    const initialAssignments = await Promise.all(
-                        response.data.map(async (assignment) => {
-                            if (signal.aborted) return null;
-                            let trackingUrl = '';
-                            if (assignment.id) {
-                                try {
-                                    const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
-                                    if (trackingResponse.success) {
-                                        trackingUrl = trackingResponse.data.tracking_url;
-                                    }
-                                } catch (error) {
-                                    if (!isAbortError(error)) {
-                                        console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
-                                    }
-                                }
-                            }
-                            return {
-                                offer_id: assignment.offer_id?.toString() || '',
-                                publisher_id: assignment.publisher_id,
-                                publisher_email: assignment.publisher_email,
-                                payout_override: assignment.payout_override ?? null,
-                                conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                capping_type: assignment.capping_type || 'none',
-                                capping_duration: assignment.capping_duration || 'daily',
-                                capping_amount: assignment.capping_amount || '',
-                                capping_action: assignment.capping_action || 'stop',
-                                callback_url: assignment.callback_url || '',
-                                offer_url: assignment.destination_url || assignment.offer_url || '',
-                                notes: assignment.notes || '',
-                                status: assignment.status || 'active',
-                                assignment_id: assignment.id,
-                                tracking_url: trackingUrl,
-                                selectedTokens: []
-                            };
-                        })
-                    );
-                    if (!signal.aborted) {
-                        setPublisherAssignments(initialAssignments.filter(Boolean));
-                    }
-                }
-            } catch (error) {
-                if (isAbortError(error)) return;
-                console.error('Error fetching assignments:', error);
-                toast.error('Failed to load assignments');
-            } finally {
-                if (!signal.aborted) {
-                    setLoadingAssignments(false);
-                }
-            }
-        };
-
-        fetchAssignments();
-        return () => controller.abort();
-    }, [id, toast, refreshKey]);
 
     if (loading) {
         return (
@@ -1354,15 +1213,15 @@ function OfferDetail() {
                                         {assignment.assignment_id ? (
                                             loadingTrackingUrls[assignment.assignment_id] ? (
                                                 <div className="url-skeleton"></div>
-                                            ) : assignment.tracking_url ? (
+                                            ) : resolveAssignmentTrackingUrl(assignment) ? (
                                                 <div className={`tracking-url-wrapper has-url`}>
                                                     <div className="tracking-url-display">
-                                                        {assignment.tracking_url}
+                                                        {resolveAssignmentTrackingUrl(assignment)}
                                                     </div>
                                                     <button
                                                         className={`copy-btn ${copiedId === assignmentId ? 'copied' : ''}`}
                                                         onClick={async () => {
-                                                            const result = await safeCopyToClipboard(assignment.tracking_url);
+                                                            const result = await safeCopyToClipboard(resolveAssignmentTrackingUrl(assignment));
                                                             if (result.success) {
                                                                 setCopiedId(assignmentId);
                                                                 setTimeout(() => setCopiedId(null), 2000);
@@ -1386,7 +1245,7 @@ function OfferDetail() {
                                                     </button>
                                                     <button
                                                         className="copy-btn generate"
-                                                        onClick={() => window.open(assignment.tracking_url, '_blank')}
+                                                        onClick={() => window.open(resolveAssignmentTrackingUrl(assignment), '_blank')}
                                                         title="Open Tracking Link"
                                                         style={{ marginLeft: '8px' }}
                                                     >
@@ -1399,18 +1258,15 @@ function OfferDetail() {
                                                     className="copy-btn generate"
                                                     onClick={async () => {
                                                         try {
-                                                            setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: true }));
-                                                            const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id, { for_offer_public_id: id });
-                                                            if (trackingResponse.success && trackingResponse.data) {
-                                                                const updated = [...publisherAssignments];
-                                                                updated[index].tracking_url = trackingResponse.data.tracking_url;
-                                                                setPublisherAssignments(updated);
-                                                            }
+                                                            await queryClient.fetchQuery(
+                                                                getAssignmentTrackingUrlQueryOptions(
+                                                                    assignment.assignment_id,
+                                                                    trackingUrlParams
+                                                                )
+                                                            );
                                                         } catch (error) {
                                                             console.error(error);
                                                             toast.error('Failed to generate link');
-                                                        } finally {
-                                                            setLoadingTrackingUrls(prev => ({ ...prev, [assignment.assignment_id]: false }));
                                                         }
                                                     }}
                                                 >
@@ -1431,7 +1287,10 @@ function OfferDetail() {
                                             className="icon-btn"
                                             onClick={async () => {
                                                 try {
-                                                    const text = buildAssignmentShareText(offer, assignment);
+                                                    const text = buildAssignmentShareText(offer, {
+                                                        ...assignment,
+                                                        tracking_url: resolveAssignmentTrackingUrl(assignment),
+                                                    });
                                                     const result = await safeCopyToClipboard(text);
 
                                                     if (navigator?.share) {
@@ -1528,51 +1387,10 @@ function OfferDetail() {
                                         }))
                                     };
 
-                                    await assignmentsAPI.createOrUpdateAssignments(assignmentData);
+                                    await createOrUpdateAssignmentsMutation.mutateAsync(assignmentData);
                                     toast.success('Assignments saved successfully!');
                                     setEditingAssignmentIndex(null);
-
-                                    // Reload assignments for this offer only (same endpoint as initial load)
-                                    const response = await offersAPI.getOfferAssignments(id);
-                                    if (response.success && response.data) {
-                                        setAssignments(response.data);
-
-                                        const updatedAssignments = await Promise.all(
-                                            response.data.map(async (assignment) => {
-                                                let trackingUrl = '';
-                                                if (assignment.id) {
-                                                    try {
-                                                        // assignment.id is the public assignment id returned by the backend formatAssignment
-                                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.id, { for_offer_public_id: id });
-                                                        if (trackingResponse.success) {
-                                                            trackingUrl = trackingResponse.data.tracking_url;
-                                                        }
-                                                    } catch (error) {
-                                                        console.error(`Error fetching tracking URL for assignment ${assignment.id}:`, error);
-                                                    }
-                                                }
-                                                return {
-                                                    offer_id: assignment.offer_id?.toString() || id?.toString(),
-                                                    publisher_id: assignment.publisher_id,
-                                                    publisher_email: assignment.publisher_email,
-                                                    payout_override: assignment.payout_override ?? null,
-                                                    conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                                                    capping_type: assignment.capping_type || 'none',
-                                                    capping_duration: assignment.capping_duration || 'daily',
-                                                    capping_amount: assignment.capping_amount || '',
-                                                    capping_action: assignment.capping_action || 'stop',
-                                                    callback_url: assignment.callback_url || '',
-                                                    offer_url: assignment.destination_url || assignment.offer_url || '',
-                                                    notes: assignment.notes || '',
-                                                    status: assignment.status || 'active',
-                                                    assignment_id: assignment.id,
-                                                    tracking_url: trackingUrl,
-                                                    selectedTokens: []
-                                                };
-                                            })
-                                        );
-                                        setPublisherAssignments(updatedAssignments);
-                                    }
+                                    await refetchAssignments();
                                 } catch (error) {
                                     console.error('Error saving assignments:', error);
                                     toast.error(error.message || 'Failed to save assignments');

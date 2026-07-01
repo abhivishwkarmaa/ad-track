@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { advertisersAPI } from '../../services/api';
+import { useCreateAdvertiser } from '../../hooks/queries/useAdvertisersQuery';
 import './Advertiser.css';
 
 const countries = [
@@ -33,6 +33,7 @@ function NewAdvertiser() {
     const navigate = useNavigate();
     const { addAdvertiser } = useData();
     const toast = useToast();
+    const createAdvertiserMutation = useCreateAdvertiser();
     const [loading, setLoading] = useState(false);
 
     const [showCustomCountry, setShowCustomCountry] = useState(false);
@@ -86,7 +87,7 @@ function NewAdvertiser() {
         setLoading(true);
 
         try {
-            await advertisersAPI.createAdvertiser(formData);
+            await createAdvertiserMutation.mutateAsync(formData);
             toast.success('Advertiser created successfully!');
             navigate('/advertiser/manage');
         } catch (error) {

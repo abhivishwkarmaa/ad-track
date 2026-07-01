@@ -1,8 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { offersAPI, advertisersAPI, assignmentsAPI, publishersAPI } from '../../services/api';
+import {
+    useOfferDetail,
+    useOffersList,
+    useUpdateOffer,
+} from '../../hooks/queries/useOffersQuery';
+import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
+import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
+import { useAssignmentsList } from '../../hooks/queries/useAssignmentsQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { OFFER_COUNTRIES } from '../../utils/countries';
@@ -256,15 +262,8 @@ function EditOffer() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const updateOfferMutation = useUpdateOffer();
     const [loading, setLoading] = useState(false);
-    const [loadingOffer, setLoadingOffer] = useState(true);
-    const [advertisers, setAdvertisers] = useState([]);
-    const [loadingAdvertisers, setLoadingAdvertisers] = useState(false);
-    const [publishers, setPublishers] = useState([]);
-    const [loadingPublishers, setLoadingPublishers] = useState(false);
-    const [assignments, setAssignments] = useState([]);
-    const [loadingAssignments, setLoadingAssignments] = useState(false);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
@@ -272,9 +271,25 @@ function EditOffer() {
     const [showMacrosInfo, setShowMacrosInfo] = useState(false);
     const [tokenMappings, setTokenMappings] = useState([]);
 
-    // Offers for Fallback
-    const [offers, setOffers] = useState([]);
-    const [loadingOffers, setLoadingOffers] = useState(false);
+    const { data: offer, isLoading: loadingOffer, error: offerError } = useOfferDetail(id);
+    const { data: advertisersResult, isLoading: loadingAdvertisers } = useAdvertisersList({ status: 'active', limit: 100 });
+    const { data: publishersResult, isLoading: loadingPublishers } = usePublishersList({ status: 'active', limit: 100 });
+    const { data: offersResult, isLoading: loadingOffers } = useOffersList({ limit: 1000 });
+    const { data: assignmentsResult, isLoading: loadingAssignments } = useAssignmentsList(
+        { offer_id: id },
+        { enabled: Boolean(id) }
+    );
+
+    const advertisers = advertisersResult?.data ?? [];
+    const publishers = publishersResult?.data ?? [];
+    const assignments = assignmentsResult?.data ?? [];
+    const offers = useMemo(() => {
+        const allOffers = offersResult?.data ?? [];
+        return allOffers.filter((o) => {
+            const publicId = o.public_offer_id ?? o.display_id ?? o.id;
+            return String(publicId) !== String(id);
+        });
+    }, [offersResult?.data, id]);
 
     // Section states - matching original website
     const [openSections, setOpenSections] = useState({
@@ -327,246 +342,125 @@ function EditOffer() {
         fallback_offer_id: ''
     });
 
-    // Fetch advertisers and offers from API
     useEffect(() => {
-        const fetchAdvertisers = async () => {
-            try {
-                setLoadingAdvertisers(true);
-                const response = await advertisersAPI.getAdvertisers({ status: 'active', limit: 100 });
-                if (response.success && response.data) {
-                    setAdvertisers(response.data);
-                }
-            } catch (error) {
-                console.error('Error fetching advertisers:', error);
-                toast.error('Failed to load advertisers');
-            } finally {
-                setLoadingAdvertisers(false);
-            }
-        };
-
-        const fetchOffers = async () => {
-            try {
-                setLoadingOffers(true);
-                // Fetch basic offer list for fallback dropdown
-                const response = await offersAPI.getOffers({ limit: 1000 });
-                if (response.success && response.data && Array.isArray(response.data)) {
-                    // Filter out current offer to avoid recursion loop.
-                    // Compare against public identity (public_offer_id or display_id) since route id may be public.
-                    const otherOffers = response.data.filter(o => {
-                        const publicId = o.public_offer_id ?? o.display_id ?? o.id;
-                        return String(publicId) !== String(id);
-                    });
-                    setOffers(otherOffers);
-                }
-            } catch (error) {
-                console.error('Error fetching offers:', error);
-            } finally {
-                setLoadingOffers(false);
-            }
+        if (!assignments.length) {
+            setPublisherAssignments([]);
+            return;
         }
 
-        fetchAdvertisers();
-        fetchOffers();
-    }, [id, toast, refreshKey]);
+        const initialAssignments = assignments.map((assignment) => ({
+            publisher_id: assignment.publisher_id,
+            publisher_email: assignment.publisher_email,
+            payout_override: assignment.payout_override || '',
+            conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+            capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
+            capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
+            callback_url: assignment.callback_url || '',
+            offer_url: assignment.offer_url || '',
+            notes: assignment.notes || '',
+            status: assignment.status || 'active',
+            assignment_id: assignment.id,
+            tracking_url: '',
+            selectedTokens: [],
+        }));
+        setPublisherAssignments(initialAssignments);
+    }, [assignments]);
 
-    // Fetch publishers from API
     useEffect(() => {
-        const fetchPublishers = async () => {
-            try {
-                setLoadingPublishers(true);
-                const response = await publishersAPI.getPublishers({ status: 'active', limit: 100 });
-                if (response.success && response.data) {
-                    setPublishers(response.data);
-                }
-            } catch (error) {
-                console.error('Error fetching publishers:', error);
-                toast.error('Failed to load publishers');
-            } finally {
-                setLoadingPublishers(false);
-            }
-        };
-
-        fetchPublishers();
-    }, [toast, refreshKey]);
-
-    // Fetch assignments for this offer
-    useEffect(() => {
-        const fetchAssignments = async () => {
-            if (!id) return;
-            try {
-                setLoadingAssignments(true);
-                const response = await assignmentsAPI.getAssignments({ offer_id: id });
-                if (response.success && response.data) {
-                    setAssignments(response.data);
-                    // Initialize publisher assignments from existing assignments
-                    const initialAssignments = response.data.map(assignment => ({
-                        publisher_id: assignment.publisher_id,
-                        publisher_email: assignment.publisher_email,
-                        payout_override: assignment.payout_override || '',
-                        conversion_approval_percentage: assignment.conversion_approval_percentage || '',
-                        capping_budget: assignment.capping_budget || { duration: 'day', amount: '' },
-                        capping_conversions: assignment.capping_conversions || { duration: 'day', amount: '' },
-                        callback_url: assignment.callback_url || '',
-                        offer_url: assignment.offer_url || '',
-                        notes: assignment.notes || '',
-                        status: assignment.status || 'active',
-                        assignment_id: assignment.id, // Keep track of existing assignment ID
-                        tracking_url: '', // Initialize tracking URL
-                        selectedTokens: [] // Initialize selected tokens
-                    }));
-                    setPublisherAssignments(initialAssignments);
-
-                    // Automatically fetch tracking URLs for all assignments
-                    const fetchTrackingUrls = async () => {
-                        const updatedAssignments = await Promise.all(
-                            initialAssignments.map(async (assignment) => {
-                                if (assignment.assignment_id) {
-                                    try {
-                                        const trackingResponse = await assignmentsAPI.getTrackingUrl(assignment.assignment_id);
-                                        if (trackingResponse.success) {
-                                            return {
-                                                ...assignment,
-                                                tracking_url: trackingResponse.data.tracking_url
-                                            };
-                                        }
-                                    } catch (error) {
-                                        console.error(`Error fetching tracking URL for assignment ${assignment.assignment_id}:`, error);
-                                    }
-                                }
-                                return assignment;
-                            })
-                        );
-                        setPublisherAssignments(updatedAssignments);
-                    };
-
-                    fetchTrackingUrls();
-                }
-            } catch (error) {
-                console.error('Error fetching assignments:', error);
-            } finally {
-                setLoadingAssignments(false);
-            }
-        };
-
-        fetchAssignments();
-    }, [id, toast, refreshKey]);
-
-    // Load offer data from API
-    useEffect(() => {
-        const fetchOffer = async () => {
-            try {
-                setLoadingOffer(true);
-                const response = await offersAPI.getOffer(id);
-                if (response.success && response.data) {
-                    const offer = response.data;
-                    // Parse JSON fields if they exist
-                    const deviceTargeting = offer.device_targeting_json ? (typeof offer.device_targeting_json === 'string' ? JSON.parse(offer.device_targeting_json) : offer.device_targeting_json) : {};
-                    const osTargeting = offer.os_targeting_json ? (typeof offer.os_targeting_json === 'string' ? JSON.parse(offer.os_targeting_json) : offer.os_targeting_json) : {};
-                    const browserTargeting = offer.browser_targeting_json ? (typeof offer.browser_targeting_json === 'string' ? JSON.parse(offer.browser_targeting_json) : offer.browser_targeting_json) : {};
-                    const macrosJson = offer.macros_json ? (typeof offer.macros_json === 'string' ? JSON.parse(offer.macros_json) : offer.macros_json) : {};
-
-                    setFormData(prev => ({
-                        ...prev,
-                        offerId: `o${String(id).padStart(4, '0')}`,
-                        name: offer.name || '',
-                        description: offer.description || '',
-                        offer_currency: offer.offer_currency || 'USD',
-                        country: offer.country || 'US',
-                        timezone: offer.timezone || '(GMT+05:30) Mumbai, Chennai, Kolkata',
-                        advertiser_id: offer.advertiser_id?.toString() || '',
-                        category: offer.category || '',
-                        advertiser_model: offer.advertiser_model || 'CPA',
-                        advertiser_amount: offer.advertiser_amount || '',
-                        affiliate_model: offer.affiliate_model || 'CPA',
-                        affiliate_amount: offer.affiliate_amount || '',
-                        offer_url: offer.offer_url || '',
-                        preview_url: offer.preview_url || '',
-                        billing_flow: offer.billing_flow || '',
-                        carrier_name: offer.carrier_name || '',
-                        billing_type: offer.billing_type || '',
-                        token_type: offer.token_type || '',
-                        offer_visibility: offer.offer_visibility || 'PUBLIC',
-                        status: offer.status || 'draft',
-                        start_date: offer.start_date ? offer.start_date.split('T')[0] : '',
-                        start_time: offer.start_time || '00:00:00',
-                        end_date: offer.end_date ? offer.end_date.split('T')[0] : '',
-                        end_time: offer.end_time || '23:59:59',
-
-                        ip_action: offer.ip_action?.toUpperCase() || 'ALLOW',
-                        ip_list: offer.ip_list || '',
-                        country_action: offer.country_action?.toUpperCase() || 'ALLOW',
-                        country_list: offer.country_list || '',
-                        device_targeting: deviceTargeting.device || [],
-                        os_targeting: osTargeting.os || [],
-                        browser_targeting: browserTargeting.browser || [],
-                        device_action: offer.device_action?.toUpperCase() || 'ALLOW',
-                        os_action: offer.os_action?.toUpperCase() || 'ALLOW',
-                        browser_action: offer.browser_action?.toUpperCase() || 'ALLOW',
-
-                        // Capping (Unified)
-                        capping_type: offer.capping_type || 'none',
-                        capping_duration: offer.capping_duration || 'daily',
-                        capping_action: offer.capping_action || 'stop',
-                        capping_amount: offer.capping_type === 'budget'
-                            ? (offer.budget_cap != null && offer.budget_cap !== '' ? offer.budget_cap : '')
-                            : offer.capping_type === 'conversion'
-                                ? (offer.conversion_cap != null && offer.conversion_cap !== '' ? offer.conversion_cap : '')
-                                : '',
-
-                        // Fallback
-                        fallback_type: offer.fallback_type || 'offer',
-                        fallback_url: offer.fallback_url || '',
-                        fallback_offer_id: offer.fallback_offer_id?.toString() || '',
-                        fallback_enabled: (offer.capping_action === 'fallback' || offer.fallback_enabled) ? 1 : 0,
-
-                        // Legacy UI State (Keep for safe rendering if needed)
-                        fallbackType: offer.fallback_url ? 'url' : (offer.fallback_offer_id ? 'offer' : 'url'),
-                        // Capping fields
-                        globalCapping: 'none',
-                        globalCappingValue: '',
-                        globalCappingPeriod: 'Daily',
-                        affiliateCapping: 'none',
-                        affiliateCappingValue: '',
-                        affiliateCappingPeriod: 'Daily',
-                        dailyClickCap: offer.daily_cap || '',
-                        dailyConversionCap: offer.conversion_cap || '',
-                        totalClickCap: offer.total_cap || '',
-                        totalConversionCap: '',
-                        sendEmailOnCap: false,
-                        capEmailRecipients: '',
-                        // Advertiser Postback
-                        advertiserPostbackEnabled: !!(offer.advertiser_postback_url),
-                        advertiserPostbackUrl: offer.advertiser_postback_url || '',
-                        advertiserPostbackMethod: offer.advertiser_postback_method || 'GET',
-                        advertiserPostbackEvents: ['conversion'],
-                        // Postback
-                        globalPostbackUrl: offer.system_postback_url || '',
-                        postbackMethod: offer.system_postback_method || 'GET',
-                        postbackEvents: ['conversion']
-                    }));
-
-                    // Check if country is custom
-                    const isStandardCountry = OFFER_COUNTRIES.some(c => c.code === (offer.country || 'US'));
-                    if (!isStandardCountry && offer.country) {
-                        setShowCustomCountry(true);
-                    }
-                } else {
-                    toast.error('Offer not found');
-                    navigate('/offer/list');
-                }
-            } catch (error) {
-                console.error('Error fetching offer:', error);
-                toast.error('Failed to load offer');
-                navigate('/offer/list');
-            } finally {
-                setLoadingOffer(false);
-            }
-        };
-
-        if (id) {
-            fetchOffer();
+        if (offerError) {
+            toast.error('Failed to load offer');
+            navigate('/offer/list');
         }
-    }, [id, navigate, toast, refreshKey]);
+    }, [offerError, navigate, toast]);
+
+    useEffect(() => {
+        if (!offer) return;
+
+        const deviceTargeting = offer.device_targeting_json
+            ? (typeof offer.device_targeting_json === 'string' ? JSON.parse(offer.device_targeting_json) : offer.device_targeting_json)
+            : {};
+        const osTargeting = offer.os_targeting_json
+            ? (typeof offer.os_targeting_json === 'string' ? JSON.parse(offer.os_targeting_json) : offer.os_targeting_json)
+            : {};
+        const browserTargeting = offer.browser_targeting_json
+            ? (typeof offer.browser_targeting_json === 'string' ? JSON.parse(offer.browser_targeting_json) : offer.browser_targeting_json)
+            : {};
+
+        setFormData((prev) => ({
+            ...prev,
+            offerId: `o${String(id).padStart(4, '0')}`,
+            name: offer.name || '',
+            description: offer.description || '',
+            offer_currency: offer.offer_currency || 'USD',
+            country: offer.country || 'US',
+            timezone: offer.timezone || '(GMT+05:30) Mumbai, Chennai, Kolkata',
+            advertiser_id: offer.advertiser_id?.toString() || '',
+            category: offer.category || '',
+            advertiser_model: offer.advertiser_model || 'CPA',
+            advertiser_amount: offer.advertiser_amount || '',
+            affiliate_model: offer.affiliate_model || 'CPA',
+            affiliate_amount: offer.affiliate_amount || '',
+            offer_url: offer.offer_url || '',
+            preview_url: offer.preview_url || '',
+            billing_flow: offer.billing_flow || '',
+            carrier_name: offer.carrier_name || '',
+            billing_type: offer.billing_type || '',
+            token_type: offer.token_type || '',
+            offer_visibility: offer.offer_visibility || 'PUBLIC',
+            status: offer.status || 'draft',
+            start_date: offer.start_date ? offer.start_date.split('T')[0] : '',
+            start_time: offer.start_time || '00:00:00',
+            end_date: offer.end_date ? offer.end_date.split('T')[0] : '',
+            end_time: offer.end_time || '23:59:59',
+            ip_action: offer.ip_action?.toUpperCase() || 'ALLOW',
+            ip_list: offer.ip_list || '',
+            country_action: offer.country_action?.toUpperCase() || 'ALLOW',
+            country_list: offer.country_list || '',
+            device_targeting: deviceTargeting.device || [],
+            os_targeting: osTargeting.os || [],
+            browser_targeting: browserTargeting.browser || [],
+            device_action: offer.device_action?.toUpperCase() || 'ALLOW',
+            os_action: offer.os_action?.toUpperCase() || 'ALLOW',
+            browser_action: offer.browser_action?.toUpperCase() || 'ALLOW',
+            capping_type: offer.capping_type || 'none',
+            capping_duration: offer.capping_duration || 'daily',
+            capping_action: offer.capping_action || 'stop',
+            capping_amount: offer.capping_type === 'budget'
+                ? (offer.budget_cap != null && offer.budget_cap !== '' ? offer.budget_cap : '')
+                : offer.capping_type === 'conversion'
+                    ? (offer.conversion_cap != null && offer.conversion_cap !== '' ? offer.conversion_cap : '')
+                    : '',
+            fallback_type: offer.fallback_type || 'offer',
+            fallback_url: offer.fallback_url || '',
+            fallback_offer_id: offer.fallback_offer_id?.toString() || '',
+            fallback_enabled: (offer.capping_action === 'fallback' || offer.fallback_enabled) ? 1 : 0,
+            fallbackType: offer.fallback_url ? 'url' : (offer.fallback_offer_id ? 'offer' : 'url'),
+            globalCapping: 'none',
+            globalCappingValue: '',
+            globalCappingPeriod: 'Daily',
+            affiliateCapping: 'none',
+            affiliateCappingValue: '',
+            affiliateCappingPeriod: 'Daily',
+            dailyClickCap: offer.daily_cap || '',
+            dailyConversionCap: offer.conversion_cap || '',
+            totalClickCap: offer.total_cap || '',
+            totalConversionCap: '',
+            sendEmailOnCap: false,
+            capEmailRecipients: '',
+            advertiserPostbackEnabled: !!(offer.advertiser_postback_url),
+            advertiserPostbackUrl: offer.advertiser_postback_url || '',
+            advertiserPostbackMethod: offer.advertiser_postback_method || 'GET',
+            advertiserPostbackEvents: ['conversion'],
+            globalPostbackUrl: offer.system_postback_url || '',
+            postbackMethod: offer.system_postback_method || 'GET',
+            postbackEvents: ['conversion'],
+        }));
+
+        const isStandardCountry = OFFER_COUNTRIES.some((c) => c.code === (offer.country || 'US'));
+        if (!isStandardCountry && offer.country) {
+            setShowCustomCountry(true);
+        }
+    }, [offer, id]);
 
     const toggleSection = (section) => {
         setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -721,7 +615,7 @@ function EditOffer() {
                 fallback_enabled: formData.capping_action === 'fallback' ? 1 : 0 // Auto-enable if action is fallback
             };
 
-            await offersAPI.updateOffer(id, offerData);
+            await updateOfferMutation.mutateAsync({ id, data: offerData });
             toast.success('Offer updated successfully!');
             navigate('/offer/list');
         } catch (error) {

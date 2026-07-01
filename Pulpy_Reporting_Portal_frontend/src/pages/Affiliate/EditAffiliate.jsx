@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { publishersAPI } from '../../services/api';
+import {
+    usePublisherDetail,
+    useUpdatePublisher,
+} from '../../hooks/queries/usePublishersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Affiliate.css';
 
@@ -25,9 +27,9 @@ function EditAffiliate() {
     const navigate = useNavigate();
     const { updateAffiliate } = useData();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const updatePublisherMutation = useUpdatePublisher();
     const [loading, setLoading] = useState(false);
-    const [fetchLoading, setFetchLoading] = useState(true);
+    const { data: publisher, isLoading: fetchLoading, error: publisherError } = usePublisherDetail(id);
 
     const [formData, setFormData] = useState({
         email: '',
@@ -39,35 +41,23 @@ function EditAffiliate() {
     });
 
     useEffect(() => {
-        const fetchPublisher = async () => {
-            try {
-                setFetchLoading(true);
-                const response = await publishersAPI.getPublisher(id);
-                if (response.success && response.data) {
-                    setFormData({
-                        email: response.data.email || '',
-                        first_name: response.data.first_name || '',
-                        company_name: response.data.company_name || '',
-                        country: response.data.country || 'US',
-                        global_postback_url: response.data.global_postback_url || '',
-                        status: response.data.status || 'active'
-                    });
-                } else {
-                    toast.error('Publisher not found');
-                    navigate('/affiliate/manage');
-                }
-            } catch (error) {
-                console.error('Fetch publisher error:', error);
-                toast.error('Failed to load publisher data');
-                navigate('/affiliate/manage');
+        if (publisherError) {
+            toast.error('Failed to load publisher data');
+            navigate('/affiliate/manage');
+        }
+    }, [publisherError, navigate, toast]);
 
-            } finally {
-                setFetchLoading(false);
-            }
-        };
-
-        fetchPublisher();
-    }, [id, navigate, toast, refreshKey]);
+    useEffect(() => {
+        if (!publisher) return;
+        setFormData({
+            email: publisher.email || '',
+            first_name: publisher.first_name || '',
+            company_name: publisher.company_name || '',
+            country: publisher.country || 'US',
+            global_postback_url: publisher.global_postback_url || '',
+            status: publisher.status || 'active',
+        });
+    }, [publisher]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -85,7 +75,8 @@ function EditAffiliate() {
                 return;
             }
 
-            await publishersAPI.updatePublisher(id, formData);
+            await updatePublisherMutation.mutateAsync({ id, data: formData });
+            updateAffiliate(id, formData);
             toast.success('Publisher updated successfully!');
             navigate('/affiliate/manage');
         } catch (error) {

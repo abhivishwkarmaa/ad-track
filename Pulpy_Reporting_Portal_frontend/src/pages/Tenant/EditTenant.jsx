@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
+import { adminSubscriptionAPI } from '../../services/api';
+import { useTenantDetail, useUpdateTenant } from '../../hooks/queries/useTenantsQuery';
 import { formatDateTimeInputIST, inputISTToISO } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
@@ -11,9 +11,9 @@ function EditTenant() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
-    const [loading, setLoading] = useState(true);
+    const updateTenantMutation = useUpdateTenant();
     const [saving, setSaving] = useState(false);
+    const { data: tenant, isLoading: loading } = useTenantDetail(id);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -30,31 +30,17 @@ function EditTenant() {
     const [errors, setErrors] = useState({});
 
     useEffect(() => {
-        fetchTenant();
-        fetchSubscriptionStatus();
-    }, [id, refreshKey]);
+        if (!tenant) return;
+        setFormData({
+            name: tenant.name || '',
+            status: (tenant.status || 'TRIAL').toUpperCase(),
+        });
+    }, [tenant]);
 
-    const fetchTenant = async () => {
-        try {
-            setLoading(true);
-            const response = await tenantsAPI.getTenant(id);
-            if (response.success) {
-                setFormData({
-                    name: response.data.name || '',
-                    status: (response.data.status || 'TRIAL').toUpperCase(),
-                });
-            } else {
-                toast.error('Failed to load tenant');
-                navigate('/tenant/manage');
-            }
-        } catch (error) {
-            console.error('Fetch tenant error:', error);
-            toast.error('Failed to load tenant');
-            navigate('/tenant/manage');
-        } finally {
-            setLoading(false);
-        }
-    };
+    useEffect(() => {
+        if (!id) return;
+        fetchSubscriptionStatus();
+    }, [id]);
 
     const fetchSubscriptionStatus = async () => {
         try {
@@ -104,17 +90,15 @@ function EditTenant() {
         setSaving(true);
 
         try {
-            const response = await tenantsAPI.updateTenant(id, {
-                name: formData.name.trim(),
-                status: formData.status,
+            await updateTenantMutation.mutateAsync({
+                id,
+                data: {
+                    name: formData.name.trim(),
+                    status: formData.status,
+                },
             });
-
-            if (response.success) {
-                toast.success('Tenant updated successfully!');
-                navigate('/tenant/manage');
-            } else {
-                toast.error(response.message || 'Failed to update tenant');
-            }
+            toast.success('Tenant updated successfully!');
+            navigate('/tenant/manage');
         } catch (error) {
             console.error('Update tenant error:', error);
             toast.error(error.message || 'Failed to update tenant');

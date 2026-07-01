@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { advertisersAPI } from '../../services/api';
+import {
+    useAdvertiserDetail,
+    useUpdateAdvertiser,
+} from '../../hooks/queries/useAdvertisersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
@@ -36,10 +38,10 @@ function EditAdvertiser() {
     const navigate = useNavigate();
     const { updateAdvertiser } = useData();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const updateAdvertiserMutation = useUpdateAdvertiser();
     const [loading, setLoading] = useState(false);
-    const [fetchLoading, setFetchLoading] = useState(true);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
+    const { data: advertiser, isLoading: fetchLoading, error: advertiserError } = useAdvertiserDetail(id);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -52,41 +54,28 @@ function EditAdvertiser() {
     });
 
     useEffect(() => {
-        const fetchAdvertiser = async () => {
-            try {
-                setFetchLoading(true);
-                const response = await advertisersAPI.getAdvertiser(id);
-                if (response.success && response.data) {
-                    setFormData({
-                        name: response.data.name || '',
-                        email: response.data.email || '',
-                        company_name: response.data.company_name || '',
-                        country: response.data.country || 'US',
-                        website: response.data.website || '',
-                        notes: response.data.notes || '',
-                        status: response.data.status || 'active'
-                    });
+        if (advertiserError) {
+            toast.error('Failed to load advertiser data');
+            navigate('/advertiser/manage');
+        }
+    }, [advertiserError, navigate, toast]);
 
-                    // Check if country is custom
-                    const isStandardCountry = countries.some(c => c.code === (response.data.country || 'US'));
-                    if (!isStandardCountry && response.data.country) {
-                        setShowCustomCountry(true);
-                    }
-                } else {
-                    toast.error('Advertiser not found');
-                    navigate('/advertiser/manage');
-                }
-            } catch (error) {
-                console.error('Fetch advertiser error:', error);
-                toast.error('Failed to load advertiser data');
-                navigate('/advertiser/manage');
-            } finally {
-                setFetchLoading(false);
-            }
-        };
-
-        fetchAdvertiser();
-    }, [id, navigate, toast, refreshKey]);
+    useEffect(() => {
+        if (!advertiser) return;
+        setFormData({
+            name: advertiser.name || '',
+            email: advertiser.email || '',
+            company_name: advertiser.company_name || '',
+            country: advertiser.country || 'US',
+            website: advertiser.website || '',
+            notes: advertiser.notes || '',
+            status: advertiser.status || 'active',
+        });
+        const isStandardCountry = countries.some((c) => c.code === (advertiser.country || 'US'));
+        if (!isStandardCountry && advertiser.country) {
+            setShowCustomCountry(true);
+        }
+    }, [advertiser]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -104,7 +93,8 @@ function EditAdvertiser() {
                 return;
             }
 
-            await advertisersAPI.updateAdvertiser(id, formData);
+            await updateAdvertiserMutation.mutateAsync({ id, data: formData });
+            updateAdvertiser(id, formData);
             toast.success('Advertiser updated successfully!');
             navigate('/advertiser/manage');
         } catch (error) {

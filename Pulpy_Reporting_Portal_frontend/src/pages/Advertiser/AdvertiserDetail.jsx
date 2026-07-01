@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useRefresh } from '../../context/RefreshContext';
-import { advertisersAPI, dashboardAPI } from '../../services/api';
+import { dashboardAPI } from '../../services/api';
+import { useAdvertiserDetail } from '../../hooks/queries/useAdvertisersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Advertiser.css';
 
@@ -11,11 +12,9 @@ function AdvertiserDetail() {
     const navigate = useNavigate();
     const toast = useToast();
     const { refreshKey } = useRefresh();
-    const [fetchLoading, setFetchLoading] = useState(true);
     const [statsLoading, setStatsLoading] = useState(true);
     const [offerStats, setOfferStats] = useState([]);
-
-    const [advertiser, setAdvertiser] = useState(null);
+    const { data: advertiser, isLoading: fetchLoading } = useAdvertiserDetail(id);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
 
     const countries = [
@@ -43,38 +42,20 @@ function AdvertiserDetail() {
     ];
 
     useEffect(() => {
-        const fetchAdvertiser = async () => {
-            try {
-                setFetchLoading(true);
-                const response = await advertisersAPI.getAdvertiser(id);
-                if (response.success && response.data) {
-                    setAdvertiser(response.data);
+        if (!advertiser) return;
+        const isStandardCountry = countries.some((c) => c.code === (advertiser.country || 'US'));
+        if (!isStandardCountry && advertiser.country) {
+            setShowCustomCountry(true);
+        }
+    }, [advertiser]);
 
-                    // Check if country is custom
-                    const isStandardCountry = countries.some(c => c.code === (response.data.country || 'US'));
-                    if (!isStandardCountry && response.data.country) {
-                        setShowCustomCountry(true);
-                    }
-                } else {
-                    toast.error('Advertiser not found');
-                    navigate('/advertiser/manage');
-                }
-            } catch (error) {
-                console.error('Fetch advertiser error:', error);
-                toast.error('Failed to load advertiser data');
-                navigate('/advertiser/manage');
-            } finally {
-                setFetchLoading(false);
-            }
-        };
-
+    useEffect(() => {
         const fetchStats = async () => {
             try {
                 setStatsLoading(true);
-                // Fetch detailed report grouped by offer for this advertiser
                 const response = await dashboardAPI.getDetailed({
                     advertiser_id: id,
-                    groupBy: 'offer_id'
+                    groupBy: 'offer_id',
                 });
                 if (response.success && response.data) {
                     setOfferStats(response.data);
@@ -86,9 +67,8 @@ function AdvertiserDetail() {
             }
         };
 
-        fetchAdvertiser();
-        fetchStats();
-    }, [id, navigate, toast, refreshKey]);
+        if (id) fetchStats();
+    }, [id, refreshKey]);
 
     const getCountryName = (code) => {
         const country = countries.find(c => c.code === code);

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
 import { tenantsAPI, adminSubscriptionAPI } from '../../services/api';
+import { useTenantDetail } from '../../hooks/queries/useTenantsQuery';
 import { formatDateIST, formatDateTimeIST } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import './Tenant.css';
@@ -41,37 +41,16 @@ function TenantDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
-    const [loading, setLoading] = useState(true);
-    const [tenant, setTenant] = useState(null);
+    const { data: tenant, isLoading: loading } = useTenantDetail(id);
     const [metrics, setMetrics] = useState(null);
     const [metricsLoading, setMetricsLoading] = useState(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState(null);
 
     useEffect(() => {
-        fetchTenant();
+        if (!id) return;
         fetchMetrics();
         fetchSubscriptionStatus();
-    }, [id, refreshKey]);
-
-    const fetchTenant = async () => {
-        try {
-            setLoading(true);
-            const response = await tenantsAPI.getTenant(id);
-            if (response.success) {
-                setTenant(response.data);
-            } else {
-                toast.error('Failed to load tenant');
-                navigate('/tenant/manage');
-            }
-        } catch (error) {
-            console.error('Fetch tenant error:', error);
-            toast.error('Failed to load tenant');
-            navigate('/tenant/manage');
-        } finally {
-            setLoading(false);
-        }
-    };
+    }, [id]);
 
     const fetchMetrics = async () => {
         try {

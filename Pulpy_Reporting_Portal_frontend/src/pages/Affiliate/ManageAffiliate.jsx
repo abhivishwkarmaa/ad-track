@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../context/DataContext';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { publishersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import {
+    usePublishersList,
+    useDeletePublisher,
+    useUpdatePublisher,
+} from '../../hooks/queries/usePublishersQuery';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Affiliate.css';
 
@@ -70,54 +72,28 @@ const PlayIcon = () => (
 function ManageAffiliate() {
     const { deleteAffiliate } = useData();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
     const navigate = useNavigate();
-    const [publishers, setPublishers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [deleteModal, setDeleteModal] = useState({ open: false, affiliate: null });
+    const [togglingStatus, setTogglingStatus] = useState({});
 
-    // Fetch publishers data
-    useEffect(() => {
-        const controller = new AbortController();
+    const listParams = useMemo(() => {
+        const params = { page: 1, limit: 100 };
+        if (statusFilter !== 'all') params.status = statusFilter;
+        return params;
+    }, [statusFilter]);
 
-        const fetchPublishers = async () => {
-            try {
-                setLoading(true);
-                setError(null);
+    const {
+        data: publishersResult,
+        isLoading: loading,
+        error: queryError,
+    } = usePublishersList(listParams);
+    const deletePublisherMutation = useDeletePublisher();
+    const updatePublisherMutation = useUpdatePublisher();
 
-                // Prepare API parameters
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-
-                // Only add status filter if it's not 'all'
-                if (statusFilter !== 'all') {
-                    params.status = statusFilter;
-                }
-
-                const response = await publishersAPI.getPublishers(params, { signal: controller.signal });
-                if (response.success) {
-                    setPublishers(response.data);
-                } else {
-                    setError('Failed to load publishers');
-                }
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Publishers fetch error:', err);
-                setError(err.message || 'Failed to load publishers');
-            } finally {
-                if (controller.signal.aborted) return;
-                setLoading(false);
-            }
-        };
-
-        fetchPublishers();
-        return () => controller.abort();
-    }, [statusFilter, refreshKey]);
+    const publishers = publishersResult?.data ?? [];
+    const error = queryError?.message ?? null;
 
     const filteredAffiliates = publishers.filter(affiliate => {
         const matchesSearch =
@@ -130,28 +106,20 @@ function ManageAffiliate() {
         return matchesSearch && matchesStatus;
     });
 
-    const [togglingStatus, setTogglingStatus] = useState({});
-
     const handleToggleStatus = async (affiliate) => {
         const newStatus = affiliate.status === 'active' ? 'suspended' : 'active';
         try {
-            setTogglingStatus(prev => ({ ...prev, [affiliate.id]: true }));
-            const response = await publishersAPI.updatePublisher(affiliate.id, { status: newStatus });
-
-            if (response.success) {
-                toast.success(`Publisher ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`);
-                // Update local state
-                setPublishers(prev => prev.map(p =>
-                    p.id === affiliate.id ? { ...p, status: newStatus } : p
-                ));
-            } else {
-                toast.error(response.message || 'Failed to update status');
-            }
+            setTogglingStatus((prev) => ({ ...prev, [affiliate.id]: true }));
+            await updatePublisherMutation.mutateAsync({
+                id: affiliate.id,
+                data: { status: newStatus },
+            });
+            toast.success(`Publisher ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`);
         } catch (err) {
             console.error('Update status error:', err);
             toast.error('Failed to update status');
         } finally {
-            setTogglingStatus(prev => ({ ...prev, [affiliate.id]: false }));
+            setTogglingStatus((prev) => ({ ...prev, [affiliate.id]: false }));
         }
     };
 
@@ -160,31 +128,15 @@ function ManageAffiliate() {
     };
 
     const confirmDelete = async () => {
-        if (deleteModal.affiliate) {
-            try {
-                await publishersAPI.deletePublisher(deleteModal.affiliate.id);
-                toast.success('Publisher deleted successfully');
-                setDeleteModal({ open: false, affiliate: null });
-
-                // Refresh publishers data after deletion with current filter
-                const params = {
-                    page: 1,
-                    limit: 100
-                };
-
-                // Only add status filter if it's not 'all'
-                if (statusFilter !== 'all') {
-                    params.status = statusFilter;
-                }
-
-                const response = await publishersAPI.getPublishers(params);
-                if (response.success) {
-                    setPublishers(response.data);
-                }
-            } catch (err) {
-                console.error('Delete error:', err);
-                toast.error('Failed to delete publisher');
-            }
+        if (!deleteModal.affiliate) return;
+        try {
+            await deletePublisherMutation.mutateAsync(deleteModal.affiliate.id);
+            deleteAffiliate(deleteModal.affiliate.id);
+            toast.success('Publisher deleted successfully');
+            setDeleteModal({ open: false, affiliate: null });
+        } catch (err) {
+            console.error('Delete error:', err);
+            toast.error('Failed to delete publisher');
         }
     };
 

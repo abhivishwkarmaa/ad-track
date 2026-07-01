@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { tenantsAPI } from '../../services/api';
+import { useCreateTenant } from '../../hooks/queries/useTenantsQuery';
 import './Tenant.css';
 
 function NewTenant() {
     const navigate = useNavigate();
     const toast = useToast();
+    const createTenantMutation = useCreateTenant();
     const [loading, setLoading] = useState(false);
 
     const [formData, setFormData] = useState({
@@ -77,14 +78,9 @@ function NewTenant() {
                 payload.adminName = formData.adminName.trim();
             }
 
-            const response = await tenantsAPI.createTenant(payload);
-            
-            if (response.success) {
-                toast.success('Tenant created successfully!');
-                navigate('/tenant/manage');
-            } else {
-                toast.error(response.message || 'Failed to create tenant');
-            }
+            await createTenantMutation.mutateAsync(payload);
+            toast.success('Tenant created successfully!');
+            navigate('/tenant/manage');
         } catch (error) {
             console.error('Create tenant error:', error);
             toast.error(error.message || 'Failed to create tenant');

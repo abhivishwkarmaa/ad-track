@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { assignmentsAPI, offersAPI, publishersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import { assignmentsAPI } from '../../services/api';
+import { useCreateOrUpdateAssignments } from '../../hooks/queries/useAssignmentsQuery';
+import { useOffersList } from '../../hooks/queries/useOffersQuery';
+import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import './Assignment.css';
 
 function NewAssignment() {
     const navigate = useNavigate();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const createOrUpdateAssignmentsMutation = useCreateOrUpdateAssignments();
     const [loading, setLoading] = useState(false);
-    const [offers, setOffers] = useState([]);
-    const [publishers, setPublishers] = useState([]);
+    const { data: offersResult } = useOffersList({ limit: 100 });
+    const { data: publishersResult } = usePublishersList({ limit: 100 });
+    const offers = offersResult?.data ?? [];
+    const publishers = publishersResult?.data ?? [];
     const [selectedOffer, setSelectedOffer] = useState('');
     const [selectedPublishers, setSelectedPublishers] = useState([]);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
@@ -20,29 +23,6 @@ function NewAssignment() {
     const [assignedOffersByPublisher, setAssignedOffersByPublisher] = useState({});
 
     const publisherIdsKey = publisherAssignments.map(a => a.publisher_id).sort((a, b) => a - b).join(',');
-
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchData = async () => {
-            try {
-                const [offersRes, publishersRes] = await Promise.all([
-                    offersAPI.getOffers({ limit: 100 }, { signal }),
-                    publishersAPI.getPublishers({ limit: 100 }, { signal })
-                ]);
-                if (signal.aborted) return;
-                if (offersRes.success) setOffers(offersRes.data);
-                if (publishersRes.success) setPublishers(publishersRes.data);
-            } catch (err) {
-                if (isAbortError(err)) return;
-                console.error('Error fetching data:', err);
-                toast.error('Failed to load data');
-            }
-        };
-        fetchData();
-        return () => controller.abort();
-    }, [toast, refreshKey]);
 
     useEffect(() => {
         const loadAssignedOffers = async () => {
@@ -70,7 +50,7 @@ function NewAssignment() {
             setAssignedOffersByPublisher(next);
         };
         loadAssignedOffers();
-    }, [publisherIdsKey, refreshKey]);
+    }, [publisherIdsKey]);
 
     const handleAddPublisher = (publisherId) => {
         if (!publisherId) return;
@@ -145,7 +125,7 @@ function NewAssignment() {
                 }))
             };
 
-            await assignmentsAPI.createOrUpdateAssignments(assignmentData);
+            await createOrUpdateAssignmentsMutation.mutateAsync(assignmentData);
             toast.success('Assignment created successfully!');
             navigate('/assignment/manage');
         } catch (error) {

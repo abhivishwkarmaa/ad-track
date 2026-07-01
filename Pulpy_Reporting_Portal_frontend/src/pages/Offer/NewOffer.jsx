@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { offersAPI, advertisersAPI } from '../../services/api';
+import { useOffersList, useCreateOffer } from '../../hooks/queries/useOffersQuery';
+import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
 import { OFFER_COUNTRIES } from '../../utils/countries';
 import './Offer.css';
 
@@ -205,20 +205,18 @@ const getDefaultDates = () => {
 function NewOffer() {
     const navigate = useNavigate();
     const toast = useToast();
-    const { refreshKey } = useRefresh();
+    const createOfferMutation = useCreateOffer();
     const [loading, setLoading] = useState(false);
-    const [advertisers, setAdvertisers] = useState([]);
-    const [loadingAdvertisers, setLoadingAdvertisers] = useState(true);
+    const { data: advertisersResult, isLoading: loadingAdvertisers } = useAdvertisersList({ status: 'active', limit: 100 });
+    const { data: offersResult, isLoading: loadingOffers } = useOffersList({ limit: 1000, status: 'live' });
+    const advertisers = advertisersResult?.data ?? [];
+    const offers = offersResult?.data ?? [];
     const [showTokenTable, setShowTokenTable] = useState(false);
     const [showMacrosInfo, setShowMacrosInfo] = useState(false);
     const [tokenMappings, setTokenMappings] = useState([]);
 
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
-
-    // Offers for Fallback
-    const [offers, setOffers] = useState([]);
-    const [loadingOffers, setLoadingOffers] = useState(false);
 
     // Get default dates on component initialization
     const defaultDates = getDefaultDates();
@@ -272,42 +270,6 @@ function NewOffer() {
         os_action: 'ALLOW',
         os_targeting: [],
     });
-
-    // Fetch advertisers and offers from API
-    useEffect(() => {
-        const fetchAdvertisers = async () => {
-            try {
-                setLoadingAdvertisers(true);
-                const response = await advertisersAPI.getAdvertisers({ status: 'active', limit: 100 });
-                if (response.success && response.data) {
-                    setAdvertisers(response.data);
-                }
-            } catch (error) {
-                console.error('Error fetching advertisers:', error);
-                toast.error('Failed to load advertisers');
-            } finally {
-                setLoadingAdvertisers(false);
-            }
-        };
-
-        const fetchOffers = async () => {
-            try {
-                setLoadingOffers(true);
-                // Fetch basic offer list for fallback dropdown
-                const response = await offersAPI.getOffers({ limit: 1000, status: 'live' });
-                if (response.success && response.data && Array.isArray(response.data.offers)) {
-                    setOffers(response.data.offers);
-                }
-            } catch (error) {
-                console.error('Error fetching offers:', error);
-            } finally {
-                setLoadingOffers(false);
-            }
-        }
-
-        fetchAdvertisers();
-        fetchOffers();
-    }, [toast, refreshKey]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -443,7 +405,7 @@ function NewOffer() {
                 fallback_enabled: formData.capping_action === 'fallback' ? 1 : 0 // Auto-enable if action is fallback
             };
 
-            await offersAPI.createOffer(offerData);
+            await createOfferMutation.mutateAsync(offerData);
             toast.success('Offer created successfully!');
             navigate('/offer/list');
         } catch (error) {

@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { offersAPI } from '../../services/api';
-import { isAbortError } from '../../hooks/useAbortableRequest';
+import {
+    useOffersList,
+    useDeleteOffer,
+    useUpdateOfferStatus,
+} from '../../hooks/queries/useOffersQuery';
 import { formatDateIST } from '../../utils/dateTime';
 import { SkeletonPage } from '../../components/Skeleton/Skeleton';
 import './Offer.css';
@@ -59,22 +61,37 @@ function OfferList() {
 
     const toast = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
-    const { refreshKey } = useRefresh();
-    const [offers, setOffers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [initialLoading, setInitialLoading] = useState(true);
-    const [isRefreshing, setIsRefreshing] = useState(false);
-    const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [deleteModal, setDeleteModal] = useState({ open: false, offer: null });
     const currentPage = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const itemsPerPage = 10;
-    const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
     const [searchDebounced, setSearchDebounced] = useState('');
     const [updatingStatus, setUpdatingStatus] = useState({});
     const effectiveSearch = searchDebounced.trim().length >= 3 ? searchDebounced.trim() : '';
     const prevSearchAndFilter = useRef({ search: effectiveSearch, filter: statusFilter });
+
+    const listParams = useMemo(() => {
+        const params = { page: currentPage, limit: itemsPerPage };
+        if (effectiveSearch) params.search = effectiveSearch;
+        if (statusFilter !== 'all') params.type = statusFilter;
+        return params;
+    }, [currentPage, effectiveSearch, statusFilter]);
+
+    const {
+        data: offersResult,
+        isLoading,
+        isFetching,
+        error: queryError,
+    } = useOffersList(listParams);
+    const deleteOfferMutation = useDeleteOffer();
+    const updateOfferStatusMutation = useUpdateOfferStatus();
+
+    const offers = offersResult?.data ?? [];
+    const pagination = offersResult?.pagination ?? { total: 0, totalPages: 1 };
+    const loading = isLoading;
+    const isRefreshing = isFetching && !isLoading;
+    const error = queryError?.message ?? null;
 
     useEffect(() => {
         const t = setTimeout(() => setSearchDebounced(searchTerm), 400);
@@ -95,48 +112,6 @@ function OfferList() {
         }
     }, [effectiveSearch, statusFilter]);
 
-    useEffect(() => {
-        const controller = new AbortController();
-
-        const fetchOffers = async () => {
-            try {
-                if (initialLoading) {
-                    setLoading(true);
-                } else {
-                    setIsRefreshing(true);
-                }
-                setError(null);
-                const params = { page: currentPage, limit: itemsPerPage };
-                if (effectiveSearch) params.search = effectiveSearch;
-                if (statusFilter !== 'all') params.type = statusFilter;
-
-                const response = await offersAPI.getOffers(params, { signal: controller.signal });
-                if (response.success) {
-                    setOffers(response.data || []);
-                    setPagination(response.pagination || { total: 0, totalPages: 1 });
-                } else {
-                    setError('Failed to load offers');
-                }
-            } catch (err) {
-                if (!isAbortError(err)) {
-                    console.error('Offers fetch error:', err);
-                    setError(err.message || 'Failed to load offers');
-                }
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                    setIsRefreshing(false);
-                    if (initialLoading) {
-                        setInitialLoading(false);
-                    }
-                }
-            }
-        };
-
-        fetchOffers();
-        return () => controller.abort();
-    }, [currentPage, effectiveSearch, statusFilter, refreshKey]);
-
     const { total, totalPages } = pagination;
 
     const handleDelete = (offer) => {
@@ -144,59 +119,34 @@ function OfferList() {
     };
 
     const confirmDelete = async () => {
-        if (deleteModal.offer) {
-            try {
-                // Call the API to archive the offer (backend will set status to 'archived')
-                await offersAPI.deleteOffer(deleteModal.offer.id);
-                toast.success('Offer archived successfully');
-                setDeleteModal({ open: false, offer: null });
-
-                const params = { page: currentPage, limit: itemsPerPage };
-                if (effectiveSearch) params.search = effectiveSearch;
-                if (statusFilter !== 'all') params.type = statusFilter;
-                const response = await offersAPI.getOffers(params);
-                if (response.success) {
-                    setOffers(response.data || []);
-                    setPagination(response.pagination || pagination);
-                    if (response.data?.length === 0 && currentPage > 1) {
-                        setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            return next;
-                        }, { replace: true });
-                    }
-                }
-            } catch (err) {
-                console.error('Delete error:', err);
-                toast.error('Failed to delete offer');
+        if (!deleteModal.offer) return;
+        try {
+            await deleteOfferMutation.mutateAsync(deleteModal.offer.id);
+            toast.success('Offer archived successfully');
+            setDeleteModal({ open: false, offer: null });
+            if (offers.length === 1 && currentPage > 1) {
+                setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    return next;
+                }, { replace: true });
             }
+        } catch (err) {
+            console.error('Delete error:', err);
+            toast.error('Failed to delete offer');
         }
     };
 
     const handleStatusChange = async (offerId, newStatus) => {
         try {
-            setUpdatingStatus(prev => ({ ...prev, [offerId]: true }));
-            const response = await offersAPI.updateOfferStatus(offerId, newStatus);
-
-            if (response.success) {
-                toast.success('Offer status updated successfully');
-
-                const params = { page: currentPage, limit: itemsPerPage };
-                if (effectiveSearch) params.search = effectiveSearch;
-                if (statusFilter !== 'all') params.type = statusFilter;
-                const offersResponse = await offersAPI.getOffers(params);
-                if (offersResponse.success) {
-                    setOffers(offersResponse.data || []);
-                    setPagination(offersResponse.pagination || pagination);
-                }
-            } else {
-                toast.error(response.message || 'Failed to update offer status');
-            }
+            setUpdatingStatus((prev) => ({ ...prev, [offerId]: true }));
+            await updateOfferStatusMutation.mutateAsync({ id: offerId, status: newStatus });
+            toast.success('Offer status updated successfully');
         } catch (err) {
             console.error('Status update error:', err);
             toast.error(err.message || 'Failed to update offer status');
         } finally {
-            setUpdatingStatus(prev => ({ ...prev, [offerId]: false }));
+            setUpdatingStatus((prev) => ({ ...prev, [offerId]: false }));
         }
     };
 
