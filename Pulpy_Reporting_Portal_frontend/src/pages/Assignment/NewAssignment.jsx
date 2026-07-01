@@ -129,7 +129,9 @@ function NewAssignment() {
                     capping_type: assignment.capping_type,
                     capping_duration: assignment.capping_duration,
                     capping_action: assignment.capping_action,
-                    capping_amount: assignment.capping_type !== 'none' && assignment.capping_amount ? parseFloat(assignment.capping_amount) : null,
+                    capping_amount: assignment.capping_type !== 'none' && assignment.capping_amount !== '' && assignment.capping_amount != null
+                        ? parseFloat(assignment.capping_amount)
+                        : null,
                     fallback_type: assignment.capping_action === 'fallback' ? assignment.fallback_type : null,
                     fallback_url: assignment.capping_action === 'fallback' && assignment.fallback_type === 'custom' ? (assignment.fallback_url || null) : null,
                     fallback_offer_id: assignment.capping_action === 'fallback' && assignment.fallback_type === 'offer' && assignment.fallback_offer_id
