@@ -507,9 +507,11 @@ function EditOffer() {
                         capping_type: offer.capping_type || 'none',
                         capping_duration: offer.capping_duration || 'daily',
                         capping_action: offer.capping_action || 'stop',
-                        capping_amount: (offer.capping_type === 'budget' || offer.budget_cap > 0)
-                            ? (offer.budget_cap || '')
-                            : (offer.capping_type === 'conversion' || offer.conversion_cap > 0 ? (offer.conversion_cap || '') : ''),
+                        capping_amount: offer.capping_type === 'budget'
+                            ? (offer.budget_cap != null && offer.budget_cap !== '' ? offer.budget_cap : '')
+                            : offer.capping_type === 'conversion'
+                                ? (offer.conversion_cap != null && offer.conversion_cap !== '' ? offer.conversion_cap : '')
+                                : '',
 
                         // Fallback
                         fallback_type: offer.fallback_type || 'offer',

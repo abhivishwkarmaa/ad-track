@@ -207,19 +207,32 @@ export class CacheService {
         const capType = o.capping_type;
         const duration = o.capping_duration;
 
-        let limit = 0;
+        let limit = null;
         if (entityType === 'offer') {
-            if (capType === 'budget') limit = parseFloat(o.budget_cap || 0);
-            else if (capType === 'conversion') limit = parseInt(o.conversion_cap || 0);
+            if (capType === 'budget') {
+                if (o.budget_cap != null && o.budget_cap !== '') {
+                    limit = parseFloat(o.budget_cap);
+                }
+            } else if (capType === 'conversion') {
+                if (o.conversion_cap != null && o.conversion_cap !== '') {
+                    limit = parseInt(o.conversion_cap, 10);
+                }
+            }
         } else {
             if (capType === 'budget') {
-                limit = parseFloat(o.capping_amount ?? o.capping_budget_amount ?? 0);
+                const raw = o.capping_amount ?? o.capping_budget_amount;
+                if (raw != null && raw !== '') {
+                    limit = parseFloat(raw);
+                }
             } else if (capType === 'conversion') {
-                limit = parseInt(o.capping_amount ?? o.capping_conversions_amount ?? 0, 10);
+                const raw = o.capping_amount ?? o.capping_conversions_amount;
+                if (raw != null && raw !== '') {
+                    limit = parseInt(raw, 10);
+                }
             }
         }
 
-        if (!capType || capType === 'none' || !duration) {
+        if (!capType || capType === 'none' || !duration || limit === null) {
             return { isHit: false, current: 0, limit: 0 };
         }
 
