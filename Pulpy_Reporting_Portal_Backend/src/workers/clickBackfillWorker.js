@@ -235,8 +235,8 @@ async function insertClickIntoDB(clickData) {
         ip, user_agent, referrer, country, region, city, isp, location, domain,
         device_type, browser, os, os_version, device_brand, device_model,
         source_id, device_id, google_id, android_id, rcid, tid,
-        timestamp, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        extra_params, timestamp, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE id = id`;
 
     const values = [
@@ -249,6 +249,7 @@ async function insertClickIntoDB(clickData) {
         clickData.source_id || null, clickData.device_id || null,
         clickData.google_id || null, clickData.android_id || null,
         clickData.rcid || null, clickData.tid || null,
+        clickData.extra_params && String(clickData.extra_params).trim() !== '' ? clickData.extra_params : null,
         clickData.timestamp ? new Date(clickData.timestamp) : new Date(),
         new Date()
     ];

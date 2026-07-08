@@ -110,6 +110,10 @@ function getErrorTitle(errorType) {
         'browser_blocked': 'Browser Not Allowed',
         'os_blocked': 'OS Not Allowed',
         'country_blocked': 'Country Not Allowed',
+        'isp_blocked': 'Network Not Allowed',
+        'city_blocked': 'City Not Allowed',
+        'carrier_blocked': 'Carrier Not Allowed',
+        'missing_offer_params': 'Missing Tracking Parameters',
     };
     return titles[errorType] || 'Offer Unavailable';
 }
@@ -128,6 +132,11 @@ function getErrorDescription(errorType, errorMessage) {
         'browser_blocked': 'Your browser is not permitted to access this offer.',
         'os_blocked': 'Your operating system is not permitted to access this offer.',
         'country_blocked': 'Your location is not permitted to access this offer.',
+        'isp_blocked': 'Your network or ISP is not permitted for this offer.',
+        'city_blocked': 'Your city is not permitted for this offer.',
+        'carrier_blocked': 'Your mobile carrier is not permitted for this offer.',
+        'missing_offer_params':
+          'This offer requires additional parameters in the tracking link (for example sub-IDs). Use the full URL from your dashboard, including all required query fields.',
     };
     return descriptions[errorType] || 'This offer is currently unavailable. Please try again later.';
 }

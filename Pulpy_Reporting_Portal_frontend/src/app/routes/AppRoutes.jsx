@@ -23,6 +23,8 @@ import EditAssignment from '../../pages/Assignment/EditAssignment';
 import DetailedReports from '../../pages/Reports/DetailedReports';
 import UpdateProfile from '../../pages/Settings/UpdateProfile';
 import LiveLogs from '../../pages/LiveLogs/LiveLogs';
+import ClickDetail from '../../pages/Logs/ClickDetail';
+import ConversionDetail from '../../pages/Logs/ConversionDetail';
 import ManageTenant from '../../pages/Tenant/ManageTenant';
 import NewTenant from '../../pages/Tenant/NewTenant';
 import EditTenant from '../../pages/Tenant/EditTenant';
@@ -131,6 +133,10 @@ export default function AppRoutes() {
                             <Route path="detailed" element={<DetailedReports />} />
                         </Route>
                         <Route path="live-logs" element={<LiveLogs />} />
+                        <Route path="logs">
+                            <Route path="click/:clickUuid" element={<ClickDetail />} />
+                            <Route path="conversion/:conversionUuid" element={<ConversionDetail />} />
+                        </Route>
                     </Route>
 
                     <Route element={isAdminDomain ? <Outlet /> : <Navigate to="/" replace />}>

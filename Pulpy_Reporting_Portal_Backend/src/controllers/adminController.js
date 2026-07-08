@@ -766,14 +766,14 @@ export class AdminController {
         });
       }
 
-      const trackingURL = await assignmentService.generateTrackingURL(
+      const trackingPayload = await assignmentService.generateTrackingURL(
         internalAssignmentId,
         baseURL,
         format,
         tenantId,
         forOfferPublicId
       );
-      if (!trackingURL) {
+      if (!trackingPayload?.tracking_url) {
         return reply.code(404).send({
           success: false,
           error: 'Not Found',
@@ -783,7 +783,7 @@ export class AdminController {
       return reply.send({
         success: true,
         data: {
-          tracking_url: trackingURL,
+          ...trackingPayload,
           format: format,
         },
       });

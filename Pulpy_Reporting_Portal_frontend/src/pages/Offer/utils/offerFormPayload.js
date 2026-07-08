@@ -1,8 +1,103 @@
 /**
  * Maps offer form state to API payload (shared by create + update).
  */
-export function buildOfferPayload(formData, { showCustomCategory = false } = {}) {
+
+import { buildListTargetingPayload, parseListTargetingField } from './offerFormTargeting.js';
+
+export const RESERVED_OFFER_PARAM_KEYS = new Set([
+    'offer_id',
+    'oid',
+    'pub_id',
+    'a',
+    'publisher_id',
+    'click_id',
+    'clickid',
+    'tid',
+    'rcid',
+    'sub',
+    'm',
+    'token',
+    'auth',
+]);
+
+export function emptyOfferParamRow() {
+    return { param_key: '', is_required: false, default_value: '' };
+}
+
+export function normalizeOfferParamsForApi(rows) {
+    if (!Array.isArray(rows)) return [];
+    return rows
+        .map((p) => ({
+            param_key: String(p.param_key || '').trim(),
+            is_required: Boolean(p.is_required),
+            default_value:
+                p.default_value != null && String(p.default_value).trim() !== ''
+                    ? String(p.default_value).trim()
+                    : null,
+        }))
+        .filter((p) => p.param_key);
+}
+
+export function validateOfferParamsClient(rows) {
+    const seen = new Set();
+    for (const row of rows) {
+        const key = String(row.param_key || '').trim();
+        if (!key) continue;
+        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(key)) {
+            return `Parameter "${key}" must start with a letter and use only letters, numbers, underscore`;
+        }
+        if (RESERVED_OFFER_PARAM_KEYS.has(key.toLowerCase())) {
+            return `"${key}" is reserved for platform tracking — choose another name`;
+        }
+        const lower = key.toLowerCase();
+        if (seen.has(lower)) {
+            return `Duplicate parameter name: ${key}`;
+        }
+        seen.add(lower);
+    }
+    return null;
+}
+
+export function mapOfferParamsFromOffer(offer) {
+    if (Array.isArray(offer?.offer_params) && offer.offer_params.length > 0) {
+        return offer.offer_params.map((p) => ({
+            param_key: p.param_key || '',
+            is_required: Boolean(p.is_required === 1 || p.is_required === true),
+            default_value: p.default_value ?? '',
+        }));
+    }
+    return [emptyOfferParamRow()];
+}
+
+/** Empty time fields → null in API (24/7, no IST window on clicks/postbacks). */
+export function normalizeScheduleTimeForApi(value) {
+    if (value == null) return null;
+    const s = String(value).trim();
+    return s === '' ? null : s;
+}
+
+/** For <input type="time"> — null/empty stays blank; DB TIME values normalized to HH:MM:SS. */
+export function formatScheduleTimeForForm(value) {
+    if (value == null || String(value).trim() === '') return '';
+    const raw = String(value).trim();
+    const parts = raw.split(':');
+    if (parts.length < 2) return raw;
+    const h = parts[0].padStart(2, '0');
+    const m = parts[1].padStart(2, '0');
+    const sec = (parts[2] || '00').split('.')[0].padStart(2, '0');
+    return `${h}:${m}:${sec}`;
+}
+
+/** Detail page label for start/end time (IST). */
+export function formatScheduleTimeForDisplay(value) {
+    if (value == null || String(value).trim() === '') return null;
+    return formatScheduleTimeForForm(value).slice(0, 8);
+}
+
+export function buildOfferPayload(formData, { showCustomCategory = false, offerParams = [] } = {}) {
     const finalCategory = showCustomCategory ? formData.custom_category : formData.category;
+    const start_time = normalizeScheduleTimeForApi(formData.start_time);
+    const end_time = normalizeScheduleTimeForApi(formData.end_time);
 
     return {
         advertiser_id: parseInt(formData.advertiser_id, 10),
@@ -26,8 +121,8 @@ export function buildOfferPayload(formData, { showCustomCategory = false } = {})
         token_type: formData.token_type || null,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
-        start_time: formData.start_time || null,
-        end_time: formData.end_time || null,
+        start_time,
+        end_time,
         ip_action: formData.ip_action.toLowerCase(),
         ip_list: formData.ip_list || null,
         country_action: formData.country_action ? formData.country_action.toLowerCase() : 'allow',
@@ -47,6 +142,9 @@ export function buildOfferPayload(formData, { showCustomCategory = false } = {})
             formData.browser_targeting?.length > 0
                 ? JSON.stringify({ browser: formData.browser_targeting })
                 : null,
+        isp_targeting_json: buildListTargetingPayload(formData.isp_action, formData.isp_list),
+        carrier_targeting_json: buildListTargetingPayload(formData.carrier_action, formData.carrier_list),
+        city_targeting_json: buildListTargetingPayload(formData.city_action, formData.city_list),
         capping_type: formData.capping_type,
         capping_duration: formData.capping_duration,
         capping_action: formData.capping_action,
@@ -62,6 +160,7 @@ export function buildOfferPayload(formData, { showCustomCategory = false } = {})
             ? parseInt(formData.fallback_offer_id, 10)
             : null,
         fallback_enabled: formData.capping_action === 'fallback' ? 1 : 0,
+        offer_params: normalizeOfferParamsForApi(offerParams),
     };
 }
 
@@ -81,6 +180,9 @@ export function mapOfferToFormData(offer, routeId) {
             ? JSON.parse(offer.browser_targeting_json)
             : offer.browser_targeting_json
         : {};
+    const ispParsed = parseListTargetingField(offer.isp_targeting_json, 'isps');
+    const carrierParsed = parseListTargetingField(offer.carrier_targeting_json, 'carriers');
+    const cityParsed = parseListTargetingField(offer.city_targeting_json, 'cities');
 
     return {
         offerId: routeId ? `o${String(routeId).padStart(4, '0')}` : '',
@@ -105,9 +207,9 @@ export function mapOfferToFormData(offer, routeId) {
         billing_type: offer.billing_type || '',
         token_type: offer.token_type || '',
         start_date: offer.start_date ? offer.start_date.split('T')[0] : '',
-        start_time: offer.start_time || '00:00:00',
+        start_time: formatScheduleTimeForForm(offer.start_time),
         end_date: offer.end_date ? offer.end_date.split('T')[0] : '',
-        end_time: offer.end_time || '23:59:59',
+        end_time: formatScheduleTimeForForm(offer.end_time),
         ip_action: offer.ip_action?.toUpperCase() || 'ALLOW',
         ip_list: offer.ip_list || '',
         country_action: offer.country_action?.toUpperCase() || 'ALLOW',
@@ -118,6 +220,12 @@ export function mapOfferToFormData(offer, routeId) {
         device_targeting: deviceTargeting.device || [],
         os_action: offer.os_action?.toUpperCase() || 'ALLOW',
         os_targeting: osTargeting.os || [],
+        isp_action: ispParsed.action,
+        isp_list: ispParsed.list,
+        carrier_action: carrierParsed.action,
+        carrier_list: carrierParsed.list,
+        city_action: cityParsed.action,
+        city_list: cityParsed.list,
         capping_type: offer.capping_type || 'none',
         capping_duration: offer.capping_duration || 'daily',
         capping_action: offer.capping_action || 'stop',

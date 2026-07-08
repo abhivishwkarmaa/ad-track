@@ -1,4 +1,9 @@
 import pool from '../db/connection.js';
+import {
+  checkOfferValidity as checkOfferValidityFn,
+  validateOfferDatesAndStatus as validateOfferDatesAndStatusFn,
+  validateConversionSchedule as validateConversionScheduleFn,
+} from './offer.validation.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime } from '../utils/mysqlUtcRange.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
@@ -28,58 +33,7 @@ class OfferService {
    * @returns {Object} - { valid: boolean, message: string, error_type: string }
    */
   checkOfferValidity(offer) {
-    if (!offer) {
-      return {
-        valid: false,
-        message: 'Offer not found',
-        error_type: 'offer_not_found'
-      };
-    }
-
-    // Check offer status
-    if (offer.status !== 'live') {
-      return {
-        valid: false,
-        message: `Offer is not live. Current status: ${offer.status}. Only live offers can accept traffic.`,
-        error_type: 'offer_not_live'
-      };
-    }
-
-    const now = new Date();
-
-    // Check if offer has expired (end_date passed)
-    if (offer.end_date) {
-      const endDate = new Date(offer.end_date);
-      endDate.setHours(23, 59, 59, 999); // End of day
-
-      if (now > endDate) {
-        return {
-          valid: false,
-          message: `Offer has expired. End date: ${offer.end_date}. The offer is no longer accepting traffic.`,
-          error_type: 'offer_expired'
-        };
-      }
-    }
-
-    // Check if offer hasn't started yet (start_date in future)
-    if (offer.start_date) {
-      const startDate = new Date(offer.start_date);
-      startDate.setHours(0, 0, 0, 0); // Start of day
-
-      if (now < startDate) {
-        return {
-          valid: false,
-          message: `Offer has not started yet. Start date: ${offer.start_date}. The offer will become active on this date.`,
-          error_type: 'offer_not_started'
-        };
-      }
-    }
-
-    return {
-      valid: true,
-      message: 'Offer is valid and active',
-      error_type: null
-    };
+    return checkOfferValidityFn(offer);
   }
 
   /**
@@ -89,48 +43,11 @@ class OfferService {
    * @returns {Object} - { valid: boolean, message: string, error_type: string }
    */
   validateOfferDatesAndStatus(offerData, existingOffer = null) {
-    const now = new Date();
+    return validateOfferDatesAndStatusFn(offerData, existingOffer);
+  }
 
-    // Check if offer has expired (end_date passed)
-    const endDate = offerData.end_date || (existingOffer ? existingOffer.end_date : null);
-    if (endDate) {
-      const endDateObj = new Date(endDate);
-      endDateObj.setHours(23, 59, 59, 999); // End of day
-
-      if (now > endDateObj) {
-        return {
-          valid: false,
-          message: `Offer has expired. End date (${endDate}) has already passed. Cannot create or update expired offers.`,
-          error_type: 'offer_expired'
-        };
-      }
-    }
-
-    // Check if status is being set to 'live' but offer has expired
-    const status = offerData.status || (existingOffer ? existingOffer.status : null);
-    if (status === 'live' && endDate) {
-      const endDateObj = new Date(endDate);
-      endDateObj.setHours(23, 59, 59, 999);
-
-      if (now > endDateObj) {
-        return {
-          valid: false,
-          message: `Cannot set offer status to 'live': Offer has expired. End date (${endDate}) has already passed.`,
-          error_type: 'offer_expired'
-        };
-      }
-    }
-
-    // Check if trying to set status to 'live' but offer is not live
-    if (status && status !== 'live' && existingOffer && existingOffer.status !== 'live') {
-      // This is just informational, not blocking
-    }
-
-    return {
-      valid: true,
-      message: 'Offer validation passed',
-      error_type: null
-    };
+  validateConversionSchedule(offer) {
+    return validateConversionScheduleFn(offer);
   }
 
   async createOffer(data) {
@@ -290,14 +207,16 @@ class OfferService {
       const [result] = await pool.query(sql, params);
       const insertId = result.insertId ?? result?.[0]?.insertId;
 
-      // 🔥 NEW: Save offer parameters if provided
-      if (data.offer_params && Array.isArray(data.offer_params) && data.offer_params.length > 0) {
-        await offerParamsService.setOfferParams(insertId, tenantId, data.offer_params);
-        logger.info(`Saved ${data.offer_params.length} parameters for offer ${insertId}`);
+      if (data.offer_params !== undefined) {
+        await offerParamsService.setOfferParams(
+          insertId,
+          tenantId,
+          Array.isArray(data.offer_params) ? data.offer_params : []
+        );
       }
 
-      // ✅ CRITICAL: Fetch with tenant_id filtering
-      return this.getOfferById(insertId, tenantId);
+      // ✅ CRITICAL: Fetch with tenant_id filtering (include offer_params for API consumers)
+      return this.getOfferByIdWithDetails(insertId, '+05:30', tenantId);
     } catch (error) {
       logger.error('OfferService.createOffer error:', error);
       throw error;
@@ -447,7 +366,14 @@ class OfferService {
       });
 
       if (!fields.length) {
-        return this.getOfferById(internalId);
+        if (data.offer_params !== undefined && tenantId) {
+          await offerParamsService.setOfferParams(
+            internalId,
+            tenantId,
+            Array.isArray(data.offer_params) ? data.offer_params : []
+          );
+        }
+        return this.getOfferById(internalId, tenantId);
       }
 
       fields.push('updated_at = UTC_TIMESTAMP()');
@@ -469,7 +395,15 @@ class OfferService {
       // Layer 2: also drop the public-id → internal-id cache so /click resolves freshly
       await cacheService.invalidateOfferByPublicId(existingOffer.public_offer_id, tenantId);
 
-      return this.getOfferById(internalId, tenantId);
+      if (data.offer_params !== undefined && tenantId) {
+        await offerParamsService.setOfferParams(
+          internalId,
+          tenantId,
+          Array.isArray(data.offer_params) ? data.offer_params : []
+        );
+      }
+
+      return this.getOfferByIdWithDetails(internalId, '+05:30', tenantId);
     } catch (error) {
       logger.error('OfferService.updateOffer error:', error);
       throw error;
@@ -594,9 +528,16 @@ class OfferService {
         }
       }
 
+      let offer_params = [];
+      const tid = parsedOffer.tenant_id;
+      if (tid != null) {
+        offer_params = await offerParamsService.getOfferParams(parsedOffer.id, tid);
+      }
+
       return {
         ...parsedOffer,
         advertiser,
+        offer_params,
       };
     } catch (error) {
       logger.error('OfferService.getOfferByIdWithDetails error:', error);
@@ -1429,7 +1370,7 @@ class OfferService {
     };
   }
   async geteditOffer(id, tenantId = null) {
-    return this.getOfferById(id, tenantId);
+    return this.getOfferByIdWithDetails(id, '+05:30', tenantId);
   }
 }
 

@@ -15,6 +15,7 @@ import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { formatDateTimeInTimeZone, parseDate } from '../../utils/dateTime';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
+import '../Logs/LogDetail.css';
 import TimelineFilter from '../../components/TimelineFilter/TimelineFilter';
 import { getTimelineRange } from '../../utils/timelineRange';
 import {
@@ -24,6 +25,10 @@ import {
     userRangeYmdToBackendIstRange,
     userRangeYmdToBackendUtcMysqlRange,
 } from '../../utils/reportTimezone';
+import { parseListTargetingField } from './utils/offerFormTargeting';
+import { formatScheduleTimeForDisplay } from './utils/offerFormPayload';
+import { getTrackingUrlString } from './utils/trackingUrlUtils';
+import TrackingUrlPanel from './components/TrackingUrlPanel';
 import './Offer.css';
 
 const ArrowLeftIcon = () => (
@@ -290,8 +295,12 @@ function OfferDetail() {
     const { byAssignmentId: trackingUrlByAssignmentId, loadingByAssignmentId: loadingTrackingUrls } =
         useAssignmentsTrackingUrls(assignmentIdsForTracking, trackingUrlParams, { enabled: Boolean(id) });
 
+    const getAssignmentTrackingMeta = (assignment) =>
+        trackingUrlByAssignmentId[assignment.assignment_id] ??
+        (assignment.tracking_url ? { tracking_url: assignment.tracking_url, offer_params: [], required_params: [] } : null);
+
     const resolveAssignmentTrackingUrl = (assignment) =>
-        trackingUrlByAssignmentId[assignment.assignment_id] ?? assignment.tracking_url ?? '';
+        getTrackingUrlString(getAssignmentTrackingMeta(assignment));
 
     useEffect(() => {
         if (!id || !assignmentRows.length) {
@@ -443,12 +452,9 @@ function OfferDetail() {
         const conversionModel = offerObj?.advertiser_model || offerObj?.affiliate_model || '-';
         const country = offerObj?.country || '-';
         const carrierName = offerObj?.carrier_name && String(offerObj.carrier_name).trim();
-        const carrierJson = safeParseJson(offerObj?.carrier_targeting_json);
-        const carrierFromJson =
-            (carrierJson?.carrier && Array.isArray(carrierJson.carrier) && carrierJson.carrier.length > 0)
-                ? carrierJson.carrier.join(', ')
-                : null;
-        const carrier = carrierName || carrierFromJson || '-';
+        const carrierParsed = parseListTargetingField(offerObj?.carrier_targeting_json, 'carriers');
+        const carrierFromTargeting = carrierParsed.list ? carrierParsed.list : null;
+        const carrier = carrierName || carrierFromTargeting || '-';
 
         const payoutOverride = assignmentObj?.payout_override;
         const hasPayoutOverride =
@@ -728,6 +734,18 @@ function OfferDetail() {
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>End Date:</span>
                             <span className="detail-value">{formatDate(offer.end_date)}</span>
                         </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Start Time (IST):</span>
+                            <span className="detail-value">
+                                {formatScheduleTimeForDisplay(offer.start_time) ?? '24/7 (no restriction)'}
+                            </span>
+                        </div>
+                        <div className="detail-item">
+                            <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>End Time (IST):</span>
+                            <span className="detail-value">
+                                {formatScheduleTimeForDisplay(offer.end_time) ?? '24/7 (no restriction)'}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -770,6 +788,35 @@ function OfferDetail() {
                                 ) : '-'}
                             </span>
                         </div>
+                        {Array.isArray(offer.offer_params) && offer.offer_params.length > 0 && (
+                            <div className="detail-item" style={{ gridColumn: '1 / -1' }}>
+                                <span className="detail-label" style={{ color: '#666', fontSize: '14px', display: 'block', marginBottom: '8px' }}>
+                                    Tracking URL Parameters:
+                                </span>
+                                <table className="table table-sm" style={{ marginBottom: 0, fontSize: '13px' }}>
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Required</th>
+                                            <th>Default</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {offer.offer_params.map((p) => (
+                                            <tr key={p.param_key}>
+                                                <td><code>{p.param_key}</code></td>
+                                                <td>{p.is_required ? 'Yes' : 'No'}</td>
+                                                <td>{p.default_value || '—'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#64748b' }}>
+                                    Publisher tracking links in the Assignments section below include these parameters automatically
+                                    (required params as <code>{'{param}'}</code> placeholders, or defaults when set).
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -1211,69 +1258,28 @@ function OfferDetail() {
                                     {/* Column 2: Tracking URL (Primary Visual) */}
                                     <div className="tracking-col">
                                         {assignment.assignment_id ? (
-                                            loadingTrackingUrls[assignment.assignment_id] ? (
-                                                <div className="url-skeleton"></div>
-                                            ) : resolveAssignmentTrackingUrl(assignment) ? (
-                                                <div className={`tracking-url-wrapper has-url`}>
-                                                    <div className="tracking-url-display">
-                                                        {resolveAssignmentTrackingUrl(assignment)}
-                                                    </div>
-                                                    <button
-                                                        className={`copy-btn ${copiedId === assignmentId ? 'copied' : ''}`}
-                                                        onClick={async () => {
-                                                            const result = await safeCopyToClipboard(resolveAssignmentTrackingUrl(assignment));
-                                                            if (result.success) {
-                                                                setCopiedId(assignmentId);
-                                                                setTimeout(() => setCopiedId(null), 2000);
-                                                            } else {
-                                                                toast.error('Failed to copy');
-                                                            }
-                                                        }}
-                                                        title="Copy Tracking Link"
-                                                    >
-                                                        {copiedId === assignmentId ? (
-                                                            <>
-                                                                <CheckIcon />
-                                                                <span>Copied</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <CopyIcon />
-                                                                <span>Copy</span>
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                    <button
-                                                        className="copy-btn generate"
-                                                        onClick={() => window.open(resolveAssignmentTrackingUrl(assignment), '_blank')}
-                                                        title="Open Tracking Link"
-                                                        style={{ marginLeft: '8px' }}
-                                                    >
-                                                        <ExternalLinkIcon />
-                                                        <span>Open</span>
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    className="copy-btn generate"
-                                                    onClick={async () => {
-                                                        try {
-                                                            await queryClient.fetchQuery(
-                                                                getAssignmentTrackingUrlQueryOptions(
-                                                                    assignment.assignment_id,
-                                                                    trackingUrlParams
-                                                                )
-                                                            );
-                                                        } catch (error) {
-                                                            console.error(error);
-                                                            toast.error('Failed to generate link');
-                                                        }
-                                                    }}
-                                                >
-                                                    <LinkIcon />
-                                                    <span>Generate Link</span>
-                                                </button>
-                                            )
+                                            <TrackingUrlPanel
+                                                trackingMeta={getAssignmentTrackingMeta(assignment)}
+                                                loading={loadingTrackingUrls[assignment.assignment_id]}
+                                                compact
+                                                onGenerate={
+                                                    !getAssignmentTrackingMeta(assignment)
+                                                        ? async () => {
+                                                              try {
+                                                                  await queryClient.fetchQuery(
+                                                                      getAssignmentTrackingUrlQueryOptions(
+                                                                          assignment.assignment_id,
+                                                                          trackingUrlParams
+                                                                      )
+                                                                  );
+                                                              } catch (error) {
+                                                                  console.error(error);
+                                                                  toast.error('Failed to generate link');
+                                                              }
+                                                          }
+                                                        : undefined
+                                                }
+                                            />
                                         ) : (
                                             <div className="tracking-url-placeholder">
                                                 Save changes to generate link
@@ -1424,8 +1430,23 @@ function OfferDetail() {
                             </thead>
                             <tbody>
                                 {offer.recent_clicks.slice(0, 10).map((click) => (
-                                    <tr key={click.id}>
-                                        <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{click.click_uuid}</td>
+                                    <tr
+                                        key={click.id}
+                                        className="logs-row-clickable"
+                                        onClick={() => click.click_uuid && navigate(`/logs/click/${encodeURIComponent(click.click_uuid)}`)}
+                                        title={click.click_uuid ? 'View click detail' : undefined}
+                                    >
+                                        <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                                            {click.click_uuid ? (
+                                                <Link
+                                                    to={`/logs/click/${encodeURIComponent(click.click_uuid)}`}
+                                                    className="log-row-link"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    {click.click_uuid}
+                                                </Link>
+                                            ) : '—'}
+                                        </td>
                                         <td>{click.publisher_email}</td>
                                         <td>{click.ip}</td>
                                         <td>{click.device_type || '-'}</td>

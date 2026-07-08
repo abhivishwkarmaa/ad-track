@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { assignmentsAPI } from '../../services/api';
+import TrackingUrlPanel from '../Offer/components/TrackingUrlPanel';
+import { normalizeTrackingUrlMeta } from '../Offer/utils/trackingUrlUtils';
 import {
     useAssignmentDetail,
     useAssignmentsList,
@@ -51,7 +53,8 @@ function EditAssignment() {
         offer_url: '',
         notes: '',
         status: 'active',
-        tracking_url: ''
+        tracking_url: '',
+        tracking_meta: null,
     });
     const { data: assignment, isLoading: loadingAssignment, error: assignmentError } = useAssignmentDetail(id);
     const { data: offersResult } = useOffersList({ limit: 100 });
@@ -100,6 +103,7 @@ function EditAssignment() {
             notes: assignment.notes || '',
             status: assignment.status || 'active',
             tracking_url: '',
+            tracking_meta: null,
         });
 
         let cancelled = false;
@@ -107,9 +111,11 @@ function EditAssignment() {
             try {
                 const trackingResponse = await assignmentsAPI.getTrackingUrl(id);
                 if (!cancelled && trackingResponse.success) {
+                    const meta = normalizeTrackingUrlMeta(trackingResponse.data);
                     setFormData((prev) => ({
                         ...prev,
-                        tracking_url: trackingResponse.data.tracking_url,
+                        tracking_url: meta.tracking_url,
+                        tracking_meta: meta,
                     }));
                 }
             } catch (err) {
@@ -391,15 +397,10 @@ function EditAssignment() {
                             />
                         </div>
 
-                        {formData.tracking_url && (
+                        {formData.tracking_meta?.tracking_url && (
                             <div className="form-group">
                                 <label className="form-label">Tracking URL</label>
-                                <input
-                                    type="text"
-                                    className="form-control"
-                                    value={formData.tracking_url}
-                                    readOnly
-                                />
+                                <TrackingUrlPanel trackingMeta={formData.tracking_meta} compact />
                             </div>
                         )}
 

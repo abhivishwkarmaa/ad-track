@@ -5,7 +5,7 @@ import { useOffersList, useCreateOffer } from '../../hooks/queries/useOffersQuer
 import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
 import { useOfferFormState } from './hooks/useOfferFormState';
 import { createEmptyOfferFormData } from './utils/offerFormState';
-import { buildOfferPayload } from './utils/offerFormPayload';
+import { buildOfferPayload, validateOfferParamsClient } from './utils/offerFormPayload';
 import OfferForm from './components/OfferForm';
 import './Offer.css';
 
@@ -44,8 +44,15 @@ function NewOffer() {
                 return;
             }
 
+            const paramError = validateOfferParamsClient(form.offerParams);
+            if (paramError) {
+                toast.error(paramError);
+                return;
+            }
+
             const offerData = buildOfferPayload(form.formData, {
                 showCustomCategory: form.showCustomCategory,
+                offerParams: form.offerParams,
             });
 
             await createOfferMutation.mutateAsync(offerData);

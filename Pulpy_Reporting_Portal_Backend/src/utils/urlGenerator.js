@@ -79,6 +79,31 @@ function normalizeBaseURL(url) {
   return normalized;
 }
 
+/**
+ * Append offer-defined param keys to a tracking URL.
+ * Uses default_value when set; otherwise {param_key} placeholder for publisher substitution.
+ */
+export function appendOfferParamPlaceholders(url, offerParams = []) {
+  if (!url || !Array.isArray(offerParams) || offerParams.length === 0) return url;
+
+  let result = url;
+  for (const p of offerParams) {
+    const key = String(p.param_key || '').trim();
+    if (!key) continue;
+    if (new RegExp(`[?&]${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=`, 'i').test(result)) {
+      continue;
+    }
+
+    const hasDefault =
+      p.default_value != null && String(p.default_value).trim() !== '';
+    const token = hasDefault ? String(p.default_value).trim() : `{${key}}`;
+    const encoded = token.includes('{') ? token : encodeURIComponent(token);
+    result += `${result.includes('?') ? '&' : '?'}${key}=${encoded}`;
+  }
+
+  return result;
+}
+
 export function generateTrackingURL(baseURL, offerId, publisherId, params = {}) {
   // Normalize baseURL to handle duplicate protocols
   const normalizedBaseURL = normalizeBaseURL(baseURL);
@@ -172,10 +197,36 @@ export function replaceMacros(url, macroValues = {}) {
     result = result.replace(/{TID}/gi, macroValues.tid);
   }
 
+  const reservedMacroKeys = new Set([
+    'click_id',
+    'clickid',
+    'CLICK_ID',
+    'REPLACE',
+    'replace',
+    'rcid',
+    'RCID',
+    'tid',
+    'TID',
+  ]);
+
+  for (const [key, val] of Object.entries(macroValues)) {
+    if (val == null || val === '') continue;
+    if (reservedMacroKeys.has(key)) continue;
+    if (!/^[a-zA-Z0-9_]+$/.test(key)) continue;
+    const s = String(val);
+    const re = new RegExp(`\\{${key}\\}`, 'gi');
+    result = result.replace(re, s);
+  }
+
   return result;
 }
 
-export function appendClickParams(offerUrl, clickData) {
+/**
+ * @param {string} offerUrl
+ * @param {Record<string, string|null|undefined>} clickData
+ * @param {Record<string, string>} [offerDynamicParams] - merged offer-defined sub params
+ */
+export function appendClickParams(offerUrl, clickData, offerDynamicParams = {}) {
   // Helper to check if value contains macros (curly braces) - these shouldn't be URL-encoded
   const hasMacros = (value) => value && typeof value === 'string' && (value.includes('{') || value.includes('}'));
 
@@ -237,6 +288,28 @@ export function appendClickParams(offerUrl, clickData) {
       url.searchParams.set('android_id', clickData.android_id);
     }
 
+    const skipDynamic = new Set([
+      'click_id',
+      'clickid',
+      'tid',
+      'rcid',
+      'source_id',
+      'device_id',
+      'google_id',
+      'android_id',
+    ]);
+    if (offerDynamicParams && typeof offerDynamicParams === 'object') {
+      for (const [k, v] of Object.entries(offerDynamicParams)) {
+        if (v == null || v === '') continue;
+        const name = String(k);
+        if (!/^[a-zA-Z0-9_]+$/.test(name)) continue;
+        if (skipDynamic.has(name.toLowerCase())) continue;
+        if (!hasParam(url, name)) {
+          url.searchParams.set(name, String(v));
+        }
+      }
+    }
+
     // Append params with macros directly to avoid URL encoding
     if (paramsToAppend.length > 0) {
       const separator = url.search ? '&' : '?';
@@ -265,6 +338,19 @@ export function appendClickParams(offerUrl, clickData) {
     }
     if (clickData.rcid && !isOnlyMacro(clickData.rcid) && !hasRcid) {
       params.push(`rcid=${clickData.rcid}`);
+    }
+
+    const skipDyn = new Set(['click_id', 'clickid', 'tid', 'rcid', 'source_id', 'device_id', 'google_id', 'android_id']);
+    if (offerDynamicParams && typeof offerDynamicParams === 'object') {
+      for (const [k, v] of Object.entries(offerDynamicParams)) {
+        if (v == null || v === '') continue;
+        const name = String(k);
+        if (!/^[a-zA-Z0-9_]+$/.test(name) || skipDyn.has(name.toLowerCase())) continue;
+        const needle = `${name.toLowerCase()}=`;
+        if (!urlLower.includes(needle)) {
+          params.push(`${name}=${encodeURIComponent(String(v))}`);
+        }
+      }
     }
 
     if (params.length === 0) {

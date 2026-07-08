@@ -1,15 +1,11 @@
-/** Default schedule dates for new offers. */
+/** Default schedule dates for new offers (times empty = 24/7, no IST window). */
 export function getDefaultDates() {
     const now = new Date();
     const startDate = now.toISOString().split('T')[0];
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    const startTime = `${hours}:${minutes}:${seconds}`;
     const endDateObj = new Date(now);
     endDateObj.setFullYear(endDateObj.getFullYear() + 5);
     const endDate = endDateObj.toISOString().split('T')[0];
-    return { startDate, startTime, endDate, endTime: startTime };
+    return { startDate, endDate };
 }
 
 export function createEmptyOfferFormData() {
@@ -36,9 +32,9 @@ export function createEmptyOfferFormData() {
         billing_type: '',
         token_type: '',
         start_date: defaultDates.startDate,
-        start_time: defaultDates.startTime,
+        start_time: '',
         end_date: defaultDates.endDate,
-        end_time: defaultDates.endTime,
+        end_time: '',
         capping_type: 'none',
         capping_duration: 'daily',
         capping_amount: '',
@@ -56,6 +52,12 @@ export function createEmptyOfferFormData() {
         device_targeting: [],
         os_action: 'ALLOW',
         os_targeting: [],
+        isp_action: 'ALLOW',
+        isp_list: '',
+        carrier_action: 'ALLOW',
+        carrier_list: '',
+        city_action: 'ALLOW',
+        city_list: '',
     };
 }
 

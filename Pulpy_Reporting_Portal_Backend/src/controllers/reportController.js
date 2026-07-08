@@ -1,4 +1,5 @@
 import reportService from '../services/reportService.js';
+import logDetailService from '../services/logDetailService.js';
 import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
@@ -246,6 +247,64 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getConversions error:', error);
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
+    }
+  }
+
+  async getClickDetail(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const { clickUuid } = request.params;
+      const detail = await logDetailService.getClickDetail(clickUuid, tenantId);
+      if (!detail) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Click not found',
+        });
+      }
+
+      return reply.send({ success: true, data: detail });
+    } catch (error) {
+      logger.error('ReportController.getClickDetail error:', error);
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
+    }
+  }
+
+  async getConversionDetail(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const { conversionUuid } = request.params;
+      const detail = await logDetailService.getConversionDetail(conversionUuid, tenantId);
+      if (!detail) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Conversion not found',
+        });
+      }
+
+      return reply.send({ success: true, data: detail });
+    } catch (error) {
+      logger.error('ReportController.getConversionDetail error:', error);
       const status = error.statusCode || 500;
       return reply.code(status).send(createErrorResponse(error, status));
     }

@@ -7,7 +7,7 @@ import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { OFFER_COUNTRIES } from '../../utils/countries';
 import { useOfferFormState } from './hooks/useOfferFormState';
 import { createEmptyOfferFormData } from './utils/offerFormState';
-import { buildOfferPayload, mapOfferToFormData } from './utils/offerFormPayload';
+import { buildOfferPayload, mapOfferToFormData, mapOfferParamsFromOffer, validateOfferParamsClient } from './utils/offerFormPayload';
 import OfferForm from './components/OfferForm';
 import './Offer.css';
 
@@ -43,6 +43,7 @@ function EditOffer() {
     useEffect(() => {
         if (!offer) return;
         form.setFormData(mapOfferToFormData(offer, id));
+        form.setOfferParams(mapOfferParamsFromOffer(offer));
         const isStandardCountry = OFFER_COUNTRIES.some((c) => c.code === (offer.country || 'US'));
         if (!isStandardCountry && offer.country) {
             form.setShowCustomCountry(true);
@@ -60,8 +61,15 @@ function EditOffer() {
                 return;
             }
 
+            const paramError = validateOfferParamsClient(form.offerParams);
+            if (paramError) {
+                toast.error(paramError);
+                return;
+            }
+
             const offerData = buildOfferPayload(form.formData, {
                 showCustomCategory: form.showCustomCategory,
+                offerParams: form.offerParams,
             });
 
             await updateOfferMutation.mutateAsync({ id, data: offerData });

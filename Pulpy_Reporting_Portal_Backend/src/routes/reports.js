@@ -33,6 +33,10 @@ async function reportRoutes(fastify, options) {
   // Conversion Logs
   fastify.get('/conversions', reportController.getConversions);
 
+  // Click / conversion drill-down
+  fastify.get('/clicks/:clickUuid', reportController.getClickDetail);
+  fastify.get('/conversions/:conversionUuid', reportController.getConversionDetail);
+
   // Manual Click Approval
   fastify.post('/approve-click', reportController.manualApproveClick)
 }

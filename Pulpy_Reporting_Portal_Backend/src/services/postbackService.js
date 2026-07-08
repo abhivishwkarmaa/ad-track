@@ -9,6 +9,9 @@ import http from 'http';
 import crypto from 'crypto';
 
 import redis from '../config/redis.js';
+import { checkOfferValidity, validateConversionSchedule } from './offer.validation.js';
+
+// Offer validity + IST schedule checks live in offer.validation.js (shared with tracking).
 
 // ---------- In-file lookups (no external findById/getOfferById) ----------
 /** Get offer by internal id only. Returns row or null. */
@@ -73,25 +76,6 @@ async function getPublisherByInternalId(id, tenantId) {
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
-/** Check if offer is valid for conversions (live, within dates). */
-function checkOfferValidity(offer) {
-  if (!offer) return { valid: false, message: 'Offer not found', error_type: 'offer_not_found' };
-  if (offer.status !== 'live') {
-    return { valid: false, message: `Offer is not live. Current status: ${offer.status}.`, error_type: 'offer_not_live' };
-  }
-  const now = new Date();
-  if (offer.end_date) {
-    const endDate = new Date(offer.end_date);
-    endDate.setHours(23, 59, 59, 999);
-    if (now > endDate) return { valid: false, message: `Offer has expired.`, error_type: 'offer_expired' };
-  }
-  if (offer.start_date) {
-    const startDate = new Date(offer.start_date);
-    startDate.setHours(0, 0, 0, 0);
-    if (now < startDate) return { valid: false, message: `Offer has not started yet.`, error_type: 'offer_not_started' };
-  }
-  return { valid: true, message: 'Offer is valid and active', error_type: null };
-}
 
 // ---------- End in-file lookups ----------
 
@@ -643,7 +627,22 @@ export class PostbackService {
 
           const offerValidation = checkOfferValidity(offer);
           if (!offerValidation.valid) {
-            return { success: false, message: offerValidation.message, duplicate: false };
+            return {
+              success: false,
+              message: offerValidation.message,
+              error_type: offerValidation.error_type,
+              duplicate: false,
+            };
+          }
+
+          const scheduleValidation = validateConversionSchedule(offer);
+          if (!scheduleValidation.valid) {
+            return {
+              success: false,
+              message: scheduleValidation.message,
+              error_type: scheduleValidation.error_type,
+              duplicate: false,
+            };
           }
 
           // 3. Get Assignment & Payout (in-file lookup by internal id)
@@ -1011,6 +1010,17 @@ export class PostbackService {
           success: false,
           message: offerValidation.message,
           error_type: offerValidation.error_type,
+          conversion: null,
+          duplicate: false,
+        };
+      }
+
+      const scheduleValidation = validateConversionSchedule(offer);
+      if (!scheduleValidation.valid) {
+        return {
+          success: false,
+          message: scheduleValidation.message,
+          error_type: scheduleValidation.error_type,
           conversion: null,
           duplicate: false,
         };
@@ -1808,97 +1818,6 @@ export class PostbackService {
     }
   }
 
-  /**
-   * Validate offer is active and not expired before processing conversion
-   * @param {Object} offer - Offer object from database
-   * @returns {Object} - { valid: boolean, message: string, error_type: string }
-   */
-  validateOfferForConversion(offer) {
-    // Check offer status
-    if (offer.status !== 'live') {
-      return {
-        valid: false,
-        message: `Offer is not active. Current status: ${offer.status}. Only live offers can accept conversions.`,
-        error_type: 'offer_not_active'
-      };
-    }
-
-    // UTC ENFORCEMENT: Business logic validation uses IST conversion for time-based checks
-    // Storage remains UTC, only business rules convert to IST
-    const now = new Date();
-    const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    const currentDate = istTime.toISOString().split('T')[0]; // YYYY-MM-DD in IST
-    const currentTime = istTime.toISOString().split('T')[1].split('.')[0]; // HH:MM:SS in IST
-
-    // Check if offer has expired (end_date passed)
-    if (offer.end_date) {
-      const endDate = new Date(offer.end_date); // Assuming stored as YYYY-MM-DD
-      // We interpret stored date as end of that day in IST
-      endDate.setHours(23, 59, 59, 999);
-
-      // Compare YYYY-MM-DD strings to avoid offset confusion
-      if (currentDate > offer.end_date) {
-        return {
-          valid: false,
-          message: `Offer has expired. End date: ${offer.end_date}`,
-          error_type: 'offer_expired'
-        };
-      }
-    }
-
-    // Check if offer hasn't started yet (start_date in future)
-    if (offer.start_date) {
-      // Compare YYYY-MM-DD strings
-      if (currentDate < offer.start_date) {
-        return {
-          valid: false,
-          message: `Offer has not started yet. Start date: ${offer.start_date}`,
-          error_type: 'offer_not_started'
-        };
-      }
-    }
-
-    // Check time restrictions if both start_time and end_time are set
-    // Assuming start_time and end_time are stored as 'HH:MM:SS' strings
-    if (offer.start_time && offer.end_time) {
-      const startTime = offer.start_time;
-      const endTime = offer.end_time;
-
-      // Compare times (HH:MM:SS format)
-      if (currentTime < startTime || currentTime > endTime) {
-        return {
-          valid: false,
-          message: `Conversion outside allowed time window. Allowed: ${startTime} - ${endTime}, Current: ${currentTime}`,
-          error_type: 'offer_time_restricted'
-        };
-      }
-    } else if (offer.start_time) {
-      // Only start_time set
-      if (currentTime < offer.start_time) {
-        return {
-          valid: false,
-          message: `Conversion before allowed start time. Start time: ${offer.start_time}, Current: ${currentTime}`,
-          error_type: 'offer_time_restricted'
-        };
-      }
-    } else if (offer.end_time) {
-      // Only end_time set
-      if (currentTime > offer.end_time) {
-        return {
-          valid: false,
-          message: `Conversion after allowed end time. End time: ${offer.end_time}, Current: ${currentTime}`,
-          error_type: 'offer_time_restricted'
-        };
-      }
-    }
-
-    return {
-      valid: true,
-      message: 'Offer is valid for conversion',
-      error_type: null
-    };
-  }
-
   async isCapExceeded(offer, tenantId = null) {
     if (!offer) return false;
 
@@ -1961,6 +1880,16 @@ export class PostbackService {
       // 2. Fetch Offer and Assignment for Payout
       const offer = await getOfferByInternalId(click.offer_id, tenantId);
       if (!offer) throw new Error('Offer not found');
+
+      const offerValidation = checkOfferValidity(offer);
+      if (!offerValidation.valid) {
+        throw new Error(offerValidation.message);
+      }
+
+      const scheduleValidation = validateConversionSchedule(offer);
+      if (!scheduleValidation.valid) {
+        throw new Error(scheduleValidation.message);
+      }
 
       let assignment = null;
       if (click.publisher_offer_id) {

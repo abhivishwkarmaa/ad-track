@@ -584,7 +584,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
         ip, user_agent, referrer, country, region, city, isp, location, domain,
         device_type, browser, os, os_version, device_brand, device_model,
         source_id, device_id, google_id, android_id, rcid, tid,
-        timestamp, created_at
+        extra_params, timestamp, created_at
     ) VALUES ?
     ON DUPLICATE KEY UPDATE id = id`;
 
@@ -635,6 +635,7 @@ async function bulkInsertClicks(clicks, batchTimestamp = new Date()) {
             c.device_type || '', c.browser || '', c.os || '', c.os_version || '', c.device_brand || '', c.device_model || '',
             c.source_id || null, c.device_id || null, c.google_id || null, c.android_id || null,
             c.rcid || null, c.tid || null,
+            c.extra_params && String(c.extra_params).trim() !== '' ? c.extra_params : null,
             new Date(), new Date() // UTC timestamps - database connection handles timezone conversion
         ];
     });

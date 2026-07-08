@@ -2,8 +2,6 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
-import { parseDevice } from '../utils/deviceParser.js';
-import { getLocationFromIP, getCountryFromHeaders } from '../utils/countryLookup.js';
 import { extractDomain, appendClickParams, replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { generateOfferErrorPage } from '../utils/errorPage.js';
 import offerService from './offer.service.js';
@@ -12,6 +10,8 @@ import assignmentService from './assignmentService.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import { TenantRequiredError } from '../utils/secureErrors.js';
 import offerPublicIdService from './offerPublicIdService.js';
+import offerParamsService from './offerParamsService.js';
+import { enforceOfferTrafficRules } from './trackingOfferGates.js';
 
 import { clickQueue, isOverloaded } from '../workers/clickQueue.js';
 import redis from '../config/redis.js';
@@ -360,11 +360,35 @@ export class TrackingService {
         throw new Error(`Security violation: Assignment belongs to tenant ${assignment.tenant_id}, but request is for tenant ${tenantId}. Access denied.`);
       }
 
+      // Offer-defined pass-through params: merge query + defaults, enforce required
+      let mergedOfferParams = {};
+      const offerParamDefs = await offerParamsService.getOfferParams(offer.id, tenantId);
+      if (offerParamDefs.length > 0) {
+        const provided = offerParamsService.collectProvidedForDefinitions(offerParamDefs, query);
+        mergedOfferParams = offerParamsService.mergeWithDefaults(offerParamDefs, provided);
+        const paramCheck = offerParamsService.validateRequiredParams(offerParamDefs, mergedOfferParams);
+        if (!paramCheck.valid) {
+          const msg = `Missing required parameters: ${paramCheck.missing.join(', ')}`;
+          return {
+            html: generateOfferErrorPage(msg, 'missing_offer_params'),
+            clickId: null,
+          };
+        }
+      }
+
       // ============================================
       // 🕵️ TEST POSTBACK INTERCEPTION
       // ============================================
       // Check if there is an active test session for this tenant
-      const testResult = await this._processTestInterception(tenantId, offer, publisher, assignment, query, request);
+      const testResult = await this._processTestInterception(
+        tenantId,
+        offer,
+        publisher,
+        assignment,
+        query,
+        request,
+        mergedOfferParams
+      );
       if (testResult) {
         return testResult; // 🛑 EXIT EARLY: No Production DB Writes
       }
@@ -375,97 +399,15 @@ export class TrackingService {
 
       let redirectUrl = '';
 
-      // Validation
-      const offerValidation = offerService.checkOfferValidity(offer);
-      if (!offerValidation.valid) {
+      // Validation + targeting (schedule, geo, device, ISP/city/carrier)
+      const traffic = await enforceOfferTrafficRules(offer, { ip, userAgent, request });
+      if (!traffic.ok) {
         return {
-          html: generateOfferErrorPage(offerValidation.message, offerValidation.error_type),
-          clickId: null
+          html: generateOfferErrorPage(traffic.message, traffic.error_type),
+          clickId: null,
         };
       }
-
-      // 3.1 TARGETING VALIDATION
-      const deviceInfo = parseDevice(userAgent);
-      const offerIpAction = offer.ip_action ? offer.ip_action.toLowerCase() : null;
-      if (offerIpAction && offer.ip_list) {
-        const ipList = offer.ip_list.split(',').map(i => i.trim()).filter(Boolean);
-        const isIpMatch = ipList.includes(ip);
-        if (offerIpAction === 'allow' && !isIpMatch) {
-          return { html: generateOfferErrorPage('IP not allowed', 'ip_blocked'), clickId: null };
-        } else if (offerIpAction === 'block' && isIpMatch) {
-          return { html: generateOfferErrorPage('IP blocked', 'ip_blocked'), clickId: null };
-        }
-      }
-
-      const location = getLocationFromIP(ip); // { country, region, city }
-      const country_final = location.country || getCountryFromHeaders(request) || '';
-
-      const offerCountryAction = offer.country_action ? offer.country_action.toLowerCase() : null;
-      if (offerCountryAction && offer.country_list) {
-        const countryList = offer.country_list.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
-        const isCountryMatch = countryList.includes(country_final.toLowerCase());
-        if (offerCountryAction === 'allow' && !isCountryMatch) {
-          return { html: generateOfferErrorPage('Country not allowed', 'country_blocked'), clickId: null };
-        } else if (offerCountryAction === 'block' && isCountryMatch) {
-          return { html: generateOfferErrorPage('Country blocked', 'country_blocked'), clickId: null };
-        }
-      }
-
-      const offerDeviceAction = offer.device_action ? offer.device_action.toLowerCase() : null;
-      if (offerDeviceAction && offer.device_targeting_json) {
-        try {
-          const dt = typeof offer.device_targeting_json === 'string' ? JSON.parse(offer.device_targeting_json) : offer.device_targeting_json;
-          const allowedDevices = Array.isArray(dt) ? dt : (dt?.device || dt?.devices || []);
-          if (allowedDevices.length > 0 && !allowedDevices.includes('All')) {
-            const isMatch = allowedDevices.includes(deviceInfo.deviceType) || allowedDevices.map(d => d.toLowerCase()).includes(deviceInfo.deviceType.toLowerCase());
-            if (offerDeviceAction === 'allow' && !isMatch) {
-              return { html: generateOfferErrorPage('Device not allowed', 'device_blocked'), clickId: null };
-            } else if (offerDeviceAction === 'block' && isMatch) {
-              return { html: generateOfferErrorPage('Device blocked', 'device_blocked'), clickId: null };
-            }
-          }
-        } catch (e) {
-          logger.warn('Parsing device_targeting_json failed', e);
-        }
-      }
-
-      const offerBrowserAction = offer.browser_action ? offer.browser_action.toLowerCase() : null;
-      if (offerBrowserAction && offer.browser_targeting_json) {
-        try {
-          const bt = typeof offer.browser_targeting_json === 'string' ? JSON.parse(offer.browser_targeting_json) : offer.browser_targeting_json;
-          const allowedBrowsers = Array.isArray(bt) ? bt : (bt?.browser || bt?.browsers || []);
-          if (allowedBrowsers.length > 0 && !allowedBrowsers.includes('All')) {
-            const isMatch = allowedBrowsers.includes(deviceInfo.browser) || allowedBrowsers.map(b => b.toLowerCase()).includes(deviceInfo.browser.toLowerCase());
-            if (offerBrowserAction === 'allow' && !isMatch) {
-              return { html: generateOfferErrorPage('Browser not allowed', 'browser_blocked'), clickId: null };
-            } else if (offerBrowserAction === 'block' && isMatch) {
-              return { html: generateOfferErrorPage('Browser blocked', 'browser_blocked'), clickId: null };
-            }
-          }
-        } catch (e) {
-          logger.warn('Parsing browser_targeting_json failed', e);
-        }
-      }
-
-      const offerOsAction = offer.os_action ? offer.os_action.toLowerCase() : null;
-      if (offerOsAction && offer.os_targeting_json) {
-        try {
-          const ot = typeof offer.os_targeting_json === 'string' ? JSON.parse(offer.os_targeting_json) : offer.os_targeting_json;
-          const allowedOs = Array.isArray(ot) ? ot : (ot?.os || []);
-          if (allowedOs.length > 0 && !allowedOs.includes('All')) {
-            const isMatch = allowedOs.includes(deviceInfo.os) || allowedOs.map(o => o.toLowerCase()).includes(deviceInfo.os.toLowerCase());
-            if (offerOsAction === 'allow' && !isMatch) {
-              return { html: generateOfferErrorPage('OS not allowed', 'os_blocked'), clickId: null };
-            } else if (offerOsAction === 'block' && isMatch) {
-              return { html: generateOfferErrorPage('OS blocked', 'os_blocked'), clickId: null };
-            }
-          }
-        } catch (e) {
-          logger.warn('Parsing os_targeting_json failed', e);
-        }
-      }
-
-
+      const { deviceInfo, location, country_final } = traffic;
 
       // ✅ 4. REDIS: CHECK OFFER & PUBLISHER CAPS (Zero DB)
       // ============================================
@@ -550,7 +492,7 @@ export class TrackingService {
         }
       }
 
-      redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+      redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
 
       // Assignment Caps? (omitted for brevity, can implement similar pattern in CacheService)
 
@@ -629,7 +571,11 @@ export class TrackingService {
         force_reject: (isCapErr === false && (
           (offerCapStatus.isHit && offer.capping_action === 'reject') ||
           (pubCapStatus.isHit && assignment.capping_action === 'reject')
-        )) ? 'true' : 'false'
+        )) ? 'true' : 'false',
+        extra_params:
+          mergedOfferParams && Object.keys(mergedOfferParams).length > 0
+            ? JSON.stringify(mergedOfferParams)
+            : '',
       };
 
       // ✅ CRITICAL: Redis key MUST be: click:{tenant_id}:{offer_id}:{publisher_id}:{click_id}
@@ -817,24 +763,31 @@ export class TrackingService {
     }
   }
 
-  _buildRedirectUrl(assignment, offer, query, clickUuid) {
+  _buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams = {}) {
     let url = assignment.destination_url || offer.offer_url;
     if (offer.status === 'deactivate') url = offer.fallback_url || url;
 
-    url = replaceMacros(url, {
+    const macroPayload = {
       click_id: clickUuid,
       rcid: query.rcid || '',
       tid: query.tid || '',
-    });
+      ...mergedOfferParams,
+    };
 
-    return appendClickParams(url, {
-      click_id: clickUuid,
-      tid: query.tid || null,
-      rcid: query.rcid || null
-    });
+    url = replaceMacros(url, macroPayload);
+
+    return appendClickParams(
+      url,
+      {
+        click_id: clickUuid,
+        tid: query.tid || null,
+        rcid: query.rcid || null,
+      },
+      mergedOfferParams
+    );
   }
 
-  async _processTestInterception(tenantId, offer, publisher, assignment, query, request) {
+  async _processTestInterception(tenantId, offer, publisher, assignment, query, request, mergedOfferParams = {}) {
     try {
       // ✅ Key Pattern: test:postback:{tenant_id}:{publisher_id}:{offer_id}
       const key = `test:postback:${tenantId}:${publisher.id}:${offer.id}`;
@@ -878,7 +831,7 @@ export class TrackingService {
 
         // Continue redirect normally (no postback fired)
         const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
-        const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+        const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
 
         return {
           redirect: redirectUrl,
@@ -973,7 +926,7 @@ export class TrackingService {
       // ❌ NO conversions table insert
       // ❌ NO postback_logs table insert
       const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
-      const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid);
+      const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
 
       logger.info('[TEST] 🔄 Returning redirect (ZERO DB WRITES)', {
         redirect_url: redirectUrl.substring(0, 100) + '...'
@@ -1247,18 +1200,23 @@ export class TrackingService {
         return { success: false, error: 'Assignment not found or inactive' };
       }
 
-      // ✅ Verify assignment belongs to tenant if tenant_id is set
       if (tenantId && assignment.tenant_id && assignment.tenant_id !== tenantId) {
         return { success: false, error: 'Assignment does not belong to this tenant' };
       }
 
-      // Extract info
       const ip = extractIP(request);
       const userAgent = request.headers['user-agent'] || '';
       const referrer = request.headers.referer || request.headers.referrer || null;
 
-      // 🔒 STRICT: Tenant must come from subdomain - NO FALLBACKS
-      // Tenant identity was already resolved from subdomain
+      const impTraffic = await enforceOfferTrafficRules(offer, { ip, userAgent, request });
+      if (!impTraffic.ok) {
+        return {
+          success: false,
+          error: impTraffic.message,
+          error_type: impTraffic.error_type,
+        };
+      }
+
       const finalTenantId = tenantId;
 
       if (!finalTenantId) {
@@ -1266,7 +1224,6 @@ export class TrackingService {
         return { success: false, error: 'Tenant identity required from subdomain. Cannot track impression without tenant context.' };
       }
 
-      // ✅ Validate offer belongs to resolved tenant
       if (offer && offer.tenant_id && parseInt(offer.tenant_id) !== parseInt(finalTenantId)) {
         logger.error('❌ HARD FAILURE: Offer tenant mismatch for impression', {
           offer_id: offer.id,
@@ -1276,7 +1233,6 @@ export class TrackingService {
         return { success: false, error: `Security violation: Offer ${offer.id} belongs to tenant ${offer.tenant_id}, but request is for tenant ${finalTenantId}. Access denied.` };
       }
 
-      // ✅ Verify ownership if tenant_id is set on offer/publisher
       if (offer.tenant_id && offer.tenant_id !== finalTenantId) {
         return { success: false, error: 'Offer does not belong to this tenant' };
       }

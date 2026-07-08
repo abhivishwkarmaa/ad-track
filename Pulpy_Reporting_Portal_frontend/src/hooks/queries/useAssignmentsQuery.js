@@ -4,6 +4,7 @@ import { assignmentsAPI } from '../../services/api';
 import { queryKeys } from '../../lib/queryKeys';
 import { unwrapApiData } from '../../lib/apiQuery';
 import { referenceDataQueryDefaults, listQueryDefaults } from '../../lib/queryClient';
+import { normalizeTrackingUrlMeta } from '../../pages/Offer/utils/trackingUrlUtils';
 import {
     invalidateListCaches,
     patchAssignmentsListCaches,
@@ -43,7 +44,7 @@ export function getAssignmentTrackingUrlQueryOptions(assignmentId, params = {}) 
         queryKey: queryKeys.assignments.trackingUrl(assignmentId, params),
         queryFn: ({ signal }) =>
             unwrapApiData(assignmentsAPI.getTrackingUrl(assignmentId, params, { signal })),
-        select: (response) => response.data?.tracking_url ?? '',
+        select: (response) => normalizeTrackingUrlMeta(response.data),
     };
 }
 
@@ -72,9 +73,9 @@ export function useAssignmentsTrackingUrls(assignmentIds, params = {}, options =
     const byAssignmentId = useMemo(() => {
         const map = {};
         uniqueIds.forEach((assignmentId, index) => {
-            const url = queries[index]?.data;
-            if (url) {
-                map[assignmentId] = url;
+            const meta = queries[index]?.data;
+            if (meta?.tracking_url) {
+                map[assignmentId] = meta;
             }
         });
         return map;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
@@ -15,6 +15,7 @@ import {
 } from '../../utils/dateTime';
 import { getDetailedReportsPresetRange } from '../../utils/timelineRange';
 import { userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
+import '../Logs/LogDetail.css';
 import './Reports.css';
 
 // Icons
@@ -767,7 +768,16 @@ function DetailedReports() {
                             </tr>
                         ) : (
                             reports.map((row, idx) => (
-                                <tr key={idx}>
+                                <tr
+                                    key={idx}
+                                    className={!isAggregated && row.click_uuid ? 'logs-row-clickable' : undefined}
+                                    onClick={
+                                        !isAggregated && row.click_uuid
+                                            ? () => navigate(`/logs/click/${encodeURIComponent(row.click_uuid)}`)
+                                            : undefined
+                                    }
+                                    title={!isAggregated && row.click_uuid ? 'View click detail' : undefined}
+                                >
                                     {tableColumns.map(col => {
                                         const val = row[col.id];
                                         if (col.id === 'referrer' || col.id === 'referer') {
@@ -779,7 +789,35 @@ function DetailedReports() {
                                         if (col.id === 'offer_id') return <td key={col.id}>{row.offer_name ? `${row.offer_id} - ${row.offer_name}` : row.offer_id}</td>;
                                         if (col.id === 'publisher_id') return <td key={col.id}>{row.publisher_name || row.publisher_company ? `${row.publisher_id} - ${row.publisher_name || row.publisher_company}` : row.publisher_id}</td>;
                                         if (col.id === 'advertiser_id') return <td key={col.id}>{row.advertiser_name ? `${row.advertiser_id} - ${row.advertiser_name}` : row.advertiser_id}</td>;
-                                        if (col.id === 'conversion_status') return <td key={col.id}>{getStatusBadge(val)}</td>;
+                                        if (col.id === 'conversion_status') {
+                                            if (row.conversion_uuid && val) {
+                                                return (
+                                                    <td key={col.id}>
+                                                        <Link
+                                                            to={`/logs/conversion/${encodeURIComponent(row.conversion_uuid)}`}
+                                                            className="log-row-link"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            {getStatusBadge(val)}
+                                                        </Link>
+                                                    </td>
+                                                );
+                                            }
+                                            return <td key={col.id}>{getStatusBadge(val)}</td>;
+                                        }
+                                        if (col.id === 'click_uuid' && val) {
+                                            return (
+                                                <td key={col.id}>
+                                                    <Link
+                                                        to={`/logs/click/${encodeURIComponent(val)}`}
+                                                        className="log-row-link"
+                                                        title="View full click detail"
+                                                    >
+                                                        {val}
+                                                    </Link>
+                                                </td>
+                                            );
+                                        }
                                         if (col.id === 'timestamp') {
                                             const clickT = formatDate(getClickTimeRaw(row), 'datetime');
                                             const convT = row.conversion_timestamp
@@ -815,7 +853,10 @@ function DetailedReports() {
                                                     {canApprove && (
                                                         <button 
                                                             className="btn btn-primary" 
-                                                            onClick={() => handleApproveClick(row.click_uuid)}
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleApproveClick(row.click_uuid);
+                                                            }}
                                                             title="Manually Approve"
                                                             style={{ 
                                                                 padding: '4px 8px', 
@@ -882,7 +923,10 @@ function DetailedReports() {
                                                          return canApprove && (
                                                             <button 
                                                                 className="btn btn-primary" 
-                                                                onClick={() => handleApproveClick(row.click_uuid)}
+                                                                onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleApproveClick(row.click_uuid);
+                                                            }}
                                                                 style={{ 
                                                                     padding: '4px 10px', 
                                                                     fontSize: '11px',

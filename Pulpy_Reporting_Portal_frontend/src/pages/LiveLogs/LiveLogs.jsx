@@ -9,6 +9,7 @@ import { formatDateTimeIST } from '../../utils/dateTime';
 import { formatYmdInTimeZone, userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
 import './LiveLogs.css';
+import '../Logs/LogDetail.css';
 
 const ReportsIcon = () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
@@ -301,11 +302,26 @@ const LiveLogs = () => {
                                 </td>
                             </tr>
                         ) : data.map((row, idx) => (
-                            <tr key={idx}>
+                            <tr
+                                key={idx}
+                                className="logs-row-clickable"
+                                onClick={() => {
+                                    if (activeTab === 'clicks' && row.click_uuid) {
+                                        navigate(`/logs/click/${encodeURIComponent(row.click_uuid)}`);
+                                    } else if (activeTab === 'conversions' && row.conversion_uuid) {
+                                        navigate(`/logs/conversion/${encodeURIComponent(row.conversion_uuid)}`);
+                                    }
+                                }}
+                                title="View full detail"
+                            >
                                 {activeTab === 'clicks' ? (
                                     <>
                                         <td>{formatDate(row.click_created_at || row.created_at)}</td>
-                                        <td className="monospace">{row.click_uuid}</td>
+                                        <td className="monospace">
+                                            {row.click_uuid ? (
+                                                <span className="log-row-link">{row.click_uuid}</span>
+                                            ) : '—'}
+                                        </td>
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_company || row.publisher_email} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>{row.ip}</td>
@@ -317,8 +333,14 @@ const LiveLogs = () => {
                                 ) : (
                                     <>
                                         <td>{formatDate(row.created_at)}</td>
-                                        <td className="monospace">{row.conversion_uuid}</td>
-                                        <td className="monospace">{row.click_uuid}</td>
+                                        <td className="monospace">
+                                            <span className="log-row-link">{row.conversion_uuid}</span>
+                                        </td>
+                                        <td className="monospace">
+                                            {row.click_uuid ? (
+                                                <span className="log-row-link">{row.click_uuid}</span>
+                                            ) : '—'}
+                                        </td>
                                         <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
                                         <td>{row.publisher_name} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
@@ -335,7 +357,10 @@ const LiveLogs = () => {
                                                 return (
                                                     <button
                                                         className="btn btn-approve-sm"
-                                                        onClick={() => handleApproveClick(row.click_uuid)}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleApproveClick(row.click_uuid);
+                                                        }}
                                                         disabled={approvingId === row.click_uuid}
                                                         title="Manually approve – fires postback & updates payout"
                                                     >

@@ -1,5 +1,19 @@
 const timePattern = '^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$';
 
+const offerParamsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['param_key'],
+    properties: {
+      param_key: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[a-zA-Z][a-zA-Z0-9_]*$' },
+      is_required: { type: 'boolean' },
+      default_value: { type: ['string', 'null'], maxLength: 255 },
+    },
+  },
+};
+
 export const offerIdParamSchema = {
   type: 'object',
   required: ['id'],
@@ -142,6 +156,7 @@ export const createOfferSchema = {
     system_postback_url: { type: ['string', 'null'], maxLength: 500 },
     system_postback_method: { type: ['string', 'null'], maxLength: 10 },
     system_postback_macros_json: { type: ['object', 'null'] },
+    offer_params: offerParamsSchema,
   },
 };
 
@@ -223,6 +238,7 @@ export const updateOfferSchema = {
     system_postback_url: { type: ['string', 'null'], maxLength: 500 },
     system_postback_method: { type: ['string', 'null'], maxLength: 10 },
     system_postback_macros_json: { type: ['object', 'null'] },
+    offer_params: offerParamsSchema,
   },
 };
 

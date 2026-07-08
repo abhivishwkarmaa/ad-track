@@ -13,6 +13,7 @@ import {
     advertiserParameters,
     platformTokens,
 } from '../constants/offerFormConstants';
+import OfferParamsEditor from './OfferParamsEditor';
 
 export default function OfferForm({
     headerSubtitle,
@@ -30,6 +31,8 @@ export default function OfferForm({
     handleTestOfferLink,
     advertisers,
     offers,
+    offerParams,
+    setOfferParams,
     loadingAdvertisers = false,
     loading,
     submitLabel,
@@ -355,10 +358,11 @@ export default function OfferForm({
                                     type="time"
                                     className="form-control"
                                     name="start_time"
-                                    value={formData.start_time}
+                                    value={formData.start_time || ''}
                                     onChange={handleChange}
                                     step="1"
                                 />
+                                <small style={{ color: '#666' }}>Leave empty for 24/7 (IST)</small>
                             </div>
                         </div>
                         <div className="offer-form-row two-col">
@@ -378,12 +382,16 @@ export default function OfferForm({
                                     type="time"
                                     className="form-control"
                                     name="end_time"
-                                    value={formData.end_time}
+                                    value={formData.end_time || ''}
                                     onChange={handleChange}
                                     step="1"
                                 />
+                                <small style={{ color: '#666' }}>Leave empty for 24/7 (IST)</small>
                             </div>
                         </div>
+                        <p style={{ color: '#666', fontSize: '13px', margin: '0 0 12px' }}>
+                            If both start and end time are empty, the offer accepts traffic all day within the date range.
+                        </p>
                         <div className="offer-form-row">
                             <div className="form-group">
                                 <label className="form-label">Offer Live/Pause</label>
@@ -607,6 +615,16 @@ export default function OfferForm({
                         </div>
                     </div>
 
+                    {/* Pass-through URL parameters */}
+                    <div className="offer-form-section">
+                        <h3 className="offer-form-section-title">Tracking URL Parameters</h3>
+                        <OfferParamsEditor
+                            params={offerParams}
+                            onChange={setOfferParams}
+                            disabled={loading}
+                        />
+                    </div>
+
                     {/* Targeting */}
                     <div className="offer-form-section">
                         <h3 className="offer-form-section-title">Targeting</h3>
@@ -757,6 +775,81 @@ export default function OfferForm({
                                     ))}
                                 </select>
                                 <small>Hold Ctrl/Cmd to select multiple</small>
+                            </div>
+                        </div>
+                        <div className="offer-form-row">
+                            <div className="form-group" style={{ flex: '0 0 150px' }}>
+                                <label className="form-label">Select Action</label>
+                                <select
+                                    className="form-control"
+                                    name="isp_action"
+                                    value={formData.isp_action}
+                                    onChange={handleChange}
+                                >
+                                    <option value="ALLOW">Allow</option>
+                                    <option value="BLOCK">Block</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ flex: '1' }}>
+                                <label className="form-label">Target ISP</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="isp_list"
+                                    value={formData.isp_list}
+                                    onChange={handleChange}
+                                    placeholder="Jio, Airtel, Vi (comma separated)"
+                                />
+                            </div>
+                        </div>
+                        <div className="offer-form-row">
+                            <div className="form-group" style={{ flex: '0 0 150px' }}>
+                                <label className="form-label">Select Action</label>
+                                <select
+                                    className="form-control"
+                                    name="carrier_action"
+                                    value={formData.carrier_action}
+                                    onChange={handleChange}
+                                >
+                                    <option value="ALLOW">Allow</option>
+                                    <option value="BLOCK">Block</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ flex: '1' }}>
+                                <label className="form-label">Target Carrier / Network</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="carrier_list"
+                                    value={formData.carrier_list}
+                                    onChange={handleChange}
+                                    placeholder="Jio, Airtel, T-Mobile (comma separated)"
+                                />
+                            </div>
+                        </div>
+                        <div className="offer-form-row">
+                            <div className="form-group" style={{ flex: '0 0 150px' }}>
+                                <label className="form-label">Select Action</label>
+                                <select
+                                    className="form-control"
+                                    name="city_action"
+                                    value={formData.city_action}
+                                    onChange={handleChange}
+                                >
+                                    <option value="ALLOW">Allow</option>
+                                    <option value="BLOCK">Block</option>
+                                </select>
+                            </div>
+                            <div className="form-group" style={{ flex: '1' }}>
+                                <label className="form-label">Target Cities</label>
+                                <input
+                                    type="text"
+                                    className="form-control"
+                                    name="city_list"
+                                    value={formData.city_list}
+                                    onChange={handleChange}
+                                    placeholder="Mumbai, Delhi, Bangalore (comma separated)"
+                                />
                             </div>
                         </div>
                     </div>

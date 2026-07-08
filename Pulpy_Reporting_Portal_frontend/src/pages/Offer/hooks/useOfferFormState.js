@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useToast } from '../../../context/ToastContext';
 import { DEFAULT_TOKEN_MAPPINGS } from '../utils/offerFormState';
+import { emptyOfferParamRow } from '../utils/offerFormPayload';
 
 /**
  * Shared form UI state + handlers for NewOffer and EditOffer.
@@ -13,6 +14,7 @@ export function useOfferFormState(initialFormData) {
     const [tokenMappings, setTokenMappings] = useState([]);
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
+    const [offerParams, setOfferParams] = useState([emptyOfferParamRow()]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -62,6 +64,8 @@ export function useOfferFormState(initialFormData) {
         setShowCustomCategory,
         showCustomCountry,
         setShowCustomCountry,
+        offerParams,
+        setOfferParams,
         handleChange,
         handleTokenMappingChange,
         handleTestOfferLink,

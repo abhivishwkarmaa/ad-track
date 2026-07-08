@@ -2,7 +2,8 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import publisherService from './publisherService.js';
 import offerService from './offer.service.js';
-import { generateTrackingURL, generateAlternativeTrackingURL, generateClickId } from '../utils/urlGenerator.js';
+import { generateTrackingURL, generateAlternativeTrackingURL, generateClickId, appendOfferParamPlaceholders } from '../utils/urlGenerator.js';
+import offerParamsService from './offerParamsService.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import cacheService from './cacheService.js';
@@ -559,29 +560,45 @@ export class AssignmentService {
 
     if (format === 'alternative') {
       const advertiserId = offer.advertiser_id;
-      // Note: We might want public_advertiser_id here too if that's part of the spec?
-      // User said "public id advertiser aur publisher ka bhi chahiye".
-      // But `generateAlternativeTrackingURL` args depend on implementation. assuming it takes advertiserId.
 
-      return generateAlternativeTrackingURL(
+      let altUrl = generateAlternativeTrackingURL(
         baseURL,
-        publicOfferId,  // 🔥 Use public_offer_id
-        publicPublisherId, // 🔥 Use public_publisher_id
+        publicOfferId,
+        publicPublisherId,
         advertiserId,
-        { rcid: '{replace_it}' } // Use the format they specified
+        { rcid: '{replace_it}' }
       );
+      const offerParams = await offerParamsService.getOfferParams(internalOfferId, tenantId);
+      altUrl = appendOfferParamPlaceholders(altUrl, offerParams);
+      return this._trackingUrlPayload(altUrl, offerParams);
     }
 
-    // Default to standard format
-    // Do NOT generate click_id upfront, but pass the placeholder.
-    // This allows the UI to show {click_id} in the generated URL.
+    const offerParams = await offerParamsService.getOfferParams(internalOfferId, tenantId);
 
-    return generateTrackingURL(
+    let trackingUrl = generateTrackingURL(
       baseURL,
-      publicOfferId,  // 🔥 Use public_offer_id
-      publicPublisherId, // 🔥 Use public_publisher_id
+      publicOfferId,
+      publicPublisherId,
       { click_id: '{click_id}' }
     );
+    trackingUrl = appendOfferParamPlaceholders(trackingUrl, offerParams);
+
+    return this._trackingUrlPayload(trackingUrl, offerParams);
+  }
+
+  _trackingUrlPayload(trackingUrl, offerParams = []) {
+    const list = Array.isArray(offerParams) ? offerParams : [];
+    return {
+      tracking_url: trackingUrl,
+      offer_params: list.map((p) => ({
+        param_key: p.param_key,
+        is_required: Boolean(p.is_required === 1 || p.is_required === true),
+        default_value: p.default_value ?? null,
+      })),
+      required_params: list
+        .filter((p) => p.is_required === 1 || p.is_required === true)
+        .map((p) => p.param_key),
+    };
   }
 
   async getPayout(assignmentId, tenantId = null) {

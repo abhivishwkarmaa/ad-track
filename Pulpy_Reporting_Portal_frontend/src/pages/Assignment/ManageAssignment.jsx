@@ -10,6 +10,7 @@ import {
 import { useOffersList } from '../../hooks/queries/useOffersQuery';
 import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
+import { normalizeTrackingUrlMeta } from '../Offer/utils/trackingUrlUtils';
 import { formatDateIST } from '../../utils/dateTime';
 import { useEntityListQueryState } from '../../hooks/useEntityListQueryState';
 import ConfirmModal from '../../shared/ui/ConfirmModal';
@@ -118,7 +119,8 @@ function ManageAssignment() {
             setLoadingTrackingUrls((prev) => ({ ...prev, [assignmentId]: true }));
             const response = await assignmentsAPI.getTrackingUrl(assignmentId);
             if (response.success && response.data) {
-                const trackingUrl = response.data.tracking_url || '';
+                const meta = normalizeTrackingUrlMeta(response.data);
+                const trackingUrl = meta.tracking_url;
                 setTrackingUrls((prev) => ({ ...prev, [assignmentId]: trackingUrl }));
 
                 if (trackingUrl) {
