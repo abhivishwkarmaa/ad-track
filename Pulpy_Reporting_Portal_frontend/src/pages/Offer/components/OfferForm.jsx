@@ -18,6 +18,7 @@ import OfferParamsEditor from './OfferParamsEditor';
 export default function OfferForm({
     headerSubtitle,
     formData,
+    setFormData,
     handleChange,
     showCustomCategory,
     setShowCustomCategory,
