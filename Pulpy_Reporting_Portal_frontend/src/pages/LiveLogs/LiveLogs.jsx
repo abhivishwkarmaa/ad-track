@@ -205,7 +205,7 @@ const LiveLogs = () => {
                         <select value={selectedOffer} onChange={(e) => setSelectedOffer(e.target.value)}>
                             <option value="">All Offers</option>
                             {offers.map(o => (
-                                <option key={o.id} value={o.id}>{o.name} ({o.display_id || o.id})</option>
+                                <option key={o.id} value={o.public_offer_id ?? o.display_id ?? o.id}>{o.name} ({o.display_id || o.public_offer_id || o.id})</option>
                             ))}
                         </select>
                     </div>
@@ -214,7 +214,7 @@ const LiveLogs = () => {
                         <select value={selectedPublisher} onChange={(e) => setSelectedPublisher(e.target.value)}>
                             <option value="">All Publishers</option>
                             {publishers.map(p => (
-                                <option key={p.id} value={p.id}>{p.company_name || p.email} ({p.public_publisher_id ?? p.id})</option>
+                                <option key={p.id} value={p.public_publisher_id ?? p.id}>{p.company_name || p.email} ({p.public_publisher_id ?? p.id})</option>
                             ))}
                         </select>
                     </div>
