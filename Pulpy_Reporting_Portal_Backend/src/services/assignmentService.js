@@ -338,6 +338,23 @@ export class AssignmentService {
   }
 
   /**
+   * Resolve assignment for write APIs.
+   * Prefer public_assignment_id (API contract). Fall back to internal PK only when
+   * no public match exists — avoids updating the wrong row when internal ids and
+   * public_assignment_ids overlap in the same tenant.
+   */
+  async resolveAssignmentForWrite(id, tenantId) {
+    if (id == null || id === '' || !tenantId) return null;
+
+    const byPublicId = await this.getInternalAssignmentIdByPublicId(id, tenantId);
+    if (byPublicId != null) {
+      return this.findById(byPublicId, tenantId, true);
+    }
+
+    return this.findById(id, tenantId, true);
+  }
+
+  /**
    * Resolve assignment for tracking URL. When internalOfferId is set, scope to that offer
    * so public_assignment_id collisions across offers cannot return the wrong publisher pub_id.
    */
@@ -624,17 +641,12 @@ export class AssignmentService {
         throw err;
       }
 
-      // UI se public id aata hai → tenant + public id se internal id resolve karo, phir sab internal se
-      const internalId = await this.getInternalAssignmentIdByPublicId(id, tenantId) ?? id;
-      const existing = await this.findById(internalId, tenantId, true);
+      // Resolve public assignment id first; only fall back to internal PK if no public match.
+      // Never treat an internal PK as public_assignment_id when both namespaces overlap
+      // (e.g. dolpus internal id 57 vs another row with public_assignment_id 57).
+      const existing = await this.resolveAssignmentForWrite(id, tenantId);
       if (!existing) {
         return null;
-      }
-
-      if (existing.tenant_id !== tenantId) {
-        const err = new Error('Assignment does not belong to this tenant');
-        err.statusCode = 403;
-        throw err;
       }
 
       // Prepare update fields
@@ -737,7 +749,7 @@ export class AssignmentService {
       }
 
       // DB me hamesha internal id se update (id = publisher_offers.id)
-      const dbId = existing.internal_id ?? internalId;
+      const dbId = existing.internal_id;
       updateValues.push(dbId);
 
       let updateQuery = `UPDATE publisher_offers SET ${updateFields.join(', ')} WHERE id = ?`;
@@ -766,20 +778,12 @@ export class AssignmentService {
       throw err;
     }
 
-    // UI se public id → tenant + public id se internal id resolve, phir delete internal se
-    const internalId = await this.getInternalAssignmentIdByPublicId(id, tenantId) ?? id;
-    const existing = await this.findById(internalId, tenantId, true);
+    const existing = await this.resolveAssignmentForWrite(id, tenantId);
     if (!existing) {
       return null;
     }
 
-    if (existing.tenant_id !== tenantId) {
-      const err = new Error('Assignment does not belong to this tenant');
-      err.statusCode = 403;
-      throw err;
-    }
-
-    const dbId = existing.internal_id ?? internalId;
+    const dbId = existing.internal_id;
     let query = `DELETE FROM publisher_offers WHERE id = ?`;
     const params = [dbId];
 

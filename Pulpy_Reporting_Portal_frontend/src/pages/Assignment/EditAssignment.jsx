@@ -90,7 +90,7 @@ function EditAssignment() {
             offer_id: assignment.offer_id?.toString() || '',
             publisher_id: assignment.publisher_id?.toString() || '',
             payout_override: assignment.payout_override || '',
-            conversion_approval_percentage: assignment.conversion_approval_percentage || '',
+            conversion_approval_percentage: assignment.conversion_approval_percentage ?? '',
             capping_type: assignment.capping_type || 'none',
             capping_duration: assignment.capping_duration || 'daily',
             capping_action: assignment.capping_action || 'stop',
@@ -99,7 +99,7 @@ function EditAssignment() {
             fallback_offer_id: assignment.fallback_offer_id?.toString() || '',
             capping_amount: assignment.capping_type !== 'none' ? assignment.capping_amount : '',
             callback_url: assignment.callback_url || '',
-            offer_url: assignment.offer_url || '',
+            offer_url: assignment.destination_url || assignment.offer_url || '',
             notes: assignment.notes || '',
             status: assignment.status || 'active',
             tracking_url: '',
@@ -140,8 +140,12 @@ function EditAssignment() {
             // Use internal_id if available, otherwise fallback to id from params
 
             const assignmentData = {
-                payout_override: formData.payout_override ? parseFloat(formData.payout_override) : null,
-                conversion_approval_percentage: formData.conversion_approval_percentage ? parseFloat(formData.conversion_approval_percentage) : null,
+                payout_override: formData.payout_override !== '' && formData.payout_override != null
+                    ? parseFloat(formData.payout_override)
+                    : null,
+                conversion_approval_percentage: formData.conversion_approval_percentage !== '' && formData.conversion_approval_percentage != null
+                    ? parseFloat(formData.conversion_approval_percentage)
+                    : null,
 
                 // Unified Capping
                 capping_type: formData.capping_type,
@@ -162,9 +166,10 @@ function EditAssignment() {
                 status: formData.status
             };
 
-            // Use internal_id to ensure we are updating the correct record in DB
-            // (assignment.id might be Public ID string)
-            const targetId = assignment?.internal_id || id;
+            // Always use public assignment id from the route.
+            // Sending internal_id breaks updates: backend resolves by public_assignment_id first,
+            // so internal 57 can collide with a different row whose public_assignment_id is 57.
+            const targetId = id;
 
             await updateAssignmentMutation.mutateAsync({ id: targetId, data: assignmentData });
             toast.success('Assignment updated successfully!');
