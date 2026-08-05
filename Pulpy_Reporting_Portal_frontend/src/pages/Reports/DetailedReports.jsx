@@ -155,14 +155,14 @@ function DetailedReports() {
         : searchParams.get('hasReferrer') === 'true' ? 'referred' : 'all';
     const [trafficType, setTrafficType] = useState(initTraffic);
 
-    // Checkbox selections
-    // Checkbox selections
-    const initialDims = searchParams.get('groupBy') ? searchParams.get('groupBy').split(',') : ['offer_id'];
+    // Default dims match monthly CSV export shape (day × offer × publisher × advertiser).
+    const initialDims = searchParams.get('groupBy')
+        ? searchParams.get('groupBy').split(',')
+        : ['offer_id', 'publisher_id', 'advertiser_id', 'date'];
     const initialMetrics = searchParams.get('metrics')
         ? searchParams.get('metrics').split(',')
         : ['clicks', 'conversions', 'pending_conversions', 'approved_conversions', 'rejected_conversions'];
 
-    // If URL has no group params, default to Detailed View (empty group)
     const [selectedDims, setSelectedDims] = useState(initialDims);
     const [selectedMetrics, setSelectedMetrics] = useState(initialMetrics);
 
@@ -950,24 +950,24 @@ function DetailedReports() {
                     )}
                 </div>
             </div>
-            {/* Pagination */}
+            {/* Pagination — always show total when we have rows (even single page) */}
             {
-                pagination.totalPages > 1 && (
+                pagination.total > 0 && (
                     <div className="reports-pagination">
                         <button
                             className="btn btn-outline"
                             onClick={() => handlePageChange(pagination.page - 1)}
-                            disabled={pagination.page === 1}
+                            disabled={pagination.page <= 1 || pagination.totalPages <= 1}
                         >
                             Previous
                         </button>
                         <span className="pagination-info">
-                            Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+                            Page {pagination.page} of {Math.max(pagination.totalPages, 1)} ({pagination.total} total)
                         </span>
                         <button
                             className="btn btn-outline"
                             onClick={() => handlePageChange(pagination.page + 1)}
-                            disabled={pagination.page >= pagination.totalPages}
+                            disabled={pagination.page >= pagination.totalPages || pagination.totalPages <= 1}
                         >
                             Next
                         </button>

@@ -1,8 +1,14 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
-import { summaryShouldUseDailyClickStats } from '../utils/reportDailyRollup.js';
+import {
+  summaryShouldUseDailyClickStats,
+  splitDateRangeForRollup,
+  filtersBlockReportingRollup,
+  groupByEligibleForRollup,
+} from '../utils/reportDailyRollup.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
+import { runRollupDetailedAggregated } from './reportRollupDetailed.js';
 
 export class ReportService {
   /**
@@ -103,36 +109,119 @@ export class ReportService {
         }
       }
 
-      // Pre-aggregated path: sealed IST days — reads `daily_reporting_rollup` (REPORTING_ROLLUP_TABLE).
+      // Pre-aggregated path: `daily_reporting_rollup` (default). Set REPORT_USE_RAW_TABLES=true for raw.
+      // Ranges that include today: sealed days from rollup + today from raw.
       if (tenantId && summaryShouldUseDailyClickStats(filters)) {
         const rt = getReportingRollupTableName();
         const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
         const fromDate = filters.date_from || todayIST;
         const toDate = filters.date_to || todayIST;
-        const dParams = [tenantId, fromDate, toDate];
-        let dWhere = 'tenant_id = ? AND stat_date BETWEEN ? AND ?';
+        const split = splitDateRangeForRollup(fromDate, toDate);
+
+        const entitySql = [];
+        const entityParams = [];
         if (filters.offer_id) {
-          dWhere += ' AND offer_id = ?';
-          dParams.push(filters.offer_id);
+          entitySql.push('offer_id = ?');
+          entityParams.push(filters.offer_id);
         }
         if (filters.publisher_id) {
-          dWhere += ' AND publisher_id = ?';
-          dParams.push(filters.publisher_id);
+          entitySql.push('publisher_id = ?');
+          entityParams.push(filters.publisher_id);
         }
-        const rollupSql = `
-          SELECT
-            COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN publisher_id END) AS affiliates,
-            COALESCE(SUM(total_clicks), 0) AS unique_clicks,
-            COALESCE(SUM(total_conversions), 0) AS conversions,
-            COALESCE(SUM(revenue), 0) AS revenue,
-            COALESCE(SUM(payout), 0) AS payout,
-            COALESCE(SUM(profit), 0) AS profit,
-            0 AS impressions
-          FROM ${rt}
-          WHERE ${dWhere}
-        `;
-        const [dRows] = await pool.query(rollupSql, dParams);
-        const summary = dRows[0] || { affiliates: 0, unique_clicks: 0, impressions: 0, conversions: 0, revenue: 0, payout: 0, profit: 0 };
+        const entityAnd = entitySql.length ? ` AND ${entitySql.join(' AND ')}` : '';
+
+        let affiliates = 0;
+        let unique_clicks = 0;
+        let conversions = 0;
+        let revenue = 0;
+        let payout = 0;
+        let profit = 0;
+
+        if (split.useRollup) {
+          const dParams = [tenantId, split.rollupFrom, split.rollupTo, ...entityParams];
+          const rollupSql = `
+            SELECT
+              COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN publisher_id END) AS affiliates,
+              COALESCE(SUM(total_clicks), 0) AS unique_clicks,
+              COALESCE(SUM(total_conversions), 0) AS conversions,
+              COALESCE(SUM(revenue), 0) AS revenue,
+              COALESCE(SUM(payout), 0) AS payout,
+              COALESCE(SUM(profit), 0) AS profit
+            FROM ${rt}
+            WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?${entityAnd}
+          `;
+          const [dRows] = await pool.query(rollupSql, dParams);
+          const d = dRows[0] || {};
+          affiliates = Number(d.affiliates || 0);
+          unique_clicks = Number(d.unique_clicks || 0);
+          conversions = Number(d.conversions || 0);
+          revenue = Number(d.revenue || 0);
+          payout = Number(d.payout || 0);
+          profit = Number(d.profit || 0);
+        }
+
+        if (split.scanToday) {
+          const todaySpan = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+          let clickWhere = 'tenant_id = ? AND created_at BETWEEN ? AND ?';
+          let convWhere = 'tenant_id = ? AND created_at BETWEEN ? AND ?';
+          const clickParams = [tenantId, todaySpan.start, todaySpan.end];
+          const convParams = [tenantId, todaySpan.start, todaySpan.end];
+          if (filters.offer_id) {
+            clickWhere += ' AND offer_id = ?';
+            convWhere += ' AND offer_id = ?';
+            clickParams.push(filters.offer_id);
+            convParams.push(filters.offer_id);
+          }
+          if (filters.publisher_id) {
+            clickWhere += ' AND publisher_id = ?';
+            convWhere += ' AND publisher_id = ?';
+            clickParams.push(filters.publisher_id);
+            convParams.push(filters.publisher_id);
+          }
+          const todaySql = `
+            SELECT
+              click_agg.affiliates,
+              click_agg.unique_clicks,
+              conv_agg.conversions,
+              conv_agg.revenue,
+              conv_agg.payout,
+              conv_agg.profit
+            FROM (
+              SELECT
+                COUNT(DISTINCT publisher_id) AS affiliates,
+                COUNT(*) AS unique_clicks
+              FROM clicks
+              WHERE ${clickWhere}
+            ) click_agg
+            CROSS JOIN (
+              SELECT
+                COUNT(*) AS conversions,
+                COALESCE(SUM(amount), 0) AS revenue,
+                COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS payout,
+                COALESCE(SUM(amount), 0) - COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS profit
+              FROM conversions
+              WHERE ${convWhere}
+            ) conv_agg
+          `;
+          const [tRows] = await pool.query(todaySql, [...clickParams, ...convParams]);
+          const t = tRows[0] || {};
+          affiliates += Number(t.affiliates || 0);
+          unique_clicks += Number(t.unique_clicks || 0);
+          conversions += Number(t.conversions || 0);
+          revenue += Number(t.revenue || 0);
+          payout += Number(t.payout || 0);
+          profit += Number(t.profit || 0);
+        }
+
+        const summary = {
+          affiliates,
+          unique_clicks,
+          conversions,
+          revenue,
+          payout,
+          profit,
+          impressions: 0,
+        };
         const conversionRate = summary.unique_clicks > 0
           ? (summary.conversions / summary.unique_clicks) * 100
           : 0;
@@ -235,6 +324,25 @@ export class ReportService {
         const selectedMetrics = new Set((metricColumns.length > 0 ? metricColumns : columns).map(m => String(m).trim()).filter(Boolean));
         const includeAllMetrics = selectedMetrics.size === 0;
         const wantsMetric = (name) => includeAllMetrics || selectedMetrics.has(name);
+
+        // Default: daily_reporting_rollup (+ today raw). Set REPORT_USE_RAW_TABLES=true to force raw paths below.
+        if (
+          tenantId &&
+          !filtersBlockReportingRollup(filters) &&
+          groupByEligibleForRollup(groupBy)
+        ) {
+          return await runRollupDetailedAggregated({
+            filters,
+            tenantId,
+            page,
+            limit,
+            offset,
+            groupBy,
+            buildEntityFactPredicates: this.buildEntityFactPredicates.bind(this),
+            wantsMetric,
+            includeAllMetrics,
+          });
+        }
 
         // Fast path (RAW TABLES): offer+publisher+date aggregation via grouped scans.
         // Avoids `LEFT JOIN conversions ON click_uuid` fanout and avoids COUNT(DISTINCT c.id) over joined rowsets.
