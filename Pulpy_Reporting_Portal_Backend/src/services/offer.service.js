@@ -5,11 +5,17 @@ import {
   validateConversionSchedule as validateConversionScheduleFn,
 } from './offer.validation.js';
 import logger from '../utils/logger.js';
-import { normalizeMysqlUtcDatetime } from '../utils/mysqlUtcRange.js';
+import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
 import cacheService from './cacheService.js';
+import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
+import {
+  getIstTodayYmd,
+  splitDateRangeForRollup,
+  shouldUseRawReportingTables,
+} from '../utils/reportDailyRollup.js';
 
 const jsonFields = [
   'macros_json',
@@ -25,6 +31,141 @@ const jsonFields = [
 
 const toJsonOrNull = (val) =>
   val === undefined || val === null ? null : JSON.stringify(val);
+
+const toYmd = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+async function sumRollupClickStats({ tenantId, offerId, fromDate, toDate }) {
+  const rt = getReportingRollupTableName();
+  const params = [tenantId, offerId];
+  let dateSql = '';
+  if (fromDate && toDate) {
+    dateSql = ' AND stat_date BETWEEN ? AND ?';
+    params.push(fromDate, toDate);
+  }
+  const [rows] = await pool.query(
+    `SELECT
+       COALESCE(SUM(total_clicks), 0) AS total_clicks,
+       COALESCE(SUM(unique_ips), 0) AS unique_clicks,
+       COUNT(DISTINCT CASE WHEN total_clicks > 0 THEN publisher_id END) AS unique_publishers
+     FROM ${rt}
+     WHERE tenant_id = ? AND offer_id = ?${dateSql}`,
+    params
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  return {
+    total_clicks: parseInt(row?.total_clicks || 0, 10),
+    unique_clicks: parseInt(row?.unique_clicks || 0, 10),
+    unique_publishers: parseInt(row?.unique_publishers || 0, 10),
+  };
+}
+
+async function countOfferClicksInIstSpan(offerId, tenantId, fromYmd, toYmd) {
+  const { start, end } = istYmdSpanToMysqlUtcRange(fromYmd, toYmd);
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS total_clicks
+     FROM clicks
+     WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at <= ?`,
+    [offerId, tenantId, start, end]
+  );
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  return parseInt(row?.total_clicks || 0, 10);
+}
+
+async function countOfferClicksInIstDay(offerId, tenantId, istYmd) {
+  return countOfferClicksInIstSpan(offerId, tenantId, istYmd, istYmd);
+}
+
+/** Past IST days from daily_reporting_rollup; today from COUNT(*) on clicks. */
+async function queryOfferClickStatsHybrid({ tenantId, offerId, fromDate, toDate }) {
+  const todayIST = getIstTodayYmd();
+  const from = fromDate || '2000-01-01';
+  const to = toDate || todayIST;
+  const split = splitDateRangeForRollup(from, to);
+
+  let total_clicks = 0;
+  let unique_clicks = 0;
+  let unique_publishers = 0;
+
+  if (split.useRollup) {
+    const sealed = await sumRollupClickStats({
+      tenantId,
+      offerId,
+      fromDate: split.rollupFrom,
+      toDate: split.rollupTo,
+    });
+    total_clicks += sealed.total_clicks;
+    unique_clicks += sealed.unique_clicks;
+    unique_publishers += sealed.unique_publishers;
+  }
+
+  if (split.scanToday) {
+    const todayClicks = await countOfferClicksInIstDay(offerId, tenantId, split.todayIST);
+    total_clicks += todayClicks;
+    unique_clicks += todayClicks;
+    if (!split.useRollup) {
+      const { start, end } = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+      const [pubRows] = await pool.query(
+        `SELECT COUNT(DISTINCT publisher_id) AS unique_publishers
+         FROM clicks
+         WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at <= ?`,
+        [offerId, tenantId, start, end]
+      );
+      const pubRow = Array.isArray(pubRows) ? pubRows[0] : pubRows;
+      unique_publishers = parseInt(pubRow?.unique_publishers || 0, 10);
+    }
+  }
+
+  return { total_clicks, unique_clicks, unique_publishers };
+}
+
+async function queryOfferCapUsageHybrid({ tenantId, offerId, refDate, dailyCap, monthlyCap, totalCap }) {
+  const todayIST = getIstTodayYmd();
+  const [year, month] = refDate.split('-').map(Number);
+  const monthStart = toYmd(new Date(year, month - 1, 1));
+  const monthEnd = toYmd(new Date(year, month, 0));
+
+  const daily_used = refDate === todayIST
+    ? await countOfferClicksInIstDay(offerId, tenantId, refDate)
+    : (await sumRollupClickStats({ tenantId, offerId, fromDate: refDate, toDate: refDate })).total_clicks;
+
+  const monthSplit = splitDateRangeForRollup(monthStart, monthEnd);
+  let monthly_used = 0;
+  if (monthSplit.useRollup) {
+    monthly_used += (await sumRollupClickStats({
+      tenantId,
+      offerId,
+      fromDate: monthSplit.rollupFrom,
+      toDate: monthSplit.rollupTo,
+    })).total_clicks;
+  }
+  if (monthSplit.scanToday) {
+    monthly_used += await countOfferClicksInIstDay(offerId, tenantId, monthSplit.todayIST);
+  }
+
+  const allSplit = splitDateRangeForRollup('2000-01-01', todayIST);
+  let total_used = 0;
+  if (allSplit.useRollup) {
+    total_used += (await sumRollupClickStats({
+      tenantId,
+      offerId,
+      fromDate: allSplit.rollupFrom,
+      toDate: allSplit.rollupTo,
+    })).total_clicks;
+  }
+  if (allSplit.scanToday) {
+    total_used += await countOfferClicksInIstDay(offerId, tenantId, allSplit.todayIST);
+  }
+
+  return {
+    daily_cap: parseInt(dailyCap || 0, 10),
+    daily_used,
+    monthly_cap: parseInt(monthlyCap || 0, 10),
+    monthly_used,
+    total_cap: parseInt(totalCap || 0, 10),
+    total_used,
+  };
+}
 
 class OfferService {
   /**
@@ -684,15 +825,40 @@ class OfferService {
       };
 
       const clicksWhere = buildTimeFilteredWhere();
-      const [clickRows] = await pool.query(
-        `SELECT
-          COUNT(*) AS total_clicks,
-          COUNT(DISTINCT click_uuid) AS unique_clicks,
-          COUNT(DISTINCT publisher_id) AS unique_publishers
-         FROM clicks
-         WHERE ${clicksWhere.clause}`,
-        clicksWhere.params
-      );
+      const useRollupClicks = Boolean(tenantId) && !shouldUseRawReportingTables();
+      const istToday = getIstTodayYmd();
+      const statsFromDate = dateFrom || istToday;
+      const statsToDate = dateTo || dateFrom || istToday;
+
+      let clickStats;
+      if (useRollupClicks) {
+        try {
+          clickStats = await queryOfferClickStatsHybrid({
+            tenantId,
+            offerId: internalId,
+            fromDate: statsFromDate,
+            toDate: statsToDate,
+          });
+        } catch (rollupErr) {
+          logger.warn('OfferService.getOfferStats rollup click path failed, using raw clicks', {
+            err: rollupErr.message,
+            offer_id: internalId,
+          });
+          clickStats = null;
+        }
+      }
+      if (!clickStats) {
+        const [clickRows] = await pool.query(
+          `SELECT
+            COUNT(*) AS total_clicks,
+            COUNT(DISTINCT click_uuid) AS unique_clicks,
+            COUNT(DISTINCT publisher_id) AS unique_publishers
+           FROM clicks
+           WHERE ${clicksWhere.clause}`,
+          clicksWhere.params
+        );
+        clickStats = Array.isArray(clickRows) ? clickRows[0] : clickRows;
+      }
 
       const [impressionsRows] = await pool.query(
         `SELECT COUNT(*) AS total_impressions
@@ -720,7 +886,6 @@ class OfferService {
         convWhere.params
       );
 
-      const clickStats = Array.isArray(clickRows) ? clickRows[0] : clickRows;
       const conversionStats = Array.isArray(conversionRows) ? conversionRows[0] : conversionRows;
       const impressionsStats = Array.isArray(impressionsRows) ? impressionsRows[0] : impressionsRows;
 
@@ -732,34 +897,57 @@ class OfferService {
       const approvedPayout = parseFloat(conversionStats.approved_payout || 0);
       const totalProfit = totalRevenue - approvedPayout;
 
-      const now = new Date();
-      const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-      const istToday = istNow.toISOString().split('T')[0];
       const refDate = dateTo || dateFrom || istToday;
-      const [year, month] = refDate.split('-').map(Number);
-      const monthStartDate = new Date(year, month - 1, 1);
-      const monthEndDate = new Date(year, month, 0);
-      const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const monthStart = toUtcIstStart(toYmd(monthStartDate));
-      const monthEnd = toUtcIstEnd(toYmd(monthEndDate));
-      const dayStart = toUtcIstStart(refDate);
-      const dayEnd = toUtcIstEnd(refDate);
-
-      const usageTenantClause = tenantId ? ' AND tenant_id = ?' : '';
-      const usageTenantParams = tenantId ? [tenantId] : [];
-
-      const [dailyUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
-        [internalId, ...usageTenantParams, dayStart, dayEnd]
-      );
-      const [monthlyUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
-        [internalId, ...usageTenantParams, monthStart, monthEnd]
-      );
-      const [totalUsageRows] = await pool.query(
-        `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause}`,
-        [internalId, ...usageTenantParams]
-      );
+      let cap_usage;
+      if (useRollupClicks) {
+        try {
+          cap_usage = await queryOfferCapUsageHybrid({
+            tenantId,
+            offerId: internalId,
+            refDate,
+            dailyCap: offer.daily_cap,
+            monthlyCap: offer.monthly_cap,
+            totalCap: offer.total_cap,
+          });
+        } catch (capErr) {
+          logger.warn('OfferService.getOfferStats rollup cap path failed, using raw clicks', {
+            err: capErr.message,
+            offer_id: internalId,
+          });
+          cap_usage = null;
+        }
+      }
+      if (!cap_usage) {
+        const usageTenantClause = tenantId ? ' AND tenant_id = ?' : '';
+        const usageTenantParams = tenantId ? [tenantId] : [];
+        const [year, month] = refDate.split('-').map(Number);
+        const monthStartDate = new Date(year, month - 1, 1);
+        const monthEndDate = new Date(year, month, 0);
+        const monthStart = toUtcIstStart(toYmd(monthStartDate));
+        const monthEnd = toUtcIstEnd(toYmd(monthEndDate));
+        const dayStart = toUtcIstStart(refDate);
+        const dayEnd = toUtcIstEnd(refDate);
+        const [dailyUsageRows] = await pool.query(
+          `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+          [internalId, ...usageTenantParams, dayStart, dayEnd]
+        );
+        const [monthlyUsageRows] = await pool.query(
+          `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause} AND created_at >= ? AND created_at <= ?`,
+          [internalId, ...usageTenantParams, monthStart, monthEnd]
+        );
+        const [totalUsageRows] = await pool.query(
+          `SELECT COUNT(*) AS used FROM clicks WHERE offer_id = ?${usageTenantClause}`,
+          [internalId, ...usageTenantParams]
+        );
+        cap_usage = {
+          daily_cap: parseInt(offer.daily_cap || 0),
+          daily_used: parseInt((Array.isArray(dailyUsageRows) ? dailyUsageRows[0]?.used : dailyUsageRows?.used) || 0),
+          monthly_cap: parseInt(offer.monthly_cap || 0),
+          monthly_used: parseInt((Array.isArray(monthlyUsageRows) ? monthlyUsageRows[0]?.used : monthlyUsageRows?.used) || 0),
+          total_cap: parseInt(offer.total_cap || 0),
+          total_used: parseInt((Array.isArray(totalUsageRows) ? totalUsageRows[0]?.used : totalUsageRows?.used) || 0),
+        };
+      }
 
       return {
         total_clicks: parseInt(clickStats.total_clicks || 0),
@@ -780,14 +968,7 @@ class OfferService {
         pending_payout: parseFloat(conversionStats.pending_payout || 0),
         total_profit: totalProfit,
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
-        cap_usage: {
-          daily_cap: parseInt(offer.daily_cap || 0),
-          daily_used: parseInt((Array.isArray(dailyUsageRows) ? dailyUsageRows[0]?.used : dailyUsageRows?.used) || 0),
-          monthly_cap: parseInt(offer.monthly_cap || 0),
-          monthly_used: parseInt((Array.isArray(monthlyUsageRows) ? monthlyUsageRows[0]?.used : monthlyUsageRows?.used) || 0),
-          total_cap: parseInt(offer.total_cap || 0),
-          total_used: parseInt((Array.isArray(totalUsageRows) ? totalUsageRows[0]?.used : totalUsageRows?.used) || 0),
-        },
+        cap_usage,
       };
     } catch (error) {
       logger.error('OfferService.getOfferStats error:', error);
@@ -884,6 +1065,68 @@ class OfferService {
         rangeEnd = dateTo ? toUtcIstEnd(dateTo) : null;
       }
 
+      const useRollupClicks = Boolean(tenantId) && !shouldUseRawReportingTables();
+      const istToday = getIstTodayYmd();
+      const statsFromDate = dateFrom || istToday;
+      const statsToDate = dateTo || dateFrom || istToday;
+
+      let clickSubquery = '';
+      const clickParams = [];
+      if (useRollupClicks) {
+        const split = splitDateRangeForRollup(statsFromDate, statsToDate);
+        const rt = getReportingRollupTableName();
+        const parts = [];
+        if (split.useRollup) {
+          parts.push(`
+            SELECT publisher_id, SUM(total_clicks) AS total_clicks
+            FROM ${rt}
+            WHERE offer_id = ? AND tenant_id = ? AND stat_date BETWEEN ? AND ?
+            GROUP BY publisher_id
+          `);
+          clickParams.push(internalId, tenantId, split.rollupFrom, split.rollupTo);
+        }
+        if (split.scanToday) {
+          const todaySpan = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+          parts.push(`
+            SELECT publisher_id, COUNT(*) AS total_clicks
+            FROM clicks
+            WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at <= ?
+            GROUP BY publisher_id
+          `);
+          clickParams.push(internalId, tenantId, todaySpan.start, todaySpan.end);
+        }
+        if (parts.length === 2) {
+          clickSubquery = `
+            SELECT publisher_id, SUM(total_clicks) AS total_clicks
+            FROM (${parts[0]} UNION ALL ${parts[1]}) click_parts
+            GROUP BY publisher_id
+          `;
+        } else if (parts.length === 1) {
+          clickSubquery = parts[0];
+        } else {
+          clickSubquery = 'SELECT publisher_id, 0 AS total_clicks FROM clicks WHERE 1 = 0';
+        }
+      } else {
+        clickSubquery = `
+          SELECT publisher_id, COUNT(*) AS total_clicks
+          FROM clicks
+          WHERE offer_id = ?`;
+        clickParams.push(internalId);
+        if (tenantId) {
+          clickSubquery += ' AND tenant_id = ?';
+          clickParams.push(tenantId);
+        }
+        if (rangeStart) {
+          clickSubquery += ' AND created_at >= ?';
+          clickParams.push(rangeStart);
+        }
+        if (rangeEnd) {
+          clickSubquery += ' AND created_at <= ?';
+          clickParams.push(rangeEnd);
+        }
+        clickSubquery += ' GROUP BY publisher_id';
+      }
+
       // Assigned publishers for this offer + offer-scoped performance metrics (dashboard-style)
       let query = `SELECT 
           p.id as publisher_id,
@@ -900,28 +1143,7 @@ class OfferService {
         FROM publisher_offers po
         INNER JOIN publishers p ON po.publisher_id = p.id
         LEFT JOIN (
-          SELECT
-            publisher_id,
-            COUNT(*) as total_clicks
-          FROM clicks
-          WHERE offer_id = ?`;
-      const params = [internalId];
-
-      if (tenantId) {
-        query += ' AND tenant_id = ?';
-        params.push(tenantId);
-      }
-      if (rangeStart) {
-        query += ' AND created_at >= ?';
-        params.push(rangeStart);
-      }
-      if (rangeEnd) {
-        query += ' AND created_at <= ?';
-        params.push(rangeEnd);
-      }
-
-      query += `
-          GROUP BY publisher_id
+          ${clickSubquery}
         ) c ON c.publisher_id = p.id
         LEFT JOIN (
           SELECT
@@ -933,7 +1155,7 @@ class OfferService {
             COALESCE(SUM(amount), 0) as total_revenue
           FROM conversions
           WHERE offer_id = ?`;
-      params.push(internalId);
+      const params = [...clickParams, internalId];
 
       if (tenantId) {
         query += ' AND tenant_id = ?';
