@@ -32,8 +32,20 @@ async function tenantRoutes(fastify, options) {
   // Resume tenant (restores access)
   fastify.post('/tenants/:id/resume', tenantController.resumeTenant);
 
-  // Get tenant metrics
+  // Get tenant metrics (legacy summary)
   fastify.get('/tenants/:id/metrics', tenantController.getTenantMetrics);
+
+  // Get comprehensive tenant stats & daily breakdown with date filtering
+  fastify.get('/tenants/:id/stats', tenantController.getTenantStats);
+
+  // Get tenant offers with performance stats
+  fastify.get('/tenants/:id/offers', tenantController.getTenantOffers);
+
+  // Get tenant clicks log
+  fastify.get('/tenants/:id/clicks', tenantController.getTenantClicks);
+
+  // Get tenant conversions log
+  fastify.get('/tenants/:id/conversions', tenantController.getTenantConversions);
 
   // Delete tenant (soft delete by default, hard delete with ?hardDelete=true)
   fastify.delete('/tenants/:id', tenantController.deleteTenant);

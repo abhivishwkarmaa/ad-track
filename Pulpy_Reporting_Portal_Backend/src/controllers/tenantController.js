@@ -564,6 +564,170 @@ export class TenantController {
     }
   }
 
+  /**
+   * Get comprehensive stats and daily breakdown for tenant
+   */
+  async getTenantStats(request, reply) {
+    try {
+      const { id } = request.params;
+      const { date_from, date_to } = request.query;
+
+      // Verify tenant exists
+      const [tenantRows] = await pool.query(
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
+        [id]
+      );
+
+      if (!tenantRows || tenantRows.length === 0) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Tenant not found',
+        });
+      }
+
+      const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
+      const stats = await tenantMetricsService.getTenantStats(id, date_from, date_to);
+
+      return reply.send({
+        success: true,
+        data: {
+          tenant: tenantRows[0],
+          ...stats,
+        },
+      });
+    } catch (error) {
+      logger.error('TenantController.getTenantStats error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  /**
+   * Get offers list with performance stats for tenant
+   */
+  async getTenantOffers(request, reply) {
+    try {
+      const { id } = request.params;
+      const { date_from, date_to, search, status, page, limit } = request.query;
+
+      // Verify tenant exists
+      const [tenantRows] = await pool.query(
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
+        [id]
+      );
+
+      if (!tenantRows || tenantRows.length === 0) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Tenant not found',
+        });
+      }
+
+      const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
+      const result = await tenantMetricsService.getTenantOffers(id, date_from, date_to, {
+        search,
+        status,
+        page,
+        limit,
+      });
+
+      return reply.send({
+        success: true,
+        data: result.data,
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      logger.error('TenantController.getTenantOffers error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  /**
+   * Get clicks log for tenant
+   */
+  async getTenantClicks(request, reply) {
+    try {
+      const { id } = request.params;
+      const { date_from, date_to, search, offer_id, publisher_id, page, limit } = request.query;
+
+      // Verify tenant exists
+      const [tenantRows] = await pool.query(
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
+        [id]
+      );
+
+      if (!tenantRows || tenantRows.length === 0) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Tenant not found',
+        });
+      }
+
+      const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
+      const result = await tenantMetricsService.getTenantClicks(id, date_from, date_to, {
+        search,
+        offerId: offer_id,
+        publisherId: publisher_id,
+        page,
+        limit,
+      });
+
+      return reply.send({
+        success: true,
+        data: result.data,
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      logger.error('TenantController.getTenantClicks error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
+  /**
+   * Get conversions log for tenant
+   */
+  async getTenantConversions(request, reply) {
+    try {
+      const { id } = request.params;
+      const { date_from, date_to, search, status, offer_id, publisher_id, page, limit } = request.query;
+
+      // Verify tenant exists
+      const [tenantRows] = await pool.query(
+        'SELECT id, name, slug, status FROM tenants WHERE id = ?',
+        [id]
+      );
+
+      if (!tenantRows || tenantRows.length === 0) {
+        return reply.code(404).send({
+          success: false,
+          error: 'Not Found',
+          message: 'Tenant not found',
+        });
+      }
+
+      const tenantMetricsService = (await import('../services/tenantMetricsService.js')).default;
+      const result = await tenantMetricsService.getTenantConversions(id, date_from, date_to, {
+        search,
+        status,
+        offerId: offer_id,
+        publisherId: publisher_id,
+        page,
+        limit,
+      });
+
+      return reply.send({
+        success: true,
+        data: result.data,
+        pagination: result.pagination,
+      });
+    } catch (error) {
+      logger.error('TenantController.getTenantConversions error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
+
 
 
   /**

@@ -37,10 +37,30 @@ export const tenantsAPI = {
             method: 'POST',
         });
     },
-    // Get tenant metrics
+    // Get tenant metrics (legacy summary)
     getTenantMetrics: async (id, params = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/tenants/${id}/metrics?${queryString}`);
+    },
+    // Get comprehensive tenant stats & daily breakdown
+    getTenantStats: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/tenants/${id}/stats?${queryString}`);
+    },
+    // Get tenant offers with performance metrics
+    getTenantOffers: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/tenants/${id}/offers?${queryString}`);
+    },
+    // Get tenant clicks log
+    getTenantClicks: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/tenants/${id}/clicks?${queryString}`);
+    },
+    // Get tenant conversions log
+    getTenantConversions: async (id, params = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/tenants/${id}/conversions?${queryString}`);
     },
     // Delete tenant
     deleteTenant: async (id, hardDelete = false) => {
