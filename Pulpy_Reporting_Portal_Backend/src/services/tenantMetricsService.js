@@ -1,6 +1,7 @@
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import redis from '../config/redis.js';
+import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 
 /**
  * Tenant Metrics Service
@@ -35,84 +36,75 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
-      // IST Day boundaries for "Today"
-      const todayStartUTC = new Date(`${dateTo}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const todayEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
+      const rt = getReportingRollupTableName();
 
-      // Period boundaries
-      const periodStartUTC = new Date(`${dateFrom}T00:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-      const periodEndUTC = new Date(`${dateTo}T23:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' ');
-
-      // Clicks metrics
-      const [clicksToday] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, todayStartUTC, todayEndUTC]
+      // Clicks & Conversions metrics from daily_reporting_rollup (strictly IST)
+      const [todayStats] = await pool.query(
+        `SELECT 
+           COALESCE(SUM(total_clicks), 0) as total_clicks,
+           COALESCE(SUM(unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(total_conversions), 0) as total_conversions,
+           COALESCE(SUM(approved_conversions), 0) as approved_conversions,
+           COALESCE(SUM(pending_conversions), 0) as pending_conversions,
+           COALESCE(SUM(rejected_conversions), 0) as rejected_conversions,
+           COALESCE(SUM(revenue), 0) as total_revenue,
+           COALESCE(SUM(payout), 0) as total_payout
+         FROM ${rt}
+         WHERE tenant_id = ? AND stat_date = ?`,
+        [tenantId, dateTo]
       );
 
-      const [clicksPeriod] = await pool.query(
-        `SELECT COUNT(*) as total, COUNT(DISTINCT click_uuid) as unique_clicks
-         FROM clicks
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, periodStartUTC, periodEndUTC]
+      const [periodStats] = await pool.query(
+        `SELECT 
+           COALESCE(SUM(total_clicks), 0) as total_clicks,
+           COALESCE(SUM(unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(total_conversions), 0) as total_conversions,
+           COALESCE(SUM(approved_conversions), 0) as approved_conversions,
+           COALESCE(SUM(pending_conversions), 0) as pending_conversions,
+           COALESCE(SUM(rejected_conversions), 0) as rejected_conversions,
+           COALESCE(SUM(revenue), 0) as total_revenue,
+           COALESCE(SUM(payout), 0) as total_payout,
+           COALESCE(SUM(profit), 0) as net_profit
+         FROM ${rt}
+         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
+        [tenantId, dateFrom, dateTo]
       );
+
+      const tStat = todayStats[0] || {};
+      const pStat = periodStats[0] || {};
 
       metrics.clicks = {
         today: {
-          total: parseInt(clicksToday[0]?.total || 0),
-          unique: parseInt(clicksToday[0]?.unique_clicks || 0),
+          total: parseInt(tStat.total_clicks || 0),
+          unique: parseInt(tStat.unique_clicks || 0),
         },
         period: {
-          total: parseInt(clicksPeriod[0]?.total || 0),
-          unique: parseInt(clicksPeriod[0]?.unique_clicks || 0),
+          total: parseInt(pStat.total_clicks || 0),
+          unique: parseInt(pStat.unique_clicks || 0),
         },
       };
 
-      // Conversions metrics
-      const [conversionsToday] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-           SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-           COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-         FROM conversions
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, todayStartUTC, todayEndUTC]
-      );
-
-      const [conversionsPeriod] = await pool.query(
-        `SELECT 
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-           COALESCE(SUM(amount), 0) as revenue,
-           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as payout
-         FROM conversions
-         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
-        [tenantId, periodStartUTC, periodEndUTC]
-      );
-
       metrics.conversions = {
         today: {
-          total: parseInt(conversionsToday[0]?.total || 0),
-          approved: parseInt(conversionsToday[0]?.approved || 0),
-          pending: parseInt(conversionsToday[0]?.pending || 0),
-          rejected: parseInt(conversionsToday[0]?.rejected || 0),
+          total: parseInt(tStat.total_conversions || 0),
+          approved: parseInt(tStat.approved_conversions || 0),
+          pending: parseInt(tStat.pending_conversions || 0),
+          rejected: parseInt(tStat.rejected_conversions || 0),
         },
         period: {
-          total: parseInt(conversionsPeriod[0]?.total || 0),
-          approved: parseInt(conversionsPeriod[0]?.approved || 0),
+          total: parseInt(pStat.total_conversions || 0),
+          approved: parseInt(pStat.approved_conversions || 0),
+          pending: parseInt(pStat.pending_conversions || 0),
+          rejected: parseInt(pStat.rejected_conversions || 0),
         },
       };
 
       metrics.revenue = {
-        today: parseFloat(conversionsToday[0]?.revenue || 0),
-        payout_today: parseFloat(conversionsToday[0]?.payout || 0),
-        period: parseFloat(conversionsPeriod[0]?.revenue || 0),
-        payout_period: parseFloat(conversionsPeriod[0]?.payout || 0),
-        profit_period: parseFloat(conversionsPeriod[0]?.revenue || 0) - parseFloat(conversionsPeriod[0]?.payout || 0),
+        today: parseFloat(tStat.total_revenue || 0),
+        payout_today: parseFloat(tStat.total_payout || 0),
+        period: parseFloat(pStat.total_revenue || 0),
+        payout_period: parseFloat(pStat.total_payout || 0),
+        profit_period: parseFloat(pStat.net_profit || ((parseFloat(pStat.total_revenue || 0)) - (parseFloat(pStat.total_payout || 0)))),
       };
 
       // Publishers count
@@ -167,7 +159,7 @@ export class TenantMetricsService {
   }
 
   /**
-   * Get comprehensive stats and daily breakdown for a tenant in a date range using daily_offer_stats
+   * Get comprehensive stats and daily breakdown for a tenant in a date range using daily_reporting_rollup
    */
   async getTenantStats(tenantId, dateFrom = null, dateTo = null) {
     try {
@@ -179,20 +171,22 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
-      // Summary from daily_offer_stats table
+      const rt = getReportingRollupTableName();
+
+      // Summary from daily_reporting_rollup table
       const [summaryRows] = await pool.query(
         `SELECT 
-           COALESCE(SUM(clicks), 0) as total_clicks,
-           COALESCE(SUM(unique_clicks), 0) as unique_clicks,
-           COALESCE(SUM(conversions), 0) as total_conversions,
+           COALESCE(SUM(total_clicks), 0) as total_clicks,
+           COALESCE(SUM(unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(total_conversions), 0) as total_conversions,
            COALESCE(SUM(approved_conversions), 0) as approved_conversions,
            COALESCE(SUM(pending_conversions), 0) as pending_conversions,
            COALESCE(SUM(rejected_conversions), 0) as rejected_conversions,
            COALESCE(SUM(revenue), 0) as total_revenue,
            COALESCE(SUM(payout), 0) as total_payout,
            COALESCE(SUM(profit), 0) as net_profit
-         FROM daily_offer_stats
-         WHERE tenant_id = ? AND day BETWEEN ? AND ?`,
+         FROM ${rt}
+         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
         [tenantId, dateFrom, dateTo]
       );
 
@@ -229,21 +223,21 @@ export class TenantMetricsService {
       const approvedCr = totalClicks > 0 ? parseFloat(((approvedConversions / totalClicks) * 100).toFixed(2)) : 0;
       const epc = totalClicks > 0 ? parseFloat((revenue / totalClicks).toFixed(4)) : 0;
 
-      // Daily Breakdown from daily_offer_stats
+      // Daily Breakdown from daily_reporting_rollup
       const [dailyRows] = await pool.query(
         `SELECT 
-           DATE_FORMAT(day, '%Y-%m-%d') as date,
-           COALESCE(SUM(clicks), 0) as clicks,
-           COALESCE(SUM(unique_clicks), 0) as unique_clicks,
-           COALESCE(SUM(conversions), 0) as conversions,
+           DATE_FORMAT(stat_date, '%Y-%m-%d') as date,
+           COALESCE(SUM(total_clicks), 0) as clicks,
+           COALESCE(SUM(unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(total_conversions), 0) as conversions,
            COALESCE(SUM(approved_conversions), 0) as approved,
            COALESCE(SUM(pending_conversions), 0) as pending,
            COALESCE(SUM(rejected_conversions), 0) as rejected,
            COALESCE(SUM(revenue), 0) as revenue,
            COALESCE(SUM(payout), 0) as payout,
            COALESCE(SUM(profit), 0) as profit
-         FROM daily_offer_stats
-         WHERE tenant_id = ? AND day BETWEEN ? AND ?
+         FROM ${rt}
+         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
          GROUP BY date
          ORDER BY date DESC`,
         [tenantId, dateFrom, dateTo]
@@ -305,7 +299,7 @@ export class TenantMetricsService {
   }
 
   /**
-   * Get offers list with performance stats for a tenant using daily_offer_stats
+   * Get offers list with performance stats for a tenant using daily_reporting_rollup (strictly IST)
    */
   async getTenantOffers(tenantId, dateFrom = null, dateTo = null, { search = '', status = '', page = 1, limit = 20 } = {}) {
     try {
@@ -320,6 +314,8 @@ export class TenantMetricsService {
       const parsedPage = Math.max(1, parseInt(page) || 1);
       const parsedLimit = Math.max(1, Math.min(100, parseInt(limit) || 20));
       const offset = (parsedPage - 1) * parsedLimit;
+
+      const rt = getReportingRollupTableName();
 
       const whereConditions = ['o.tenant_id = ?'];
       const params = [tenantId, dateFrom, dateTo, tenantId];
@@ -379,15 +375,15 @@ export class TenantMetricsService {
         LEFT JOIN (
           SELECT 
             offer_id,
-            COALESCE(SUM(clicks), 0) as clicks,
-            COALESCE(SUM(unique_clicks), 0) as unique_clicks,
-            COALESCE(SUM(conversions), 0) as conversions,
+            COALESCE(SUM(total_clicks), 0) as clicks,
+            COALESCE(SUM(unique_ips), 0) as unique_clicks,
+            COALESCE(SUM(total_conversions), 0) as conversions,
             COALESCE(SUM(approved_conversions), 0) as approved_conversions,
             COALESCE(SUM(revenue), 0) as revenue,
             COALESCE(SUM(payout), 0) as payout,
             COALESCE(SUM(profit), 0) as profit
-          FROM daily_offer_stats
-          WHERE tenant_id = ? AND day BETWEEN ? AND ?
+          FROM ${rt}
+          WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
           GROUP BY offer_id
         ) dos ON dos.offer_id = o.id
         WHERE ${whereClause}
@@ -654,23 +650,25 @@ export class TenantMetricsService {
   }
 
   /**
-   * Get daily metrics for a tenant (last N days) from daily_offer_stats
+   * Get daily metrics for a tenant (last N days) from daily_reporting_rollup (strictly IST)
    */
   async getTenantDailyMetrics(tenantId, days = 30) {
     try {
+      const rt = getReportingRollupTableName();
+
       const [rows] = await pool.query(
         `SELECT 
-           DATE_FORMAT(day, '%Y-%m-%d') as date,
-           COALESCE(SUM(clicks), 0) as clicks,
-           COALESCE(SUM(unique_clicks), 0) as unique_clicks,
-           COALESCE(SUM(conversions), 0) as conversions,
+           DATE_FORMAT(stat_date, '%Y-%m-%d') as date,
+           COALESCE(SUM(total_clicks), 0) as clicks,
+           COALESCE(SUM(unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(total_conversions), 0) as conversions,
            COALESCE(SUM(approved_conversions), 0) as approved_conversions,
            COALESCE(SUM(revenue), 0) as revenue,
            COALESCE(SUM(payout), 0) as payout,
            COALESCE(SUM(profit), 0) as profit
-         FROM daily_offer_stats
+         FROM ${rt}
          WHERE tenant_id = ?
-           AND day >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+           AND stat_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
          GROUP BY date
          ORDER BY date DESC`,
         [tenantId, days]
@@ -684,7 +682,7 @@ export class TenantMetricsService {
   }
 
   /**
-   * Get top performing offers for a tenant from daily_offer_stats
+   * Get top performing offers for a tenant from daily_reporting_rollup (strictly IST)
    */
   async getTenantTopOffers(tenantId, limit = 10, dateFrom = null, dateTo = null) {
     try {
@@ -696,20 +694,22 @@ export class TenantMetricsService {
         dateFrom = monthStart;
       }
 
+      const rt = getReportingRollupTableName();
+
       const [rows] = await pool.query(
         `SELECT 
            o.id,
            o.name,
-           COALESCE(SUM(dos.clicks), 0) as clicks,
-           COALESCE(SUM(dos.unique_clicks), 0) as unique_clicks,
-           COALESCE(SUM(dos.conversions), 0) as conversions,
+           COALESCE(SUM(dos.total_clicks), 0) as clicks,
+           COALESCE(SUM(dos.unique_ips), 0) as unique_clicks,
+           COALESCE(SUM(dos.total_conversions), 0) as conversions,
            COALESCE(SUM(dos.approved_conversions), 0) as approved_conversions,
            COALESCE(SUM(dos.revenue), 0) as revenue,
            COALESCE(SUM(dos.payout), 0) as payout,
            COALESCE(SUM(dos.profit), 0) as profit
          FROM offers o
-         INNER JOIN daily_offer_stats dos ON dos.offer_id = o.id AND dos.tenant_id = o.tenant_id
-           AND dos.day BETWEEN ? AND ?
+         INNER JOIN ${rt} dos ON dos.offer_id = o.id AND dos.tenant_id = o.tenant_id
+           AND dos.stat_date BETWEEN ? AND ?
          WHERE o.tenant_id = ?
          GROUP BY o.id, o.name
          ORDER BY conversions DESC, revenue DESC
