@@ -2,9 +2,272 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/mysqlUtcRange.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
+import { getIstTodayYmd, splitDateRangeForRollup } from '../utils/reportDailyRollup.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
 import reportService from './reportService.js';
+
+function buildOfferStatsSubquery(tenantId, fromDate, toDate, filters = {}) {
+  const rs = normalizeMysqlUtcDatetime(filters.range_start_utc);
+  const re = normalizeMysqlUtcDatetime(filters.range_end_utc);
+
+  if (rs && re) {
+    const sql = `(
+      SELECT 
+        o_sub.offer_id,
+        COALESCE(c_sub.clicks, 0) as clicks,
+        COALESCE(c_sub.unique_clicks, 0) as unique_clicks,
+        COALESCE(conv_sub.conversions, 0) as conversions,
+        COALESCE(conv_sub.approved_conversions, 0) as approved_conversions,
+        COALESCE(conv_sub.pending_conversions, 0) as pending_conversions,
+        COALESCE(conv_sub.payout, 0) as payout,
+        COALESCE(conv_sub.revenue, 0) as revenue,
+        COALESCE(conv_sub.profit, 0) as profit
+      FROM (
+        SELECT DISTINCT offer_id FROM (
+          SELECT offer_id FROM clicks WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+          UNION
+          SELECT offer_id FROM conversions WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        ) u
+      ) o_sub
+      LEFT JOIN (
+        SELECT offer_id, COUNT(*) as clicks, COUNT(DISTINCT ip) as unique_clicks
+        FROM clicks WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        GROUP BY offer_id
+      ) c_sub ON o_sub.offer_id = c_sub.offer_id
+      LEFT JOIN (
+        SELECT offer_id, COUNT(*) as conversions,
+          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+          SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as payout,
+          SUM(amount) as revenue,
+          (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
+        FROM conversions WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        GROUP BY offer_id
+      ) conv_sub ON o_sub.offer_id = conv_sub.offer_id
+    )`;
+    const params = [tenantId, rs, re, tenantId, rs, re, tenantId, rs, re, tenantId, rs, re];
+    return { sql, params };
+  }
+
+  const split = splitDateRangeForRollup(fromDate, toDate);
+  const rt = getReportingRollupTableName();
+  const unions = [];
+  const params = [];
+
+  if (split.useRollup) {
+    unions.push(`
+      SELECT 
+        offer_id,
+        COALESCE(SUM(total_clicks), 0) as clicks,
+        COALESCE(SUM(unique_ips), 0) as unique_clicks,
+        COALESCE(SUM(total_conversions), 0) as conversions,
+        COALESCE(SUM(approved_conversions), 0) as approved_conversions,
+        COALESCE(SUM(pending_conversions), 0) as pending_conversions,
+        COALESCE(SUM(payout), 0) as payout,
+        COALESCE(SUM(revenue), 0) as revenue,
+        COALESCE(SUM(profit), 0) as profit
+      FROM ${rt}
+      WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
+      GROUP BY offer_id
+    `);
+    params.push(tenantId, split.rollupFrom, split.rollupTo);
+  }
+
+  if (split.scanToday) {
+    const { start: todayUtcStart, end: todayUtcEnd } = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+    unions.push(`
+      SELECT 
+        c.offer_id,
+        COUNT(*) as clicks,
+        COUNT(DISTINCT c.ip) as unique_clicks,
+        0 as conversions,
+        0 as approved_conversions,
+        0 as pending_conversions,
+        0 as payout,
+        0 as revenue,
+        0 as profit
+      FROM clicks c
+      WHERE c.tenant_id = ? AND c.created_at BETWEEN ? AND ?
+      GROUP BY c.offer_id
+    `);
+    params.push(tenantId, todayUtcStart, todayUtcEnd);
+
+    unions.push(`
+      SELECT 
+        conv.offer_id,
+        0 as clicks,
+        0 as unique_clicks,
+        COUNT(*) as conversions,
+        SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+        SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+        SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END) as payout,
+        COALESCE(SUM(conv.amount), 0) as revenue,
+        (COALESCE(SUM(conv.amount), 0) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END)) as profit
+      FROM conversions conv
+      WHERE conv.tenant_id = ? AND conv.created_at BETWEEN ? AND ?
+      GROUP BY conv.offer_id
+    `);
+    params.push(tenantId, todayUtcStart, todayUtcEnd);
+  }
+
+  if (unions.length === 0) {
+    return {
+      sql: `(SELECT NULL as offer_id, 0 as clicks, 0 as unique_clicks, 0 as conversions, 0 as approved_conversions, 0 as pending_conversions, 0 as payout, 0 as revenue, 0 as profit WHERE 1=0)`,
+      params: []
+    };
+  }
+
+  const sql = `(
+    SELECT 
+      offer_id,
+      SUM(clicks) as clicks,
+      SUM(unique_clicks) as unique_clicks,
+      SUM(conversions) as conversions,
+      SUM(approved_conversions) as approved_conversions,
+      SUM(pending_conversions) as pending_conversions,
+      SUM(payout) as payout,
+      SUM(revenue) as revenue,
+      SUM(profit) as profit
+    FROM (
+      ${unions.join(' UNION ALL ')}
+    ) combined_offers
+    GROUP BY offer_id
+  )`;
+
+  return { sql, params };
+}
+
+function buildPublisherStatsSubquery(tenantId, fromDate, toDate, filters = {}) {
+  const rs = normalizeMysqlUtcDatetime(filters.range_start_utc);
+  const re = normalizeMysqlUtcDatetime(filters.range_end_utc);
+
+  if (rs && re) {
+    const sql = `(
+      SELECT 
+        p_sub.publisher_id,
+        COALESCE(c_sub.clicks, 0) as clicks,
+        COALESCE(c_sub.unique_clicks, 0) as unique_clicks,
+        COALESCE(conv_sub.conversions, 0) as conversions,
+        COALESCE(conv_sub.approved_conversions, 0) as approved_conversions,
+        COALESCE(conv_sub.pending_conversions, 0) as pending_conversions,
+        COALESCE(conv_sub.payout, 0) as payout,
+        COALESCE(conv_sub.revenue, 0) as revenue,
+        COALESCE(conv_sub.profit, 0) as profit
+      FROM (
+        SELECT DISTINCT publisher_id FROM (
+          SELECT publisher_id FROM clicks WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+          UNION
+          SELECT publisher_id FROM conversions WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        ) u
+      ) p_sub
+      LEFT JOIN (
+        SELECT publisher_id, COUNT(*) as clicks, COUNT(DISTINCT ip) as unique_clicks
+        FROM clicks WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        GROUP BY publisher_id
+      ) c_sub ON p_sub.publisher_id = c_sub.publisher_id
+      LEFT JOIN (
+        SELECT publisher_id, COUNT(*) as conversions,
+          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+          SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END) as payout,
+          SUM(amount) as revenue,
+          (SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END)) as profit
+        FROM conversions WHERE tenant_id = ? AND created_at BETWEEN ? AND ?
+        GROUP BY publisher_id
+      ) conv_sub ON p_sub.publisher_id = conv_sub.publisher_id
+    )`;
+    const params = [tenantId, rs, re, tenantId, rs, re, tenantId, rs, re, tenantId, rs, re];
+    return { sql, params };
+  }
+
+  const split = splitDateRangeForRollup(fromDate, toDate);
+  const rt = getReportingRollupTableName();
+  const unions = [];
+  const params = [];
+
+  if (split.useRollup) {
+    unions.push(`
+      SELECT 
+        publisher_id,
+        COALESCE(SUM(total_clicks), 0) as clicks,
+        COALESCE(SUM(unique_ips), 0) as unique_clicks,
+        COALESCE(SUM(total_conversions), 0) as conversions,
+        COALESCE(SUM(approved_conversions), 0) as approved_conversions,
+        COALESCE(SUM(pending_conversions), 0) as pending_conversions,
+        COALESCE(SUM(payout), 0) as payout,
+        COALESCE(SUM(revenue), 0) as revenue,
+        COALESCE(SUM(profit), 0) as profit
+      FROM ${rt}
+      WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
+      GROUP BY publisher_id
+    `);
+    params.push(tenantId, split.rollupFrom, split.rollupTo);
+  }
+
+  if (split.scanToday) {
+    const { start: todayUtcStart, end: todayUtcEnd } = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+    unions.push(`
+      SELECT 
+        c.publisher_id,
+        COUNT(*) as clicks,
+        COUNT(DISTINCT c.ip) as unique_clicks,
+        0 as conversions,
+        0 as approved_conversions,
+        0 as pending_conversions,
+        0 as payout,
+        0 as revenue,
+        0 as profit
+      FROM clicks c
+      WHERE c.tenant_id = ? AND c.created_at BETWEEN ? AND ?
+      GROUP BY c.publisher_id
+    `);
+    params.push(tenantId, todayUtcStart, todayUtcEnd);
+
+    unions.push(`
+      SELECT 
+        conv.publisher_id,
+        0 as clicks,
+        0 as unique_clicks,
+        COUNT(*) as conversions,
+        SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) as approved_conversions,
+        SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) as pending_conversions,
+        SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END) as payout,
+        COALESCE(SUM(conv.amount), 0) as revenue,
+        (COALESCE(SUM(conv.amount), 0) - SUM(CASE WHEN conv.status = 'approved' THEN conv.payout ELSE 0 END)) as profit
+      FROM conversions conv
+      WHERE conv.tenant_id = ? AND conv.created_at BETWEEN ? AND ?
+      GROUP BY conv.publisher_id
+    `);
+    params.push(tenantId, todayUtcStart, todayUtcEnd);
+  }
+
+  if (unions.length === 0) {
+    return {
+      sql: `(SELECT NULL as publisher_id, 0 as clicks, 0 as unique_clicks, 0 as conversions, 0 as approved_conversions, 0 as pending_conversions, 0 as payout, 0 as revenue, 0 as profit WHERE 1=0)`,
+      params: []
+    };
+  }
+
+  const sql = `(
+    SELECT 
+      publisher_id,
+      SUM(clicks) as clicks,
+      SUM(unique_clicks) as unique_clicks,
+      SUM(conversions) as conversions,
+      SUM(approved_conversions) as approved_conversions,
+      SUM(pending_conversions) as pending_conversions,
+      SUM(payout) as payout,
+      SUM(revenue) as revenue,
+      SUM(profit) as profit
+    FROM (
+      ${unions.join(' UNION ALL ')}
+    ) combined_pubs
+    GROUP BY publisher_id
+  )`;
+
+  return { sql, params };
+}
 
 export class DashboardService {
   /**
@@ -84,24 +347,72 @@ export class DashboardService {
     return istYmdSpanToMysqlUtcRange(from, to);
   }
 
-  async getDashboardStats(filters = {}, tenantId) {
-    // Handle overload: getDashboardStats(tenantId)
-    if (typeof filters === 'string' || typeof filters === 'number') {
-      tenantId = filters;
-      filters = {}; // Use defaults
+  async queryHybridSummary({ tenantId, fromDate, toDate, filters = {}, isPrevious = false }) {
+    const rs = normalizeMysqlUtcDatetime(isPrevious ? filters.previous_range_start_utc : filters.range_start_utc);
+    const re = normalizeMysqlUtcDatetime(isPrevious ? filters.previous_range_end_utc : filters.range_end_utc);
+
+    if (rs && re) {
+      const [clickRows] = await pool.query(
+        `SELECT 
+           COUNT(*) as total_clicks,
+           COUNT(DISTINCT ip) as unique_clicks
+         FROM clicks
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, rs, re]
+      );
+      const [convRows] = await pool.query(
+        `SELECT 
+           COUNT(*) as total_conversions,
+           COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_conversions,
+           COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_conversions,
+           COUNT(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 END) as rejected_conversions,
+           COALESCE(SUM(amount), 0) as total_revenue,
+           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout
+         FROM conversions
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, rs, re]
+      );
+
+      const c = clickRows[0] || {};
+      const cv = convRows[0] || {};
+      const totalClicks = parseInt(c.total_clicks || 0, 10);
+      const uniqueClicks = parseInt(c.unique_clicks || 0, 10);
+      const totalConversions = parseInt(cv.total_conversions || 0, 10);
+      const approvedConversions = parseInt(cv.approved_conversions || 0, 10);
+      const pendingConversions = parseInt(cv.pending_conversions || 0, 10);
+      const rejectedConversions = parseInt(cv.rejected_conversions || 0, 10);
+      const revenue = parseFloat(cv.total_revenue || 0);
+      const payout = parseFloat(cv.total_payout || 0);
+      const profit = revenue - payout;
+
+      return {
+        total_clicks: totalClicks,
+        unique_clicks: uniqueClicks,
+        total_conversions: totalConversions,
+        approved_conversions: approvedConversions,
+        pending_conversions: pendingConversions,
+        rejected_conversions: rejectedConversions,
+        total_revenue: revenue,
+        total_payout: payout,
+        net_profit: profit,
+      };
     }
 
-    if (!tenantId) throw new Error('Tenant ID required');
-    try {
-      const dates = this.getDateRanges(filters);
-      const dateFrom = dates.currentFrom;
-      const dateTo = dates.currentTo;
-      const prevFrom = dates.previousFrom;
-      const prevTo = dates.previousTo;
-      const rt = getReportingRollupTableName();
+    const split = splitDateRangeForRollup(fromDate, toDate);
+    const rt = getReportingRollupTableName();
 
-      // Summary from daily_reporting_rollup table (strictly IST indexed query)
-      const [currentRows] = await pool.query(
+    let total_clicks = 0;
+    let unique_clicks = 0;
+    let total_conversions = 0;
+    let approved_conversions = 0;
+    let pending_conversions = 0;
+    let rejected_conversions = 0;
+    let revenue = 0;
+    let payout = 0;
+    let profit = 0;
+
+    if (split.useRollup) {
+      const [rows] = await pool.query(
         `SELECT 
            COALESCE(SUM(total_clicks), 0) as total_clicks,
            COALESCE(SUM(unique_ips), 0) as unique_clicks,
@@ -114,22 +425,108 @@ export class DashboardService {
            COALESCE(SUM(profit), 0) as net_profit
          FROM ${rt}
          WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
-        [tenantId, dateFrom, dateTo]
+        [tenantId, split.rollupFrom, split.rollupTo]
       );
+      const r = rows[0] || {};
+      total_clicks += parseInt(r.total_clicks || 0, 10);
+      unique_clicks += parseInt(r.unique_clicks || 0, 10);
+      total_conversions += parseInt(r.total_conversions || 0, 10);
+      approved_conversions += parseInt(r.approved_conversions || 0, 10);
+      pending_conversions += parseInt(r.pending_conversions || 0, 10);
+      rejected_conversions += parseInt(r.rejected_conversions || 0, 10);
+      revenue += parseFloat(r.total_revenue || 0);
+      payout += parseFloat(r.total_payout || 0);
+      profit += parseFloat(r.net_profit || 0);
+    }
 
-      const [prevRows] = await pool.query(
+    if (split.scanToday) {
+      const { start: todayUtcStart, end: todayUtcEnd } = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+      const [clickRows] = await pool.query(
         `SELECT 
-           COALESCE(SUM(total_clicks), 0) as total_clicks,
-           COALESCE(SUM(total_conversions), 0) as total_conversions,
-           COALESCE(SUM(revenue), 0) as total_revenue,
-           COALESCE(SUM(payout), 0) as total_payout
-         FROM ${rt}
-         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
-        [tenantId, prevFrom, prevTo]
+           COUNT(*) as total_clicks,
+           COUNT(DISTINCT ip) as unique_clicks
+         FROM clicks
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, todayUtcStart, todayUtcEnd]
+      );
+      const [convRows] = await pool.query(
+        `SELECT 
+           COUNT(*) as total_conversions,
+           COUNT(CASE WHEN status = 'approved' THEN 1 END) as approved_conversions,
+           COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_conversions,
+           COUNT(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 END) as rejected_conversions,
+           COALESCE(SUM(amount), 0) as total_revenue,
+           COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) as total_payout
+         FROM conversions
+         WHERE tenant_id = ? AND created_at BETWEEN ? AND ?`,
+        [tenantId, todayUtcStart, todayUtcEnd]
       );
 
-      const currentStats = currentRows[0] || {};
-      const previousStats = prevRows[0] || {};
+      const c = clickRows[0] || {};
+      const cv = convRows[0] || {};
+      const cClicks = parseInt(c.total_clicks || 0, 10);
+      const cUnique = parseInt(c.unique_clicks || 0, 10);
+      const cvTotal = parseInt(cv.total_conversions || 0, 10);
+      const cvApproved = parseInt(cv.approved_conversions || 0, 10);
+      const cvPending = parseInt(cv.pending_conversions || 0, 10);
+      const cvRejected = parseInt(cv.rejected_conversions || 0, 10);
+      const cvRev = parseFloat(cv.total_revenue || 0);
+      const cvPay = parseFloat(cv.total_payout || 0);
+      const cvProf = cvRev - cvPay;
+
+      total_clicks += cClicks;
+      unique_clicks += cUnique;
+      total_conversions += cvTotal;
+      approved_conversions += cvApproved;
+      pending_conversions += cvPending;
+      rejected_conversions += cvRejected;
+      revenue += cvRev;
+      payout += cvPay;
+      profit += cvProf;
+    }
+
+    return {
+      total_clicks,
+      unique_clicks,
+      total_conversions,
+      approved_conversions,
+      pending_conversions,
+      rejected_conversions,
+      total_revenue: revenue,
+      total_payout: payout,
+      net_profit: profit,
+    };
+  }
+
+  async getDashboardStats(filters = {}, tenantId) {
+    if (typeof filters === 'string' || typeof filters === 'number') {
+      tenantId = filters;
+      filters = {};
+    }
+
+    if (!tenantId) throw new Error('Tenant ID required');
+    try {
+      const dates = this.getDateRanges(filters);
+      const dateFrom = dates.currentFrom;
+      const dateTo = dates.currentTo;
+      const prevFrom = dates.previousFrom;
+      const prevTo = dates.previousTo;
+
+      const currentStats = await this.queryHybridSummary({
+        tenantId,
+        fromDate: dateFrom,
+        toDate: dateTo,
+        filters,
+        isPrevious: false,
+      });
+
+      const previousStats = await this.queryHybridSummary({
+        tenantId,
+        fromDate: prevFrom,
+        toDate: prevTo,
+        filters,
+        isPrevious: true,
+      });
 
       const revTotal = parseFloat(currentStats.total_revenue || 0);
       const payoutTotal = parseFloat(currentStats.total_payout || 0);
@@ -219,32 +616,25 @@ export class DashboardService {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
       const limit = parseInt(filters.limit || 5);
-      const dateFrom = filters.date_from;
-      const dateTo = filters.date_to;
-      const rt = getReportingRollupTableName();
+      const dates = this.getDateRanges(filters);
+      const dateFrom = filters.date_from || dates.currentFrom;
+      const dateTo = filters.date_to || dates.currentTo;
 
-      let dateCondition = '';
-      const params = [];
-
-      if (dateFrom && dateTo) {
-        dateCondition = 'AND dos.stat_date BETWEEN ? AND ?';
-        params.push(dateFrom, dateTo);
-      }
+      const sub = buildOfferStatsSubquery(tenantId, dateFrom, dateTo, filters);
 
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
           (SELECT COUNT(*) FROM offers o2 WHERE o2.tenant_id = o.tenant_id AND o2.id <= o.id) as display_id,
           o.name as offer_name,
-          COALESCE(SUM(dos.total_conversions), 0) as conversions
+          COALESCE(dos.conversions, 0) as conversions
         FROM offers o
-        LEFT JOIN ${rt} dos ON o.id = dos.offer_id AND dos.tenant_id = o.tenant_id ${dateCondition}
+        LEFT JOIN ${sub.sql} dos ON o.id = dos.offer_id
         WHERE o.status != 'remove' AND o.tenant_id = ?
-        GROUP BY o.id, o.public_offer_id, o.name
-        ORDER BY conversions DESC
+        ORDER BY conversions DESC, o.id DESC
         LIMIT ?
         `,
-        [...params, tenantId, limit]
+        [...sub.params, tenantId, limit]
       );
 
       return rows.map(row => ({
@@ -285,26 +675,51 @@ export class DashboardService {
         return allDates.map(dg => ({ date: dg, clicks: clicksMap.get(dg) || 0, conversions: conversionsMap.get(dg) || 0 }));
       }
 
+      // Daily / Multi-day chart using hybrid approach (Rollup for sealed days + raw for today)
+      const split = splitDateRangeForRollup(dateFrom, dateTo);
       const rt = getReportingRollupTableName();
+      const dateStatsMap = new Map();
 
-      // Daily / Multi-day chart using daily_reporting_rollup (strictly IST)
-      const [rows] = await pool.query(
-        `SELECT 
-           DATE_FORMAT(stat_date, '%Y-%m-%d') as date,
-           COALESCE(SUM(total_clicks), 0) as clicks,
-           COALESCE(SUM(total_conversions), 0) as conversions
-         FROM ${rt}
-         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
-         GROUP BY date
-         ORDER BY date ASC`,
-        [tenantId, dateFrom, dateTo]
-      );
+      if (split.useRollup) {
+        const [rows] = await pool.query(
+          `SELECT 
+             DATE_FORMAT(stat_date, '%Y-%m-%d') as date,
+             COALESCE(SUM(total_clicks), 0) as clicks,
+             COALESCE(SUM(total_conversions), 0) as conversions
+           FROM ${rt}
+           WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
+           GROUP BY date
+           ORDER BY date ASC`,
+          [tenantId, split.rollupFrom, split.rollupTo]
+        );
+        for (const r of rows) {
+          dateStatsMap.set(r.date, {
+            date: r.date,
+            clicks: parseInt(r.clicks || 0),
+            conversions: parseInt(r.conversions || 0),
+          });
+        }
+      }
 
-      return rows.map(r => ({
-        date: r.date,
-        clicks: parseInt(r.clicks || 0),
-        conversions: parseInt(r.conversions || 0),
-      }));
+      if (split.scanToday) {
+        const { start: todayUtcStart, end: todayUtcEnd } = istYmdSpanToMysqlUtcRange(split.todayIST, split.todayIST);
+        const [clicksRows] = await pool.query(
+          `SELECT COUNT(*) as clicks FROM clicks WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
+          [todayUtcStart, todayUtcEnd, tenantId]
+        );
+        const [conversionsRows] = await pool.query(
+          `SELECT COUNT(*) as conversions FROM conversions WHERE created_at BETWEEN ? AND ? AND tenant_id = ?`,
+          [todayUtcStart, todayUtcEnd, tenantId]
+        );
+        dateStatsMap.set(split.todayIST, {
+          date: split.todayIST,
+          clicks: parseInt(clicksRows[0]?.clicks || 0),
+          conversions: parseInt(conversionsRows[0]?.conversions || 0),
+        });
+      }
+
+      const allDates = Array.from(dateStatsMap.keys()).sort();
+      return allDates.map(d => dateStatsMap.get(d));
     } catch (error) {
       logger.error('DashboardService.getPerformanceChart error:', error);
       throw error;
@@ -346,7 +761,6 @@ export class DashboardService {
         [utcStart, utcEnd, tenantId, tenantId, limit]
       );
 
-      // Get total conversions for all affiliates
       const [totalRows] = await pool.query(
         `SELECT COUNT(DISTINCT conv.id) as total_conversions
         FROM conversions conv
@@ -373,7 +787,6 @@ export class DashboardService {
   async getInfoCards(tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      // Get active offers count
       const [offerRows] = await pool.query(
         `SELECT COUNT(*) as count
         FROM offers
@@ -381,13 +794,9 @@ export class DashboardService {
         `, [tenantId]
       );
 
-      // Get pending affiliates count
       const publisherStats = await publisherService.getStats(tenantId);
-
-      // Get offer requests (placeholder - may need a separate table)
       const offerRequests = 0;
 
-      // Account manager info (placeholder - should come from config or admin table)
       const accountManager = {
         name: 'Sukhwinder Pal Singh',
         telegram: '@username',
@@ -396,7 +805,6 @@ export class DashboardService {
         phone: '+1234567890',
       };
 
-      // Signup link (placeholder - should come from config)
       const signupLink = 'https://signup.example.com/affiliates-advertisers';
 
       return {
@@ -426,7 +834,6 @@ export class DashboardService {
         to: dateTo,
       }));
 
-      // Get country stats from clicks and conversions
       const [rows] = await pool.query(
         `SELECT 
           c.country as country_code,
@@ -448,7 +855,6 @@ export class DashboardService {
         [utcStart, utcEnd, utcStart, utcEnd, tenantId, limit]
       );
 
-      // Map country codes to names (simplified - should use a proper country lookup)
       const countryNameMap = {
         'US': 'United States',
         'GB': 'United Kingdom',
@@ -485,7 +891,6 @@ export class DashboardService {
    * Returns: Total Clicks, Conversions, Total Revenue, Approved Payout
    */
   async getDashboardCards(filters = {}, tenantId) {
-    // Handle overload
     if (typeof filters === 'string' || typeof filters === 'number') {
       tenantId = filters;
       filters = {};
@@ -498,39 +903,22 @@ export class DashboardService {
       const dateTo = dates.currentTo;
       const prevFrom = dates.previousFrom;
       const prevTo = dates.previousTo;
-      const rt = getReportingRollupTableName();
 
-      // Current & Previous stats from daily_reporting_rollup (exact IST)
-      const [currentRows] = await pool.query(
-        `SELECT 
-           COALESCE(SUM(total_clicks), 0) as total_clicks,
-           COALESCE(SUM(unique_ips), 0) as unique_clicks,
-           COALESCE(SUM(total_conversions), 0) as total_conversions,
-           COALESCE(SUM(approved_conversions), 0) as approved_conversions,
-           COALESCE(SUM(pending_conversions), 0) as pending_conversions,
-           COALESCE(SUM(rejected_conversions), 0) as rejected_conversions,
-           COALESCE(SUM(revenue), 0) as total_revenue,
-           COALESCE(SUM(payout), 0) as total_payout,
-           COALESCE(SUM(profit), 0) as net_profit
-         FROM ${rt}
-         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
-        [tenantId, dateFrom, dateTo]
-      );
+      const currentStats = await this.queryHybridSummary({
+        tenantId,
+        fromDate: dateFrom,
+        toDate: dateTo,
+        filters,
+        isPrevious: false,
+      });
 
-      const [prevRows] = await pool.query(
-        `SELECT 
-           COALESCE(SUM(total_clicks), 0) as total_clicks,
-           COALESCE(SUM(unique_ips), 0) as unique_clicks,
-           COALESCE(SUM(total_conversions), 0) as total_conversions,
-           COALESCE(SUM(revenue), 0) as total_revenue,
-           COALESCE(SUM(payout), 0) as total_payout
-         FROM ${rt}
-         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
-        [tenantId, prevFrom, prevTo]
-      );
-
-      const currentStats = currentRows[0] || {};
-      const previousStats = prevRows[0] || {};
+      const previousStats = await this.queryHybridSummary({
+        tenantId,
+        fromDate: prevFrom,
+        toDate: prevTo,
+        filters,
+        isPrevious: true,
+      });
 
       // Compute Values
       const clicksTotal = parseInt(currentStats.total_clicks || 0);
@@ -614,7 +1002,6 @@ export class DashboardService {
   }
 
   async getPerformanceSummary(filters = {}, tenantId) {
-    // Handle overload
     if (typeof filters === 'string' || typeof filters === 'number') {
       tenantId = filters;
       filters = {};
@@ -625,28 +1012,21 @@ export class DashboardService {
       const dates = this.getDateRanges(filters);
       const dateFrom = filters.date_from || dates.currentFrom;
       const dateTo = filters.date_to || dates.currentTo;
-      const rt = getReportingRollupTableName();
 
-      const [rows] = await pool.query(
-        `SELECT 
-           COALESCE(SUM(unique_ips), 0) as unique_clicks,
-           COALESCE(SUM(total_conversions), 0) as total,
-           COALESCE(SUM(approved_conversions), 0) as approved,
-           COALESCE(SUM(revenue), 0) as revenue,
-           COALESCE(SUM(payout), 0) as payout,
-           COALESCE(SUM(profit), 0) as profit
-         FROM ${rt}
-         WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?`,
-        [tenantId, dateFrom, dateTo]
-      );
+      const r = await this.queryHybridSummary({
+        tenantId,
+        fromDate: dateFrom,
+        toDate: dateTo,
+        filters,
+        isPrevious: false,
+      });
 
-      const r = rows[0] || {};
       const uniqueClicks = parseInt(r.unique_clicks || 0);
-      const totalConversions = parseInt(r.total || 0);
-      const approvedConversions = parseInt(r.approved || 0);
-      const revenue = parseFloat(r.revenue || 0);
-      const payout = parseFloat(r.payout || 0);
-      const profit = parseFloat(r.profit || (revenue - payout));
+      const totalConversions = parseInt(r.total_conversions || 0);
+      const approvedConversions = parseInt(r.approved_conversions || 0);
+      const revenue = parseFloat(r.total_revenue || 0);
+      const payout = parseFloat(r.total_payout || 0);
+      const profit = parseFloat(r.net_profit || (revenue - payout));
 
       return {
         unique_clicks: uniqueClicks,
@@ -661,6 +1041,7 @@ export class DashboardService {
       throw error;
     }
   }
+
   async getLiveOffers(limit = 5, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
@@ -689,7 +1070,6 @@ export class DashboardService {
   async getRecentActivity(limit = 5, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
     try {
-      // Get recent unique clicks with their conversion status
       const [rows] = await pool.query(
         `SELECT 
           c.id as click_id,
@@ -720,7 +1100,7 @@ export class DashboardService {
           id: row.public_offer_id
         },
         publisher: row.publisher_name || row.first_name || 'Unknown',
-        clicks: 1, // Individual log entry represents 1 click
+        clicks: 1,
         converted: !!row.conversion_status,
         conversion_status: row.conversion_status || 'No',
         revenue: parseFloat(row.revenue).toFixed(2)
@@ -732,7 +1112,7 @@ export class DashboardService {
   }
 
   /**
-   * Get offer statistics with clicks, conversions, CR, payouts, and profit using daily_reporting_rollup (strictly IST)
+   * Get offer statistics with clicks, conversions, CR, payouts, and profit using hybrid approach (strictly IST)
    */
   async getOfferStatistics(filters = {}, tenantId) {
     if (!tenantId) throw new Error('Tenant ID required');
@@ -740,7 +1120,6 @@ export class DashboardService {
       const dateBoundaries = this.getDateBoundaries();
       const dateFrom = filters.date_from || dateBoundaries.monthStart;
       const dateTo = filters.date_to || dateBoundaries.todayStart;
-      const rt = getReportingRollupTableName();
 
       const sortBy = filters.sort_by || 'clicks';
       const orderBy = filters.order_by || 'DESC';
@@ -769,6 +1148,8 @@ export class DashboardService {
         }
       }
 
+      const sub = buildOfferStatsSubquery(tenantId, dateFrom, dateTo, filters);
+
       const [rows] = await pool.query(
         `SELECT 
           o.public_offer_id as offer_id,
@@ -788,25 +1169,12 @@ export class DashboardService {
                THEN (COALESCE(dos.approved_conversions, 0) / COALESCE(dos.clicks, 0) * 100) 
                ELSE 0 END as approved_conversion_ratio
         FROM offers o
-        LEFT JOIN (
-          SELECT 
-            offer_id,
-            COALESCE(SUM(total_clicks), 0) as clicks,
-            COALESCE(SUM(total_conversions), 0) as conversions,
-            COALESCE(SUM(approved_conversions), 0) as approved_conversions,
-            COALESCE(SUM(pending_conversions), 0) as pending_conversions,
-            COALESCE(SUM(payout), 0) as payout,
-            COALESCE(SUM(revenue), 0) as revenue,
-            COALESCE(SUM(profit), 0) as profit
-          FROM ${rt}
-          WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
-          GROUP BY offer_id
-        ) dos ON o.id = dos.offer_id
+        LEFT JOIN ${sub.sql} dos ON o.id = dos.offer_id
         WHERE o.status != 'remove' AND o.tenant_id = ?${searchClause}
         ORDER BY ${finalSortBy} ${finalOrderBy}, clicks DESC, conversions DESC
         LIMIT ? OFFSET ?
         `,
-        [tenantId, dateFrom, dateTo, tenantId, ...searchParams, limit, offset]
+        [...sub.params, tenantId, ...searchParams, limit, offset]
       );
 
       const [totalRows] = await pool.query(
@@ -859,15 +1227,11 @@ export class DashboardService {
 
       const mergedMap = new Map();
 
-      // Helper to generate a normalized key
       const getNormalizedKey = (dateStr, fromDateStr, type) => {
         if (type === 'hour') {
-          // Expected format: "YYYY-MM-DD HH:00" -> "HH:00"
           if (dateStr.length >= 16) return dateStr.substring(11, 16);
-          return dateStr; // Fallback
+          return dateStr;
         } else {
-          // Day/Week/Month: Use offset from start date
-          // Treat strings as UTC for simple difference calculation to avoid DST issues
           const date = new Date(dateStr + 'T00:00:00Z');
           const start = new Date(fromDateStr + 'T00:00:00Z');
           const diffTime = date - start;
@@ -876,7 +1240,6 @@ export class DashboardService {
         }
       };
 
-      // Populate with Current Data
       currentData.forEach(row => {
         const key = getNormalizedKey(row.date, currentFilters.date_from, groupBy);
         mergedMap.set(key, {
@@ -889,7 +1252,6 @@ export class DashboardService {
         });
       });
 
-      // Overlay Previous Data
       previousData.forEach(row => {
         const key = getNormalizedKey(row.date, previousFilters.date_from, groupBy);
         if (mergedMap.has(key)) {
@@ -909,7 +1271,6 @@ export class DashboardService {
         }
       });
 
-      // Convert map to sorted array
       const sortedData = Array.from(mergedMap.values()).sort((a, b) => {
         if (groupBy === 'hour') {
           return a.label.localeCompare(b.label);
@@ -938,7 +1299,6 @@ export class DashboardService {
       const sortBy = filters.sort_by || 'conversions';
       const orderBy = filters.order_by || 'DESC';
 
-      // Validate sort fields
       const allowedSortFields = ['clicks', 'conversions', 'approved_conversions', 'pending_conversions', 'affiliate_payout', 'total_revenue', 'profit', 'publisher_name'];
       const finalSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'conversions';
       const finalOrderBy = orderBy.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
@@ -947,7 +1307,7 @@ export class DashboardService {
       const limit = parseInt(filters.limit || 10);
       const offset = (page - 1) * limit;
 
-      const rt = getReportingRollupTableName();
+      const sub = buildPublisherStatsSubquery(tenantId, dateFrom, dateTo, filters);
 
       const [rows] = await pool.query(
         `SELECT 
@@ -961,25 +1321,12 @@ export class DashboardService {
           COALESCE(st.revenue, 0) as total_revenue,
           COALESCE(st.profit, 0) as profit
         FROM publishers p
-        LEFT JOIN (
-          SELECT 
-            publisher_id,
-            COALESCE(SUM(total_clicks), 0) as clicks,
-            COALESCE(SUM(total_conversions), 0) as conversions,
-            COALESCE(SUM(approved_conversions), 0) as approved_conversions,
-            COALESCE(SUM(pending_conversions), 0) as pending_conversions,
-            COALESCE(SUM(payout), 0) as payout,
-            COALESCE(SUM(revenue), 0) as revenue,
-            COALESCE(SUM(profit), 0) as profit
-          FROM ${rt}
-          WHERE tenant_id = ? AND stat_date BETWEEN ? AND ?
-          GROUP BY publisher_id
-        ) st ON p.id = st.publisher_id
+        LEFT JOIN ${sub.sql} st ON p.id = st.publisher_id
         WHERE p.status != 'suspended' AND p.tenant_id = ?
         ORDER BY ${finalSortBy} ${finalOrderBy}, conversions DESC, clicks DESC
         LIMIT ? OFFSET ?
         `,
-        [tenantId, dateFrom, dateTo, tenantId, limit, offset]
+        [...sub.params, tenantId, limit, offset]
       );
 
       const [totalRows] = await pool.query(
@@ -1049,7 +1396,6 @@ export class DashboardService {
         )
         : Promise.resolve([]);
 
-      // Execute only the sub-queries used by the Dashboard UI (no topOffers, topAffiliates)
       const [
         cards,
         performanceChart,
@@ -1092,4 +1438,3 @@ export class DashboardService {
 }
 
 export default new DashboardService();
-
