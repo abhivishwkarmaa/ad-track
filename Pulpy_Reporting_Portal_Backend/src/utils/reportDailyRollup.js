@@ -36,9 +36,13 @@ export function shouldUseRawReportingTables() {
 export function filtersBlockReportingRollup(filters = {}) {
   if (shouldUseRawReportingTables()) return true;
 
+  const tz = (filters.report_timezone || '').trim();
+  const isIstOrEmpty = !tz || tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta' || tz === 'IST' || tz === '+05:30';
+
+  // Only non-IST custom UTC ranges without date_from / date_to block rollup
   const rs = filters.range_start_utc;
   const re = filters.range_end_utc;
-  if (rs != null && rs !== '' && re != null && re !== '') return true;
+  if (!isIstOrEmpty && rs != null && rs !== '' && re != null && re !== '') return true;
 
   if (filters.all_dates === true || filters.all_dates === 'true') return true;
   if (filters.noReferrer === 'true' || filters.noReferrer === true) return true;
