@@ -25,7 +25,7 @@ function getDashboardCacheTTL(fromDate, toDate) {
   if (to < todayIST) {
     return 43200; // 12 hours for past immutable dates
   }
-  return 30; // 30 seconds for active ranges containing today
+  return 5; // 5 seconds for active ranges containing today
 }
 
 async function getOrSetDashboardCache(cacheKey, ttlSeconds, fetchFn) {
