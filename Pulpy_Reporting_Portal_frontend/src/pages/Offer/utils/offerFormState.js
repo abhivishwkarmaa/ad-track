@@ -62,9 +62,9 @@ export function createEmptyOfferFormData() {
 }
 
 export const DEFAULT_TOKEN_MAPPINGS = [
-    { id: 0, enabled: false, advertiserParam: 'aff_sub', platformToken: '{row-useragent}' },
+    { id: 0, enabled: false, advertiserParam: 'aff_sub', platformToken: '{raw_useragent}' },
     { id: 1, enabled: false, advertiserParam: 'aff_sub', platformToken: '{ip}' },
     { id: 2, enabled: false, advertiserParam: 'aff_sub3', platformToken: '{offerid}' },
     { id: 3, enabled: false, advertiserParam: 'aff_sub4', platformToken: '{useragent}' },
-    { id: 4, enabled: false, advertiserParam: 'aff_sub5', platformToken: '{row-useragent}' },
+    { id: 4, enabled: false, advertiserParam: 'aff_sub5', platformToken: '{raw_useragent}' },
 ];

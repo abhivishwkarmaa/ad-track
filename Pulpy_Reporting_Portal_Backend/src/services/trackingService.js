@@ -2,7 +2,8 @@ import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
-import { extractDomain, appendClickParams, replaceMacros, generateClickId } from '../utils/urlGenerator.js';
+import { extractDomain, appendClickParams, generateClickId } from '../utils/urlGenerator.js';
+import { applyRedirectMacros, buildClickRedirectMacros } from '../utils/clickRedirectMacros.js';
 import { generateOfferErrorPage } from '../utils/errorPage.js';
 import offerService from './offer.service.js';
 import publisherService from './publisherService.js';
@@ -492,7 +493,20 @@ export class TrackingService {
         }
       }
 
-      redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
+      redirectUrl = await this._composeRedirectUrl(
+        assignment,
+        offer,
+        query,
+        clickUuid,
+        mergedOfferParams,
+        {
+          tenantId,
+          publisher,
+          request,
+          country: country_final,
+          deviceInfo,
+        }
+      );
 
       // Assignment Caps? (omitted for brevity, can implement similar pattern in CacheService)
 
@@ -763,21 +777,71 @@ export class TrackingService {
     }
   }
 
-  _buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams = {}) {
-    let url = assignment.destination_url || offer.offer_url;
-    if (offer.status === 'deactivate') url = offer.fallback_url || url;
+  _redirectTemplate(assignment, offer) {
+    let url = assignment?.destination_url || offer?.offer_url;
+    if (offer?.status === 'deactivate') url = offer.fallback_url || url;
+    return url || '';
+  }
 
-    const macroPayload = {
-      click_id: clickUuid,
-      rcid: query.rcid || '',
-      tid: query.tid || '',
-      ...mergedOfferParams,
-    };
+  async _publicAdvertiserId(offer, tenantId, destinationUrl) {
+    if (!destinationUrl || !/\{adv_id\}/i.test(destinationUrl)) return '';
+    if (offer?.public_advertiser_id != null && String(offer.public_advertiser_id).trim() !== '') {
+      return String(offer.public_advertiser_id);
+    }
+    if (!offer?.advertiser_id || !tenantId) return '';
 
-    url = replaceMacros(url, macroPayload);
+    const cacheKey = `ref:advPublic:${tenantId}:${offer.advertiser_id}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached != null && cached !== '') return cached === '-' ? '' : cached;
+    } catch (err) {
+      logger.warn(`adv public id cache read: ${err.message}`);
+    }
+
+    try {
+      const [rows] = await pool.query(
+        'SELECT public_advertiser_id FROM advertisers WHERE id = ? AND tenant_id = ? LIMIT 1',
+        [offer.advertiser_id, tenantId]
+      );
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      const value = row?.public_advertiser_id != null ? String(row.public_advertiser_id) : '';
+      try {
+        await redis.setex(cacheKey, 300, value || '-');
+      } catch (err) {
+        logger.warn(`adv public id cache write: ${err.message}`);
+      }
+      return value;
+    } catch (err) {
+      logger.warn(`adv public id lookup: ${err.message}`);
+      return '';
+    }
+  }
+
+  async _composeRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams = {}, ctx = {}) {
+    const template = this._redirectTemplate(assignment, offer);
+    const advertiserPublicId = await this._publicAdvertiserId(offer, ctx.tenantId, template);
+    return this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams, {
+      ...ctx,
+      advertiserPublicId,
+    });
+  }
+
+  _buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams = {}, ctx = {}) {
+    const url = this._redirectTemplate(assignment, offer);
+    const macros = buildClickRedirectMacros({
+      clickUuid,
+      offer,
+      publisher: ctx.publisher,
+      query,
+      request: ctx.request,
+      country: ctx.country,
+      deviceInfo: ctx.deviceInfo,
+      advertiserPublicId: ctx.advertiserPublicId,
+      mergedOfferParams,
+    });
 
     return appendClickParams(
-      url,
+      applyRedirectMacros(url, macros),
       {
         click_id: clickUuid,
         tid: query.tid || null,
@@ -831,7 +895,14 @@ export class TrackingService {
 
         // Continue redirect normally (no postback fired)
         const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
-        const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
+        const redirectUrl = await this._composeRedirectUrl(
+          assignment,
+          offer,
+          query,
+          clickUuid,
+          mergedOfferParams,
+          { tenantId, publisher, request }
+        );
 
         return {
           redirect: redirectUrl,
@@ -926,7 +997,14 @@ export class TrackingService {
       // ❌ NO conversions table insert
       // ❌ NO postback_logs table insert
       const clickUuid = generateClickId(tenantId, offer.id, publisher.id, 96);
-      const redirectUrl = this._buildRedirectUrl(assignment, offer, query, clickUuid, mergedOfferParams);
+      const redirectUrl = await this._composeRedirectUrl(
+        assignment,
+        offer,
+        query,
+        clickUuid,
+        mergedOfferParams,
+        { tenantId, publisher, request }
+      );
 
       logger.info('[TEST] 🔄 Returning redirect (ZERO DB WRITES)', {
         redirect_url: redirectUrl.substring(0, 100) + '...'

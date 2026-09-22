@@ -153,8 +153,9 @@ export const platformTokens = [
     '{ip}',
     '{offerid}',
     '{useragent}',
-    '{row-useragent}',
+    '{raw_useragent}',
     '{aff_id}',
+    '{sub_aff_id}',
     '{adv_id}',
     '{country}',
     '{timestamp}',
@@ -168,5 +169,7 @@ export const platformTokens = [
     '{googleaid}',
     '{androidid}',
     '{iosidfa}',
+    '{os}',
+    '{os_ver}',
     '{random}'
 ];

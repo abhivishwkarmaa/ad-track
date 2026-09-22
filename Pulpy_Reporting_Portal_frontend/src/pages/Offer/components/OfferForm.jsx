@@ -606,8 +606,11 @@ export default function OfferForm({
                                             <p style={{ marginBottom: '5px', fontSize: '14px' }}>
                                                 <strong>{'{os}'}</strong> = OS Name (device data)
                                             </p>
-                                            <p style={{ marginBottom: '0', fontSize: '14px' }}>
+                                            <p style={{ marginBottom: '5px', fontSize: '14px' }}>
                                                 <strong>{'{os_ver}'}</strong> = OS Version (device data)
+                                            </p>
+                                            <p style={{ marginBottom: '0', fontSize: '14px' }}>
+                                                <strong>{'{random}'}</strong> = Random value generated per click
                                             </p>
                                         </div>
                                     )}
