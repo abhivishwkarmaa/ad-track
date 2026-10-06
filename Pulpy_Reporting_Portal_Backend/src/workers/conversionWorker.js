@@ -222,6 +222,16 @@ async function processConversionBatch(entries) {
                 }
 
                 // 3. Increment Counters (if not rejected & valid status & assignment/offer exists)
+                if (rejected) {
+                    await syncEventLogStatus({
+                        clickUuid: c.click_uuid,
+                        eventName: c.event_name || 'default',
+                        tenantId: c.tenant_id,
+                        status: 'rejected_cap',
+                        payout: 0,
+                    });
+                }
+
                 if (!rejected && ['approved', 'pending'].includes(c.status)) {
                     const incPromises = [];
                     if (assignment) {
@@ -290,6 +300,7 @@ async function processConversionBatch(entries) {
 }
 
 import postbackService from '../services/postbackService.js';
+import { syncEventLogStatus } from '../services/eventTracking.js';
 
 /**
  * Bulk Insert Logic
@@ -315,18 +326,37 @@ async function bulkInsertConversions(items) {
         return [
             conversionUuid,
             c.click_uuid, c.offer_id, c.publisher_id, pubOfferId, c.tenant_id,
-            c.rcid || uuidv4(), c.event_name || 'default', c.status, c.amount, c.payout, c.ip,
+            c.rcid || uuidv4(), c.event_name || 'default', c.dedup_slot || 'once', c.status, c.amount, c.payout, c.ip,
             c.postback_payload, new Date(), new Date(), new Date(),
             0  // affiliate_postback_fired: fire only when status=approved, then set to 1
         ];
     });
 
-    const sql = `INSERT INTO conversions (
+    const sqlWithSlot = `INSERT INTO conversions (
         conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
+        rcid, event_name, dedup_slot, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
     ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`;
 
-    await pool.query(sql, [values]);
+    try {
+        await pool.query(sqlWithSlot, [values]);
+    } catch (insertErr) {
+        if (insertErr.code === 'ER_BAD_FIELD_ERROR' && /dedup_slot/i.test(insertErr.message || '')) {
+            const legacyValues = values.map((row) => {
+                const copy = row.slice();
+                copy.splice(8, 1);
+                return copy;
+            });
+            await pool.query(
+                `INSERT INTO conversions (
+                    conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
+                    rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
+                ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`,
+                [legacyValues]
+            );
+        } else {
+            throw insertErr;
+        }
+    }
 
     // Fetch IDs for logging and strict stats
     let uuids = [];
@@ -622,7 +652,9 @@ async function fireAffiliatePostbacks(items) {
                     [c.id, c.tenant_id]
                 );
                 await pool.query(
-                    'UPDATE event_logs SET affiliate_postback_fired = 1 WHERE click_uuid = ? AND event_name = ? AND tenant_id = ?',
+                    `UPDATE event_logs SET affiliate_postback_fired = 1
+                     WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? AND affiliate_postback_fired = 0
+                     ORDER BY id DESC LIMIT 1`,
                     [c.click_uuid, c.event_name || 'default', c.tenant_id]
                 );
             } catch (updateErr) {

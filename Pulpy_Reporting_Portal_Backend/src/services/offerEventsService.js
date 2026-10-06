@@ -10,7 +10,7 @@ import logger from '../utils/logger.js';
 const OFFER_EVENTS_CACHE_TTL = 300;
 
 function offerEventsCacheKey(offerId, tenantId) {
-  return `ref:offer:events:${tenantId}:${offerId}`;
+  return `ref:offer:events:v2:${tenantId}:${offerId}`;
 }
 
 class OfferEventsService {
@@ -124,7 +124,7 @@ class OfferEventsService {
     const [rows] = await pool.query(
       `SELECT id, tenant_id, offer_id, event_name, title, advertiser_amount, affiliate_amount, is_primary, allow_multiple, status
        FROM offer_events
-       WHERE offer_id = ? AND tenant_id = ? AND status = 'active'
+       WHERE offer_id = ? AND tenant_id = ?
        ORDER BY id ASC`,
       [offerId, tenantId]
     );

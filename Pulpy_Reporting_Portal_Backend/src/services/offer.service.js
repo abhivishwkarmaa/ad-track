@@ -970,6 +970,18 @@ class OfferService {
       const approvedPayout = parseFloat(conversionStats.approved_payout || 0);
       const totalProfit = totalRevenue - approvedPayout;
 
+      let primaryEventNames = new Set();
+      try {
+        const configuredEvents = await offerEventsService.getOfferEvents(internalId, tenantId);
+        primaryEventNames = new Set(
+          (configuredEvents || [])
+            .filter((ev) => ev.is_primary && ev.status !== 'inactive')
+            .map((ev) => ev.event_name)
+        );
+      } catch (primaryErr) {
+        logger.warn('Failed to load offer events for stats primary flag:', primaryErr.message);
+      }
+
       const refDate = dateTo || dateFrom || istToday;
       let cap_usage;
       if (useRollupClicks) {
@@ -1052,7 +1064,9 @@ class OfferService {
           total_revenue: parseFloat(r.total_revenue || 0),
           approved_payout: parseFloat(r.approved_payout || 0),
           total_profit: parseFloat(r.total_profit || 0),
-          is_primary: parseInt(r.total_conversions || 0) > 0,
+          is_primary: primaryEventNames.size > 0
+            ? primaryEventNames.has(r.event_name)
+            : true,
         })),
       };
     } catch (error) {

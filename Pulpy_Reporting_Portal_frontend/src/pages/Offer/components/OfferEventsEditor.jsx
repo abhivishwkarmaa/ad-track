@@ -10,6 +10,8 @@ const EVENT_SUGGESTIONS = [
     { key: 'lead', title: 'Lead Form', tip: 'User submitted lead inquiry form' },
 ];
 
+const EVENT_CODE_PATTERN = /^[a-z0-9_-]+$/;
+
 export default function OfferEventsEditor({
     events,
     onChange,
@@ -20,6 +22,8 @@ export default function OfferEventsEditor({
     onPrimaryPricingChange = null,
 }) {
     const [copied, setCopied] = useState(false);
+    const [customCode, setCustomCode] = useState('');
+    const [customError, setCustomError] = useState('');
     const rows = Array.isArray(events) ? events : [];
 
     const usedKeys = new Set(
@@ -76,8 +80,7 @@ export default function OfferEventsEditor({
         onChange(remaining);
     };
 
-    const addSuggestion = (item) => {
-        const key = item.key.toLowerCase();
+    const addNamedEvent = ({ key, title = '', multiple = false }) => {
         if (usedKeys.has(key)) return;
 
         const isFirst = rows.length === 0;
@@ -88,8 +91,8 @@ export default function OfferEventsEditor({
                     ? {
                           ...row,
                           event_name: key,
-                          title: item.title,
-                          allow_multiple: Boolean(item.multiple),
+                          title: title || row.title,
+                          allow_multiple: Boolean(multiple),
                           is_primary: row.is_primary || (isFirst && i === 0),
                           advertiser_amount: row.advertiser_amount || ((row.is_primary || (isFirst && i === 0)) ? defaultAdvertiserAmount : ''),
                           affiliate_amount: row.affiliate_amount || ((row.is_primary || (isFirst && i === 0)) ? defaultAffiliateAmount : ''),
@@ -102,12 +105,39 @@ export default function OfferEventsEditor({
 
         addRow({
             event_name: key,
-            title: item.title,
-            allow_multiple: Boolean(item.multiple),
+            title,
+            allow_multiple: Boolean(multiple),
             is_primary: isFirst,
             advertiser_amount: isFirst ? defaultAdvertiserAmount : '',
             affiliate_amount: isFirst ? defaultAffiliateAmount : '',
         });
+    };
+
+    const addSuggestion = (item) => {
+        addNamedEvent({ key: item.key.toLowerCase(), title: item.title, multiple: item.multiple });
+    };
+
+    const addCustomEvent = () => {
+        const key = customCode.trim().toLowerCase();
+        if (!key) {
+            setCustomError('Enter the event code the advertiser will send.');
+            return;
+        }
+        if (!EVENT_CODE_PATTERN.test(key)) {
+            setCustomError('Use only letters, numbers, hyphens, and underscores.');
+            return;
+        }
+        if (key.length > 64) {
+            setCustomError('Event code must be 64 characters or fewer.');
+            return;
+        }
+        if (usedKeys.has(key)) {
+            setCustomError(`"${key}" is already on this offer.`);
+            return;
+        }
+        setCustomError('');
+        setCustomCode('');
+        addNamedEvent({ key, title: '' });
     };
 
     const copyPostbackTemplate = () => {
@@ -121,6 +151,9 @@ export default function OfferEventsEditor({
 
     const host = window.location.hostname || 'track.yourdomain.com';
     const samplePostback = `https://${host}/postback?click_id={click_id}&event={event_name}&amount={amount}`;
+    const configuredCodes = rows
+        .map((r) => String(r.event_name || '').trim().toLowerCase())
+        .filter(Boolean);
 
     return (
         <div className="offer-events-editor">
@@ -129,16 +162,63 @@ export default function OfferEventsEditor({
                     🎯 Multi-Event Tracking & Conversion Architecture
                 </div>
                 <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                    Advertisers can fire callbacks for multiple steps along the funnel (e.g. <code>install</code> ➡️ <code>registration</code> ➡️ <code>deposit</code>).
-                    <strong style={{ color: '#0f172a' }}> Exactly ONE event is your Primary Goal</strong> (billable conversion, consumes caps, increments stats).
-                    Other events are recorded in event history and forwarded to publisher/Google Ads with <code>{'{event}'}</code> so bidding algorithms optimize automatically.
+                    Add every event the advertiser will send. The code must match their postback <code>event</code> value.
+                    A name that is not in this list is declined: no payout, no cap, no publisher postback.
+                    <strong style={{ color: '#0f172a' }}> Exactly ONE event is your Primary Goal</strong> (billable conversion, consumes caps).
+                    Other events are funnel signals.
                 </p>
+            </div>
+
+            <div style={{ marginBottom: '16px', padding: '12px', border: '1px solid #bfdbfe', background: '#eff6ff', borderRadius: '8px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#1e3a8a', marginBottom: '6px' }}>
+                    Add the advertiser&apos;s event
+                </div>
+                <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#1e40af', lineHeight: 1.45 }}>
+                    Ask the advertiser which event names they fire, then add those codes here. Case does not matter.
+                    Save the offer after adding them.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        placeholder="e.g. purchase, ftd, level_5"
+                        value={customCode}
+                        onChange={(e) => {
+                            setCustomCode(e.target.value.toLowerCase());
+                            if (customError) setCustomError('');
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (!disabled) addCustomEvent();
+                            }
+                        }}
+                        disabled={disabled}
+                        style={{ fontFamily: 'ui-monospace, monospace', maxWidth: '320px' }}
+                        aria-label="Advertiser event code"
+                    />
+                    <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        onClick={addCustomEvent}
+                        disabled={disabled}
+                    >
+                        + Add this event
+                    </button>
+                </div>
+                {customError ? (
+                    <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#b91c1c' }}>{customError}</p>
+                ) : (
+                    <p style={{ margin: '8px 0 0 0', fontSize: '11px', color: '#64748b' }}>
+                        Letters, numbers, hyphens, and underscores only. Then set revenue, payout, and which one is the primary goal.
+                    </p>
+                )}
             </div>
 
             {/* Quick add chips */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '8px' }}>
-                    Quick add event templates:
+                    Or pick a common template:
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {EVENT_SUGGESTIONS.map((item) => {
@@ -346,7 +426,17 @@ export default function OfferEventsEditor({
                     {samplePostback}
                 </code>
                 <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                    Ask the advertiser / MMP to replace <code>{'{event_name}'}</code> with the event code (e.g. <code>install</code>, <code>registration</code>, <code>deposit</code>).
+                    The advertiser replaces <code>{'{event_name}'}</code> with one of the codes on this offer
+                    {configuredCodes.length > 0 ? (
+                        <>
+                            : {configuredCodes.map((code) => (
+                                <code key={code} style={{ marginRight: '6px' }}>{code}</code>
+                            ))}
+                        </>
+                    ) : (
+                        <> (add those codes above first).</>
+                    )}
+                    Any other name is declined.
                 </p>
             </div>
         </div>
