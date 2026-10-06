@@ -1,5 +1,24 @@
 const timePattern = '^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$';
 
+const offerEventsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['event_name'],
+    properties: {
+      id: { type: ['integer', 'null'] },
+      event_name: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9_\\-]+$' },
+      title: { type: ['string', 'null'], maxLength: 128 },
+      advertiser_amount: { type: ['number', 'string', 'null'] },
+      affiliate_amount: { type: ['number', 'string', 'null'] },
+      is_primary: { type: ['boolean', 'integer', 'null'] },
+      allow_multiple: { type: ['boolean', 'integer', 'null'] },
+      status: { type: 'string', enum: ['active', 'inactive'], default: 'active' },
+    },
+  },
+};
+
 const offerParamsSchema = {
   type: 'array',
   items: {
@@ -157,6 +176,7 @@ export const createOfferSchema = {
     system_postback_method: { type: ['string', 'null'], maxLength: 10 },
     system_postback_macros_json: { type: ['object', 'null'] },
     offer_params: offerParamsSchema,
+    offer_events: offerEventsSchema,
   },
 };
 
@@ -239,6 +259,7 @@ export const updateOfferSchema = {
     system_postback_method: { type: ['string', 'null'], maxLength: 10 },
     system_postback_macros_json: { type: ['object', 'null'] },
     offer_params: offerParamsSchema,
+    offer_events: offerEventsSchema,
   },
 };
 

@@ -106,6 +106,7 @@ function mapConversion(row) {
     conversion_uuid: row.conversion_uuid,
     click_uuid: row.click_uuid,
     rcid: row.conv_rcid,
+    event_name: row.event_name || 'default',
     status: row.conversion_status,
     amount: row.conversion_amount,
     payout: row.conversion_payout,
@@ -208,6 +209,7 @@ class LogDetailService {
           conv.id as conversion_id,
           conv.conversion_uuid,
           conv.rcid as conv_rcid,
+          conv.event_name,
           conv.status as conversion_status,
           conv.amount as conversion_amount,
           conv.payout as conversion_payout,
@@ -236,9 +238,24 @@ class LogDetailService {
         tenantId
       );
 
+      let events = [];
+      try {
+        const [eventRows] = await pool.query(
+          `SELECT id, event_name, amount, payout, is_conversion, status, ip, affiliate_postback_fired, created_at
+           FROM event_logs
+           WHERE click_uuid = ? AND tenant_id = ?
+           ORDER BY id ASC`,
+          [clickUuid, tenantId]
+        );
+        events = Array.isArray(eventRows) ? eventRows : [];
+      } catch (evErr) {
+        logger.warn(`Failed to fetch event_logs for click ${clickUuid}: ${evErr.message}`);
+      }
+
       return {
         click: mapClick(row),
         conversion: mapConversion(row),
+        events,
         offer: mapOffer(row),
         publisher: mapPublisher(row),
         assignment: mapAssignment(row),
@@ -264,6 +281,7 @@ class LogDetailService {
           conv.conversion_uuid,
           conv.click_uuid,
           conv.rcid as conv_rcid,
+          conv.event_name,
           conv.status as conversion_status,
           conv.amount as conversion_amount,
           conv.payout as conversion_payout,

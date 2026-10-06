@@ -9,6 +9,7 @@ import { normalizeMysqlUtcDatetime, istYmdSpanToMysqlUtcRange } from '../utils/m
 import { getTenantIdFromRequest, addTenantScope } from '../utils/tenantScope.js';
 import offerPublicIdService from './offerPublicIdService.js';
 import offerParamsService from './offerParamsService.js';
+import offerEventsService from './offerEventsService.js';
 import cacheService from './cacheService.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 import {
@@ -356,7 +357,15 @@ class OfferService {
         );
       }
 
-      // ✅ CRITICAL: Fetch with tenant_id filtering (include offer_params for API consumers)
+      if (data.offer_events !== undefined) {
+        await offerEventsService.setOfferEvents(
+          insertId,
+          tenantId,
+          Array.isArray(data.offer_events) ? data.offer_events : []
+        );
+      }
+
+      // ✅ CRITICAL: Fetch with tenant_id filtering (include offer_params and offer_events for API consumers)
       return this.getOfferByIdWithDetails(insertId, '+05:30', tenantId);
     } catch (error) {
       logger.error('OfferService.createOffer error:', error);
@@ -514,7 +523,14 @@ class OfferService {
             Array.isArray(data.offer_params) ? data.offer_params : []
           );
         }
-        return this.getOfferById(internalId, tenantId);
+        if (data.offer_events !== undefined && tenantId) {
+          await offerEventsService.setOfferEvents(
+            internalId,
+            tenantId,
+            Array.isArray(data.offer_events) ? data.offer_events : []
+          );
+        }
+        return this.getOfferByIdWithDetails(internalId, '+05:30', tenantId);
       }
 
       fields.push('updated_at = UTC_TIMESTAMP()');
@@ -541,6 +557,14 @@ class OfferService {
           internalId,
           tenantId,
           Array.isArray(data.offer_params) ? data.offer_params : []
+        );
+      }
+
+      if (data.offer_events !== undefined && tenantId) {
+        await offerEventsService.setOfferEvents(
+          internalId,
+          tenantId,
+          Array.isArray(data.offer_events) ? data.offer_events : []
         );
       }
 
@@ -670,15 +694,18 @@ class OfferService {
       }
 
       let offer_params = [];
+      let offer_events = [];
       const tid = parsedOffer.tenant_id;
       if (tid != null) {
         offer_params = await offerParamsService.getOfferParams(parsedOffer.id, tid);
+        offer_events = await offerEventsService.getOfferEvents(parsedOffer.id, tid);
       }
 
       return {
         ...parsedOffer,
         advertiser,
         offer_params,
+        offer_events,
       };
     } catch (error) {
       logger.error('OfferService.getOfferByIdWithDetails error:', error);
@@ -889,6 +916,52 @@ class OfferService {
       const conversionStats = Array.isArray(conversionRows) ? conversionRows[0] : conversionRows;
       const impressionsStats = Array.isArray(impressionsRows) ? impressionsRows[0] : impressionsRows;
 
+      // Event-wise Breakdown (from event_logs for all funnel signals + conversions)
+      let eventBreakdownRows = [];
+      try {
+        const [elRows] = await pool.query(
+          `SELECT
+            event_name,
+            COUNT(*) AS total_events,
+            SUM(CASE WHEN is_conversion = 1 THEN 1 ELSE 0 END) AS total_conversions,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved_conversions,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_conversions,
+            SUM(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) AS rejected_conversions,
+            COALESCE(SUM(amount), 0) AS total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS approved_payout,
+            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit
+           FROM event_logs
+           WHERE ${convWhere.clause}
+           GROUP BY event_name
+           ORDER BY total_events DESC`,
+          convWhere.params
+        );
+        eventBreakdownRows = Array.isArray(elRows) ? elRows : [];
+      } catch (elErr) {
+        logger.warn('Failed to query event_logs breakdown, falling back to conversions:', elErr.message);
+      }
+
+      if (eventBreakdownRows.length === 0) {
+        const [fallbackRows] = await pool.query(
+          `SELECT
+            event_name,
+            COUNT(*) AS total_events,
+            COUNT(*) AS total_conversions,
+            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved_conversions,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_conversions,
+            SUM(CASE WHEN status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) AS rejected_conversions,
+            COALESCE(SUM(amount), 0) AS total_revenue,
+            COALESCE(SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS approved_payout,
+            COALESCE(SUM(amount) - SUM(CASE WHEN status = 'approved' THEN payout ELSE 0 END), 0) AS total_profit
+           FROM conversions
+           WHERE ${convWhere.clause}
+           GROUP BY event_name
+           ORDER BY total_events DESC`,
+          convWhere.params
+        );
+        eventBreakdownRows = Array.isArray(fallbackRows) ? fallbackRows : [];
+      }
+
       const conversionRate = (clickStats.total_clicks || 0) > 0
         ? ((conversionStats.total_conversions || 0) / clickStats.total_clicks) * 100
         : 0;
@@ -969,6 +1042,18 @@ class OfferService {
         total_profit: totalProfit,
         conversion_rate: parseFloat(conversionRate.toFixed(2)),
         cap_usage,
+        event_stats: (Array.isArray(eventBreakdownRows) ? eventBreakdownRows : []).map(r => ({
+          event_name: r.event_name,
+          total_events: parseInt(r.total_events || r.total_conversions || 0),
+          total_conversions: parseInt(r.total_conversions || 0),
+          approved_conversions: parseInt(r.approved_conversions || 0),
+          pending_conversions: parseInt(r.pending_conversions || 0),
+          rejected_conversions: parseInt(r.rejected_conversions || 0),
+          total_revenue: parseFloat(r.total_revenue || 0),
+          approved_payout: parseFloat(r.approved_payout || 0),
+          total_profit: parseFloat(r.total_profit || 0),
+          is_primary: parseInt(r.total_conversions || 0) > 0,
+        })),
       };
     } catch (error) {
       logger.error('OfferService.getOfferStats error:', error);
@@ -1017,7 +1102,7 @@ class OfferService {
 
       // ✅ CRITICAL: Add tenant_id filtering for tenant isolation
       let query = `SELECT 
-                conv.id, conv.conversion_uuid, conv.click_uuid, conv.offer_id, conv.publisher_id, conv.tenant_id, conv.publisher_offer_id, conv.rcid, conv.status, conv.amount, conv.payout, conv.ip, conv.timestamp, conv.postback_payload, conv.created_at, conv.updated_at, conv.extra_params, conv.is_test,
+                conv.id, conv.conversion_uuid, conv.click_uuid, conv.offer_id, conv.publisher_id, conv.tenant_id, conv.publisher_offer_id, conv.rcid, conv.event_name, conv.status, conv.amount, conv.payout, conv.ip, conv.timestamp, conv.postback_payload, conv.created_at, conv.updated_at, conv.extra_params, conv.is_test,
                 p.email as publisher_email,
                 p.company_name as publisher_company,
                 c.click_uuid

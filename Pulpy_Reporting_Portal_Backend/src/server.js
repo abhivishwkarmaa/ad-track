@@ -196,6 +196,17 @@ const start = async () => {
         logger.error('❌ Failed to start Redis click worker:', error);
       }
 
+      // ✅ CRITICAL: Start Redis conversion worker (processes conversions from stream)
+      try {
+        const runConversionWorker = (await import('./workers/conversionWorker.js')).default;
+        runConversionWorker().catch(err => {
+          logger.error('❌ Redis conversion worker failed:', err);
+        });
+        logger.info('✅ Redis conversion worker started');
+      } catch (error) {
+        logger.error('❌ Failed to start Redis conversion worker:', error);
+      }
+
       // Start Redis hygiene worker (runs every hour)
       if (process.env.ENABLE_REDIS_HYGIENE !== 'false') {
         try {

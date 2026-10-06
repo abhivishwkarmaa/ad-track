@@ -77,15 +77,17 @@ async function processConversionBatch(entries) {
 
     // 1. Fetch Data
     const pipeline = redis.pipeline();
-    const mapMsgIdToClickUuid = new Map();
+    const mapMsgIdToInfo = new Map();
 
     for (const [msgId, fields] of entries) {
         const clickIdIdx = fields.indexOf('click_uuid');
         const clickUuid = clickIdIdx !== -1 ? fields[clickIdIdx + 1] : null;
+        const convKeyIdx = fields.indexOf('conversion_key');
+        const conversionKey = convKeyIdx !== -1 ? fields[convKeyIdx + 1] : (clickUuid ? `conversion:${clickUuid}` : null);
 
-        if (clickUuid) {
-            mapMsgIdToClickUuid.set(msgId, clickUuid);
-            pipeline.get(`conversion:${clickUuid}`);
+        if (clickUuid && conversionKey) {
+            mapMsgIdToInfo.set(msgId, { clickUuid, conversionKey });
+            pipeline.get(conversionKey);
         } else {
             // Invalid message
             msgIdsToAck.push(msgId);
@@ -98,31 +100,20 @@ async function processConversionBatch(entries) {
     // results: [[err, jsonString], ...]
     let resultIdx = 0;
 
-    // We need to match results back to msgIds. 
-    // They are in order of loop iteration for valid clickUuids.
-    // Let's iterate entries again or reconstruction map.
-    // Better: iterate mapMsgIdToClickUuid entries
-
     const clickUuidsToCheck = [];
     const indexToMsgId = []; // Map index in clickUuidsToCheck to msgId
+    const conversionDataMap = new Map(); // msgId -> conversionData
 
-    const conversionDataMap = new Map(); // clickUuid -> conversionData
-
-    for (const [msgId, clickUuid] of mapMsgIdToClickUuid) {
+    for (const [msgId, info] of mapMsgIdToInfo) {
         const [err, jsonString] = results[resultIdx++];
 
         if (!err && jsonString) {
             const data = JSON.parse(jsonString);
-            conversionDataMap.set(clickUuid, data);
-            clickUuidsToCheck.push(clickUuid);
+            conversionDataMap.set(msgId, data);
+            clickUuidsToCheck.push(info.clickUuid);
             indexToMsgId.push(msgId);
         } else {
-            // Data expired or missing logic
-            // If data missing, we can't process. 
-            // Log error and ACK (drop) or Retry?
-            // If it's missing from Redis, we lost the conversion payload. 
-            // Dropping is the only specific action unless we have backup.
-            logger.warn(`⚠️ Conversion data missing for ${clickUuid}, dropping.`);
+            logger.warn(`⚠️ Conversion data missing for ${info.clickUuid} (${info.conversionKey}), dropping.`);
             msgIdsToAck.push(msgId);
         }
     }
@@ -167,7 +158,7 @@ async function processConversionBatch(entries) {
             // Ready to Insert
             validConversions.push({
                 msgId,
-                data: conversionDataMap.get(clickUuid)
+                data: conversionDataMap.get(msgId)
             });
         } else {
             // Click Missing from DB
@@ -317,11 +308,14 @@ async function bulkInsertConversions(items) {
             conversionUuid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`.slice(0, 96);
         }
         c.conversion_uuid = conversionUuid; // Save for postback
+        const pubOfferId = (c.publisher_offer_id && parseInt(c.publisher_offer_id, 10) > 0)
+            ? parseInt(c.publisher_offer_id, 10)
+            : null;
 
         return [
             conversionUuid,
-            c.click_uuid, c.offer_id, c.publisher_id, c.publisher_offer_id, c.tenant_id,
-            c.rcid || uuidv4(), c.status, c.amount, c.payout, c.ip,
+            c.click_uuid, c.offer_id, c.publisher_id, pubOfferId, c.tenant_id,
+            c.rcid || uuidv4(), c.event_name || 'default', c.status, c.amount, c.payout, c.ip,
             c.postback_payload, new Date(), new Date(), new Date(),
             0  // affiliate_postback_fired: fire only when status=approved, then set to 1
         ];
@@ -329,7 +323,7 @@ async function bulkInsertConversions(items) {
 
     const sql = `INSERT INTO conversions (
         conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
+        rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
     ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`;
 
     await pool.query(sql, [values]);
@@ -459,13 +453,16 @@ async function updateDailyStats(items) {
 
     const today = getIstDateString(); // YYYY-MM-DD in IST
     const groups = {}; // Key: offer_id:tenant_id
+    const eventGroups = {}; // Key: offer_id:tenant_id:event_name
 
     // Aggregate delta for this batch
     for (const item of items) {
         const c = item.data;
         const offerId = c.offer_id;
         const tenantId = c.tenant_id || 0;
+        const eventName = c.event_name || 'default';
         const key = `${offerId}:${tenantId}`;
+        const eventKey = `${offerId}:${tenantId}:${eventName}`;
 
         if (!groups[key]) {
             groups[key] = {
@@ -480,25 +477,48 @@ async function updateDailyStats(items) {
             };
         }
 
+        if (!eventGroups[eventKey]) {
+            eventGroups[eventKey] = {
+                offerId,
+                tenantId,
+                eventName,
+                conversions: 0,
+                approved: 0,
+                pending: 0,
+                rejected: 0,
+                revenue: 0,
+                payout: 0
+            };
+        }
+
         const g = groups[key];
+        const eg = eventGroups[eventKey];
+        const amount = parseFloat(c.amount || 0);
+        const payout = parseFloat(c.payout || 0);
+
         // Revenue: Always count (Advertiser Revenue)
-        g.revenue += parseFloat(c.amount || 0);
+        g.revenue += amount;
         g.conversions += 1;
+        eg.revenue += amount;
+        eg.conversions += 1;
 
         const status = (c.status || 'pending').toLowerCase();
         if (status === 'approved') {
             g.approved += 1;
-            g.payout += parseFloat(c.payout || 0); // Payout only if approved
+            g.payout += payout; // Payout only if approved
+            eg.approved += 1;
+            eg.payout += payout;
         } else if (status === 'pending') {
             g.pending += 1;
+            eg.pending += 1;
         } else if (status === 'rejected' || status === 'rejected_cap' || status === 'click_expired') {
             g.rejected += 1;
+            eg.rejected += 1;
         }
     }
 
-    // Execute Updates
-    // We process each group (Offer + Tenant)
-    const promises = Object.values(groups).map(async (g) => {
+    // Execute Updates for Offer Totals (daily_offer_stats)
+    const offerPromises = Object.values(groups).map(async (g) => {
         const profit = g.revenue - g.payout;
 
         const sql = `
@@ -528,8 +548,37 @@ async function updateDailyStats(items) {
         ]);
     });
 
-    await Promise.all(promises);
+    // Execute Updates for Event Breakdown (daily_offer_event_stats)
+    const eventPromises = Object.values(eventGroups).map(async (eg) => {
+        const profit = eg.revenue - eg.payout;
 
+        const sql = `
+            INSERT INTO daily_offer_event_stats (
+                tenant_id, offer_id, event_name, day, 
+                conversions, approved_conversions, pending_conversions, rejected_conversions,
+                revenue, payout, profit, 
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE
+                conversions = conversions + VALUES(conversions),
+                approved_conversions = approved_conversions + VALUES(approved_conversions),
+                pending_conversions = pending_conversions + VALUES(pending_conversions),
+                rejected_conversions = rejected_conversions + VALUES(rejected_conversions),
+                revenue = revenue + VALUES(revenue),
+                payout = payout + VALUES(payout),
+                profit = profit + VALUES(profit),
+                updated_at = UTC_TIMESTAMP()
+        `;
+
+        await pool.query(sql, [
+            eg.tenantId, eg.offerId, eg.eventName, today,
+            eg.conversions, eg.approved, eg.pending, eg.rejected,
+            eg.revenue, eg.payout, profit
+        ]);
+    });
+
+    await Promise.all([...offerPromises, ...eventPromises]);
 }
 
 /**
@@ -550,6 +599,7 @@ async function fireAffiliatePostbacks(items) {
                 tenant_id: c.tenant_id,
                 publisher_id: c.publisher_id,
                 rcid: c.rcid,
+                event_name: c.event_name || 'default',
                 payout: c.payout,
                 amount: c.amount,
                 status: c.status
@@ -570,6 +620,10 @@ async function fireAffiliatePostbacks(items) {
                 await pool.query(
                     'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
                     [c.id, c.tenant_id]
+                );
+                await pool.query(
+                    'UPDATE event_logs SET affiliate_postback_fired = 1 WHERE click_uuid = ? AND event_name = ? AND tenant_id = ?',
+                    [c.click_uuid, c.event_name || 'default', c.tenant_id]
                 );
             } catch (updateErr) {
                 if (updateErr.code === 'ER_BAD_FIELD_ERROR') {

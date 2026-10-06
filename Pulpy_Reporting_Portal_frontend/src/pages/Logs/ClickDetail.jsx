@@ -147,7 +147,8 @@ function ClickDetail() {
 
     if (!detail?.click) return null;
 
-    const { click, conversion, offer, publisher, assignment, offer_params: offerParams } = detail;
+    const { click, conversion, offer, publisher, assignment, offer_params: offerParams, events } = detail;
+    const eventList = Array.isArray(events) ? events : [];
 
     return (
         <div className="log-detail-page">
@@ -197,6 +198,79 @@ function ClickDetail() {
                     ]}
                 />
             </DetailCard>
+
+            {/* Events & Funnel Journey Card */}
+            {eventList.length > 0 && (
+                <DetailCard title={`Events & Funnel Journey (${eventList.length})`}>
+                    <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                            <thead>
+                                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left', color: '#475569' }}>
+                                    <th style={{ padding: '8px 10px' }}>#</th>
+                                    <th style={{ padding: '8px 10px' }}>Event Name</th>
+                                    <th style={{ padding: '8px 10px' }}>Role</th>
+                                    <th style={{ padding: '8px 10px' }}>Revenue</th>
+                                    <th style={{ padding: '8px 10px' }}>Payout</th>
+                                    <th style={{ padding: '8px 10px' }}>Status</th>
+                                    <th style={{ padding: '8px 10px', textAlign: 'center' }}>Postback Fired</th>
+                                    <th style={{ padding: '8px 10px' }}>Logged At</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {eventList.map((ev, idx) => {
+                                    const isConv = Boolean(ev.is_conversion);
+                                    return (
+                                        <tr
+                                            key={ev.id || idx}
+                                            style={{
+                                                borderBottom: '1px solid #f1f5f9',
+                                                background: isConv ? 'rgba(254, 243, 199, 0.2)' : 'transparent',
+                                            }}
+                                        >
+                                            <td style={{ padding: '8px 10px', color: '#94a3b8' }}>{idx + 1}</td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>
+                                                    {ev.event_name}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                {isConv ? (
+                                                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#b45309', background: '#fef3c7', padding: '2px 8px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                                        👑 Primary Goal
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px' }}>
+                                                        Funnel Signal
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                {offer?.offer_currency || '$'}{Number(ev.amount || 0).toFixed(2)}
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                {offer?.offer_currency || '$'}{Number(ev.payout || 0).toFixed(2)}
+                                            </td>
+                                            <td style={{ padding: '8px 10px' }}>
+                                                <StatusBadge status={ev.status} />
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                                {ev.affiliate_postback_fired ? (
+                                                    <span style={{ color: '#16a34a', fontWeight: 600, fontSize: '12px' }}>✓ Sent</span>
+                                                ) : (
+                                                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '12px' }}>
+                                                {formatLogDate(ev.created_at)}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </DetailCard>
+            )}
 
             <DetailCard title="Pass-through Parameters (extra_params)">
                 <ExtraParamsBlock extraParams={click.extra_params} offerParams={offerParams} />

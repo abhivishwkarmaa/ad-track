@@ -1892,6 +1892,7 @@ export class ReportService {
           conv.publisher_id,
           p.public_publisher_id,
           p.company_name as publisher_name,
+          conv.event_name,
           conv.amount,
           conv.payout,
           conv.status,
@@ -1939,6 +1940,10 @@ export class ReportService {
       if (filters.status) {
         query += ' AND conv.status = ?';
         params.push(filters.status);
+      }
+      if (filters.event_name) {
+        query += ' AND conv.event_name = ?';
+        params.push(filters.event_name);
       }
       if (filters.conversion_uuid) {
         query += ' AND conv.conversion_uuid LIKE ?';

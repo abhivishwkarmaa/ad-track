@@ -7,7 +7,7 @@ import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { OFFER_COUNTRIES } from '../../utils/countries';
 import { useOfferFormState } from './hooks/useOfferFormState';
 import { createEmptyOfferFormData } from './utils/offerFormState';
-import { buildOfferPayload, mapOfferToFormData, mapOfferParamsFromOffer, validateOfferParamsClient } from './utils/offerFormPayload';
+import { buildOfferPayload, mapOfferToFormData, mapOfferParamsFromOffer, mapOfferEventsFromOffer, validateOfferParamsClient, validateOfferEventsClient } from './utils/offerFormPayload';
 import OfferForm from './components/OfferForm';
 import './Offer.css';
 
@@ -44,6 +44,7 @@ function EditOffer() {
         if (!offer) return;
         form.setFormData(mapOfferToFormData(offer, id));
         form.setOfferParams(mapOfferParamsFromOffer(offer));
+        form.setOfferEvents(mapOfferEventsFromOffer(offer));
         const isStandardCountry = OFFER_COUNTRIES.some((c) => c.code === (offer.country || 'US'));
         if (!isStandardCountry && offer.country) {
             form.setShowCustomCountry(true);
@@ -67,9 +68,16 @@ function EditOffer() {
                 return;
             }
 
+            const eventError = validateOfferEventsClient(form.offerEvents);
+            if (eventError) {
+                toast.error(eventError);
+                return;
+            }
+
             const offerData = buildOfferPayload(form.formData, {
                 showCustomCategory: form.showCustomCategory,
                 offerParams: form.offerParams,
+                offerEvents: form.offerEvents,
             });
 
             await updateOfferMutation.mutateAsync({ id, data: offerData });

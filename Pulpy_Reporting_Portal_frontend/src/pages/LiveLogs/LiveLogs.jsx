@@ -341,7 +341,14 @@ const LiveLogs = () => {
                                                 <span className="log-row-link">{row.click_uuid}</span>
                                             ) : '—'}
                                         </td>
-                                        <td>{row.offer_name} ({row.display_id || row.offer_id})</td>
+                                        <td>
+                                            <div>{row.offer_name} ({row.display_id || row.offer_id})</div>
+                                            {row.event_name && row.event_name !== 'default' && (
+                                                <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '11px', marginTop: '2px', padding: '2px 6px' }}>
+                                                    Event: {row.event_name}
+                                                </span>
+                                            )}
+                                        </td>
                                         <td>{row.publisher_name} - ({row.public_publisher_id ?? row.publisher_id})</td>
                                         <td>${parseFloat(row.amount || 0).toFixed(2)}</td>
                                         <td>${parseFloat(row.payout || 0).toFixed(2)}</td>

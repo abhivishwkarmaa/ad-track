@@ -15,6 +15,7 @@ export function useOfferFormState(initialFormData) {
     const [showCustomCategory, setShowCustomCategory] = useState(false);
     const [showCustomCountry, setShowCustomCountry] = useState(false);
     const [offerParams, setOfferParams] = useState([emptyOfferParamRow()]);
+    const [offerEvents, setOfferEvents] = useState([]);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -66,6 +67,8 @@ export function useOfferFormState(initialFormData) {
         setShowCustomCountry,
         offerParams,
         setOfferParams,
+        offerEvents,
+        setOfferEvents,
         handleChange,
         handleTokenMappingChange,
         handleTestOfferLink,

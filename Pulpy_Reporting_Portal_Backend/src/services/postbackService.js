@@ -10,6 +10,7 @@ import crypto from 'crypto';
 
 import redis from '../config/redis.js';
 import { checkOfferValidity, validateConversionSchedule } from './offer.validation.js';
+import offerEventsService from './offerEventsService.js';
 
 // Offer validity + IST schedule checks live in offer.validation.js (shared with tracking).
 
@@ -447,6 +448,8 @@ export class PostbackService {
   async processPostback(query, request) {
     try {
       const { click_id, rcid, amount, status = 'approved' } = query;
+      const rawEvent = query.event || query.event_name || query.goal || query.goal_id || 'default';
+      const eventName = String(rawEvent).trim().toLowerCase();
       const normalizedIncomingStatus = normalizeConversionStatus(status);
 
       if (!click_id && !rcid) {
@@ -651,15 +654,59 @@ export class PostbackService {
             assignment = await getAssignmentByInternalId(clickData.publisher_offer_id, tenantId);
           }
 
+          // Check for Offer Event / Goal configuration
+          let matchedEvent = null;
+          let isPrimary = true;
+          try {
+            matchedEvent = await offerEventsService.getOfferEvent(clickData.offer_id, eventName, tenantId);
+            if (matchedEvent) {
+              isPrimary = Boolean(matchedEvent.is_primary);
+            }
+          } catch (evErr) {
+            logger.warn(`Failed to fetch offer event in Redis path: ${evErr.message}`);
+          }
+
+          // Deduplication check for this event on this click:
+          const allowMultiple = matchedEvent ? Boolean(matchedEvent.allow_multiple) : false;
+          if (!allowMultiple) {
+            try {
+              const checkTable = isPrimary ? 'conversions' : 'event_logs';
+              const [existingRows] = await queryWithTimeout(
+                `SELECT id, status FROM ${checkTable} WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`,
+                [click_id, eventName, tenantId],
+                1500
+              );
+              if (existingRows && existingRows.length > 0) {
+                logger.info(`Event/Conversion already exists for click ${click_id} and event '${eventName}'`);
+                return {
+                  success: true,
+                  message: `${isPrimary ? 'Conversion' : 'Event'} already processed for event '${eventName}' (deduplicated)`,
+                  duplicate: true,
+                  is_conversion: isPrimary,
+                  status: existingRows[0].status,
+                };
+              }
+            } catch (e) {
+              logger.warn('Check existing event/conversion error in Redis path:', e.message);
+            }
+          }
+
           // Fetch Publisher (in-file lookup by internal id)
           const publisher = await getPublisherByInternalId(clickData.publisher_id, tenantId);
           let offerPayout = parseFloat(offer.advertiser_amount);
           let payout = parseFloat(offer.affiliate_amount);
-          if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
+          if (matchedEvent) {
+            offerPayout = parseFloat(matchedEvent.advertiser_amount);
+            payout = parseFloat(matchedEvent.affiliate_amount);
+          } else if (assignment?.payout_override) {
+            payout = parseFloat(assignment.payout_override);
+          }
           const conversionAmount = amount ? parseFloat(amount) : offerPayout;
           logger.info({
             path: 'redis',
             click_id,
+            event_name: eventName,
+            is_primary: isPrimary,
             rcid,
             tenantId,
             amount,
@@ -670,6 +717,7 @@ export class PostbackService {
             publisher_id: clickData.publisher_id,
             assignment_id: assignment?.id ?? assignment?.internal_id
           }, '[POSTBACK] Redis path – Payout debug');
+
           // 4. Status Determination
           let finalStatus = normalizedIncomingStatus;
           if (
@@ -690,17 +738,117 @@ export class PostbackService {
 
           // Resolve Callback URL
           const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
-
-          // 5. Store Conversion in Redis - UTC ENFORCEMENT: Store UTC timestamp only
-          // ✅ CRITICAL: Include tenant_id in conversion data
           const finalAmount = conversionAmount;
           const finalPayout = finalStatus === CLICK_EXPIRED_STATUS ? 0 : payout;
+
+          // 1. ALWAYS RECORD IN event_logs (Complete Funnel Journey)
+          try {
+            await pool.query(
+              `INSERT INTO event_logs (
+                tenant_id, offer_id, publisher_id, click_uuid, event_name,
+                amount, payout, is_conversion, status, ip, postback_payload, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+              [
+                tenantId,
+                clickData.offer_id,
+                clickData.publisher_id,
+                click_id,
+                eventName,
+                finalAmount,
+                finalPayout,
+                isPrimary ? 1 : 0,
+                finalStatus,
+                extractIP(request),
+                JSON.stringify({ query, headers: request.headers })
+              ]
+            );
+          } catch (eventLogErr) {
+            logger.error('Failed to insert into event_logs in Redis path:', eventLogErr);
+          }
+
+          // 2. ALWAYS UPDATE daily_offer_event_stats (Event Funnel Breakdown)
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            await pool.query(
+              `INSERT INTO daily_offer_event_stats (
+                tenant_id, offer_id, event_name, day,
+                conversions, approved_conversions, pending_conversions, rejected_conversions,
+                revenue, payout, profit, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+              ON DUPLICATE KEY UPDATE
+                conversions = conversions + 1,
+                approved_conversions = approved_conversions + VALUES(approved_conversions),
+                revenue = revenue + VALUES(revenue),
+                payout = payout + VALUES(payout),
+                profit = profit + VALUES(profit),
+                updated_at = UTC_TIMESTAMP()`,
+              [
+                tenantId,
+                clickData.offer_id,
+                eventName,
+                today,
+                finalStatus === 'approved' ? 1 : 0,
+                finalAmount,
+                finalPayout,
+                finalAmount - finalPayout
+              ]
+            );
+          } catch (eventStatsErr) {
+            logger.error('Failed to update daily_offer_event_stats in Redis path:', eventStatsErr);
+          }
+
+          // 3. IF SECONDARY EVENT: Forward to publisher/Google Ads immediately and exit!
+          // (DO NOT enter conversions table, DO NOT consume caps, DO NOT inflate conversion count!)
+          if (!isPrimary) {
+            let postbackResult = null;
+            if (callbackUrl && finalStatus === 'approved') {
+              try {
+                postbackResult = await this.sendPublisherPostback(
+                  callbackUrl,
+                  {
+                    status: finalStatus,
+                    event_name: eventName,
+                    amount: finalAmount,
+                    payout: finalPayout,
+                    rcid: rcid || redisClick.rcid || '',
+                    conversion_uuid: `ev_${click_id}_${eventName}`,
+                    publisher_id: clickData.publisher_id,
+                    tenant_id: tenantId
+                  },
+                  { tid: redisClick.tid || '', publisher_id: clickData.publisher_id }
+                );
+                if (postbackResult && postbackResult.success) {
+                  await pool.query(
+                    'UPDATE event_logs SET affiliate_postback_fired = 1 WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? ORDER BY id DESC LIMIT 1',
+                    [click_id, eventName, tenantId]
+                  );
+                }
+              } catch (pubErr) {
+                logger.warn(`Publisher postback for secondary event '${eventName}' error: ${pubErr.message}`);
+              }
+            }
+
+            logger.info(`✅ Secondary event '${eventName}' recorded in event_logs and forwarded to publisher: ${click_id}`);
+            return {
+              success: true,
+              message: `Event '${eventName}' logged and forwarded to publisher successfully`,
+              duplicate: false,
+              is_conversion: false,
+              event_name: eventName,
+              affiliate_postback: postbackResult,
+            };
+          }
+
+          // 4. IF PRIMARY GOAL: Proceed to official conversions pipeline!
           const conversionData = {
             click_uuid: click_id,
+            event_name: eventName,
             offer_id: clickData.offer_id,
             publisher_id: clickData.publisher_id,
-            publisher_offer_id: clickData.publisher_offer_id,
-            tenant_id: tenantId, // ✅ CRITICAL: Include tenant_id
+            publisher_offer_id: (clickData.publisher_offer_id && parseInt(clickData.publisher_offer_id, 10) > 0)
+              ? parseInt(clickData.publisher_offer_id, 10)
+              : null,
+            tenant_id: tenantId,
             rcid: rcid || redisClick.rcid || uuidv4(),
             status: finalStatus,
             amount: finalAmount,
@@ -708,29 +856,30 @@ export class PostbackService {
             ip: extractIP(request),
             timestamp: new Date().toISOString(),
             postback_payload: JSON.stringify({ query, headers: request.headers }),
-            callback_url: callbackUrl, // Pass to worker
-
-            tid: redisClick.tid || '',  // Pass affiliate click ID
-            force_reject: redisClick.force_reject // Pass reject intent from click time
+            callback_url: callbackUrl,
+            tid: redisClick.tid || '',
+            force_reject: redisClick.force_reject
           };
 
           // Save to Redis (Worker will pick this up)
-          // Short TTL logic: 15 mins. Worker should process it by then. 
-          await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(conversionData));
+          const conversionKey = `conversion:${click_id}:${eventName}`;
+          await redis.setex(conversionKey, 900, JSON.stringify(conversionData));
 
-          // ✅ NEW ARCHITECTURE: Push to Conversion Stream
-          // This decouples conversion processing from click flushing
+          // Push to Conversion Stream
           await redis.xadd('stream:conversions', '*',
             'click_uuid', click_id,
+            'conversion_key', conversionKey,
+            'event_name', eventName,
             'timestamp', new Date().toISOString()
           );
 
-          logger.info(`✅ Conversion Queued [Stream]: ${click_id}`);
+          logger.info(`✅ Primary Conversion Queued [Stream]: ${click_id} [${eventName}]`);
 
           return {
             success: true,
-            message: 'Conversion queued for processing',
+            message: 'Primary conversion queued for processing',
             duplicate: false,
+            is_conversion: true,
             note: 'Handled via independent conversion pipeline'
           };
         }
@@ -863,19 +1012,53 @@ export class PostbackService {
       // Let's implement this "Rough Buffer" in the catch block of processPostback.
 
 
-      // If rcid provided, check for existing conversion (dedupe)
+      // Check offer event in DB path
+      let matchedEventDb = null;
+      let isPrimaryDb = true;
+      if (click?.offer_id) {
+        try {
+          matchedEventDb = await offerEventsService.getOfferEvent(click.offer_id, eventName, tenantId);
+          if (matchedEventDb) {
+            isPrimaryDb = Boolean(matchedEventDb.is_primary);
+          }
+        } catch (evErr) {
+          logger.warn(`Failed to check offer event in DB path: ${evErr.message}`);
+        }
+      }
+
+      // If rcid provided, check for existing conversion/event (dedupe)
       if (rcid) {
+        const checkTable = isPrimaryDb ? 'conversions' : 'event_logs';
         const [existingRows] = await pool.query(
-          'SELECT id, conversion_uuid, click_uuid, offer_id, publisher_id, tenant_id, publisher_offer_id, rcid, status, amount, payout, ip, timestamp, postback_payload, created_at, updated_at, extra_params, is_test FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ?',
-          [rcid, click ? click.offer_id : null, tenantId]
+          `SELECT id, status FROM ${checkTable} WHERE rcid = ? AND offer_id = ? AND tenant_id = ? AND event_name = ? LIMIT 1`,
+          [rcid, click ? click.offer_id : null, tenantId, eventName]
         );
 
         if (existingRows && existingRows.length > 0) {
           return {
             success: true,
-            message: 'Conversion already exists (deduplicated)',
-            conversion: existingRows[0],
+            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already exists for event '${eventName}' (deduplicated by rcid)`,
+            conversion: isPrimaryDb ? existingRows[0] : null,
             duplicate: true,
+            is_conversion: isPrimaryDb,
+          };
+        }
+      }
+
+      const allowMultipleDb = matchedEventDb ? Boolean(matchedEventDb.allow_multiple) : false;
+      if (!allowMultipleDb && click?.click_uuid) {
+        const checkTable = isPrimaryDb ? 'conversions' : 'event_logs';
+        const [existingClickConv] = await pool.query(
+          `SELECT id, status FROM ${checkTable} WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`,
+          [click.click_uuid, eventName, tenantId]
+        );
+        if (existingClickConv && existingClickConv.length > 0) {
+          return {
+            success: true,
+            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already exists for event '${eventName}' (deduplicated by click)`,
+            conversion: isPrimaryDb ? existingClickConv[0] : null,
+            duplicate: true,
+            is_conversion: isPrimaryDb,
           };
         }
       }
@@ -1041,9 +1224,13 @@ export class PostbackService {
       }
 
       let offerPayout = parseFloat(offer.advertiser_amount);
-
       let payout = parseFloat(offer.affiliate_amount);
-      if (assignment?.payout_override) payout = parseFloat(assignment.payout_override);
+      if (matchedEventDb) {
+        offerPayout = parseFloat(matchedEventDb.advertiser_amount);
+        payout = parseFloat(matchedEventDb.affiliate_amount);
+      } else if (assignment?.payout_override) {
+        payout = parseFloat(assignment.payout_override);
+      }
       const conversionAmount = amount ? parseFloat(amount) : offerPayout;
 
       logger.info({
@@ -1091,6 +1278,109 @@ export class PostbackService {
         headers: request.headers,
         timestamp: new Date().toISOString(),
       };
+
+      // 1. ALWAYS RECORD IN event_logs (Complete Funnel Journey)
+      let eventLogId = null;
+      try {
+        const [evLogResult] = await pool.query(
+          `INSERT INTO event_logs (
+            tenant_id, offer_id, publisher_id, click_uuid, event_name,
+            amount, payout, is_conversion, status, ip, postback_payload, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+          [
+            tenantId,
+            offerId,
+            publisherId,
+            click ? click.click_uuid : null,
+            eventName,
+            finalAmount,
+            finalPayout,
+            isPrimaryDb ? 1 : 0,
+            finalStatus,
+            ip,
+            JSON.stringify(postbackPayload),
+          ]
+        );
+        eventLogId = evLogResult.insertId;
+      } catch (eventLogErr) {
+        logger.error('Failed to insert into event_logs in DB path:', eventLogErr);
+      }
+
+      // 2. ALWAYS UPDATE daily_offer_event_stats (Event Funnel Breakdown)
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        await pool.query(
+          `INSERT INTO daily_offer_event_stats (
+            tenant_id, offer_id, event_name, day,
+            conversions, approved_conversions, pending_conversions, rejected_conversions,
+            revenue, payout, profit, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 1, ?, 0, 0, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE
+            conversions = conversions + 1,
+            approved_conversions = approved_conversions + VALUES(approved_conversions),
+            revenue = revenue + VALUES(revenue),
+            payout = payout + VALUES(payout),
+            profit = profit + VALUES(profit),
+            updated_at = UTC_TIMESTAMP()`,
+          [
+            tenantId,
+            offerId,
+            eventName,
+            today,
+            finalStatus === 'approved' ? 1 : 0,
+            finalAmount,
+            finalPayout,
+            finalAmount - finalPayout
+          ]
+        );
+      } catch (eventStatsErr) {
+        logger.error('Failed to update daily_offer_event_stats in DB path:', eventStatsErr);
+      }
+
+      // 3. IF SECONDARY EVENT: Forward to publisher/Google Ads immediately and EXIT!
+      // (DO NOT enter conversions table, DO NOT consume caps, DO NOT inflate conversion count!)
+      if (!isPrimaryDb) {
+        let publisher = null;
+        if (publisherId) {
+          publisher = await getPublisherByInternalId(publisherId, tenantId);
+        }
+        const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
+
+        let postbackResult = null;
+        if (callbackUrl && finalStatus === 'approved') {
+          try {
+            postbackResult = await this.sendPublisherPostback(
+              callbackUrl,
+              {
+                status: finalStatus,
+                event_name: eventName,
+                amount: finalAmount,
+                payout: finalPayout,
+                rcid: rcid || click?.rcid || '',
+                conversion_uuid: `ev_${click?.click_uuid || click_id}_${eventName}`,
+                publisher_id: publisherId,
+                tenant_id: tenantId
+              },
+              click || { tid: '', publisher_id: publisherId }
+            );
+            if (postbackResult && postbackResult.success && eventLogId) {
+              await pool.query('UPDATE event_logs SET affiliate_postback_fired = 1 WHERE id = ?', [eventLogId]);
+            }
+          } catch (pubErr) {
+            logger.warn(`Publisher postback for secondary event '${eventName}' error (DB path): ${pubErr.message}`);
+          }
+        }
+
+        logger.info(`✅ Secondary event '${eventName}' recorded in event_logs and forwarded to publisher (DB path): ${click?.click_uuid || click_id}`);
+        return {
+          success: true,
+          message: `Event '${eventName}' logged and forwarded to publisher successfully`,
+          duplicate: false,
+          is_conversion: false,
+          event_name: eventName,
+          affiliate_postback: postbackResult
+        };
+      }
 
       // ✅ CRITICAL: Check assignment-level capping (budget) with tenant_id
       // ✅ CRITICAL: Check assignment-level capping (Unified Budget/Conversion)
@@ -1205,8 +1495,8 @@ export class PostbackService {
       const [insertResult] = await pool.query(
         `INSERT INTO conversions (
           conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-          rcid, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+          rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
         [
           conversionUuid,
           click ? click.click_uuid : null,
@@ -1215,6 +1505,7 @@ export class PostbackService {
           publisherOfferId,
           tenantId,
           rcid || click?.rcid || uuidv4(),
+          eventName,
           finalStatus,
           finalAmount,
           finalPayout,
@@ -1315,6 +1606,9 @@ export class PostbackService {
               'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
               [conversion.id, tenantId]
             );
+            if (eventLogId) {
+              await pool.query('UPDATE event_logs SET affiliate_postback_fired = 1 WHERE id = ?', [eventLogId]);
+            }
             conversion.affiliate_postback_fired = 1;
           } catch (updateErr) {
             if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
@@ -1427,7 +1721,7 @@ export class PostbackService {
     }
   }
 
-  async updateDailyStats(offerId, revenue, payout, status) {
+  async updateDailyStats(offerId, revenue, payout, status, tenantId = null, eventName = 'default') {
     try {
       // FINANCIAL SEPARATION RULES:
       // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
@@ -1481,6 +1775,37 @@ export class PostbackService {
           profit
         ]
       );
+
+      if (tenantId) {
+        await pool.query(
+          `INSERT INTO daily_offer_event_stats (
+            tenant_id, offer_id, event_name, day, conversions, approved_conversions, pending_conversions, rejected_conversions,
+            revenue, payout, profit, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+          ON DUPLICATE KEY UPDATE
+            conversions = daily_offer_event_stats.conversions + VALUES(conversions),
+            approved_conversions = daily_offer_event_stats.approved_conversions + VALUES(approved_conversions),
+            pending_conversions = daily_offer_event_stats.pending_conversions + VALUES(pending_conversions),
+            rejected_conversions = daily_offer_event_stats.rejected_conversions + VALUES(rejected_conversions),
+            revenue = daily_offer_event_stats.revenue + VALUES(revenue),
+            payout = daily_offer_event_stats.payout + VALUES(payout),
+            profit = daily_offer_event_stats.profit + VALUES(profit),
+            updated_at = UTC_TIMESTAMP()`,
+          [
+            tenantId,
+            offerId,
+            eventName || 'default',
+            today,
+            conversionInc,
+            approvedConversionInc,
+            pendingConversionInc,
+            rejectedConversionInc,
+            finalRevenue,
+            finalPayout,
+            profit
+          ]
+        );
+      }
     } catch (error) {
       logger.error('PostbackService.updateDailyStats error:', error);
     }
@@ -1590,6 +1915,9 @@ export class PostbackService {
           affiliate_click_id: affiliateClickId, // Specific macro
           conversion_id: conversion.conversion_uuid || '',
           rcid: conversion.rcid || '',
+          event: conversion.event_name || 'default',
+          event_name: conversion.event_name || 'default',
+          goal: conversion.event_name || 'default',
           payout: conversion.payout?.toString() || '0',
           amount: conversion.amount?.toString() || '0',
           status: conversion.status || 'pending',
@@ -1600,6 +1928,12 @@ export class PostbackService {
           .replace(/{affiliate_click_id}/gi, affiliateClickId)
           .replace(/{conversion_id}/gi, conversion.conversion_uuid || '')
           .replace(/{CONVERSION_ID}/gi, conversion.conversion_uuid || '')
+          .replace(/{event}/gi, conversion.event_name || 'default')
+          .replace(/{EVENT}/gi, conversion.event_name || 'default')
+          .replace(/{event_name}/gi, conversion.event_name || 'default')
+          .replace(/{EVENT_NAME}/gi, conversion.event_name || 'default')
+          .replace(/{goal}/gi, conversion.event_name || 'default')
+          .replace(/{GOAL}/gi, conversion.event_name || 'default')
           .replace(/{payout}/gi, conversion.payout?.toString() || '0')
           .replace(/{PAYOUT}/gi, conversion.payout?.toString() || '0')
           .replace(/{amount}/gi, conversion.amount?.toString() || '0')
@@ -1728,15 +2062,15 @@ export class PostbackService {
           http_status, response_body, error_message, execution_time_ms, tenant_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          data.publisher_id || 0,
-          data.conversion_id || null,
+          (data.publisher_id && data.publisher_id > 0) ? data.publisher_id : null,
+          (data.conversion_id && data.conversion_id > 0) ? data.conversion_id : null,
           data.affiliate_click_id || null,
           data.fired_url || '',
           data.http_status || 0,
           data.response_body || null,
           data.error_message || null,
           data.execution_time_ms || 0,
-          data.tenant_id || 0
+          (data.tenant_id && data.tenant_id > 0) ? data.tenant_id : null
         ]
       );
     } catch (err) {

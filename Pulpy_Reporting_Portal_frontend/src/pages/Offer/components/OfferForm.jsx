@@ -14,6 +14,7 @@ import {
     platformTokens,
 } from '../constants/offerFormConstants';
 import OfferParamsEditor from './OfferParamsEditor';
+import OfferEventsEditor from './OfferEventsEditor';
 
 export default function OfferForm({
     headerSubtitle,
@@ -34,6 +35,8 @@ export default function OfferForm({
     offers,
     offerParams,
     setOfferParams,
+    offerEvents,
+    setOfferEvents,
     loadingAdvertisers = false,
     loading,
     submitLabel,
@@ -626,6 +629,17 @@ export default function OfferForm({
                             params={offerParams}
                             onChange={setOfferParams}
                             disabled={loading}
+                        />
+                    </div>
+
+                    {/* Multi-Event / Goals Configuration */}
+                    <div className="offer-form-section">
+                        <h3 className="offer-form-section-title">Offer Events & Goals (Multi-Event Tracking)</h3>
+                        <OfferEventsEditor
+                            events={offerEvents}
+                            onChange={setOfferEvents}
+                            disabled={loading}
+                            currency={formData.offer_currency || 'USD'}
                         />
                     </div>
 

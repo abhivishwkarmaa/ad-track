@@ -24,6 +24,10 @@ export function emptyOfferParamRow() {
     return { param_key: '', is_required: false, default_value: '' };
 }
 
+export function emptyOfferEventRow() {
+    return { event_name: '', title: '', advertiser_amount: '', affiliate_amount: '', is_primary: false, allow_multiple: false, status: 'active' };
+}
+
 export function normalizeOfferParamsForApi(rows) {
     if (!Array.isArray(rows)) return [];
     return rows
@@ -36,6 +40,27 @@ export function normalizeOfferParamsForApi(rows) {
                     : null,
         }))
         .filter((p) => p.param_key);
+}
+
+export function normalizeOfferEventsForApi(rows) {
+    if (!Array.isArray(rows)) return [];
+    const valid = rows
+        .map((ev) => ({
+            event_name: String(ev.event_name || '').trim().toLowerCase(),
+            title: ev.title ? String(ev.title).trim() : null,
+            advertiser_amount: parseFloat(ev.advertiser_amount) || 0,
+            affiliate_amount: parseFloat(ev.affiliate_amount) || 0,
+            is_primary: Boolean(ev.is_primary),
+            allow_multiple: Boolean(ev.allow_multiple),
+            status: ev.status === 'inactive' ? 'inactive' : 'active',
+        }))
+        .filter((ev) => ev.event_name);
+
+    if (valid.length > 0 && !valid.some((ev) => ev.is_primary)) {
+        const primaryIdx = valid.findIndex((ev) => ev.affiliate_amount > 0);
+        valid[primaryIdx >= 0 ? primaryIdx : 0].is_primary = true;
+    }
+    return valid;
 }
 
 export function validateOfferParamsClient(rows) {
@@ -56,6 +81,45 @@ export function validateOfferParamsClient(rows) {
         seen.add(lower);
     }
     return null;
+}
+
+export function validateOfferEventsClient(rows) {
+    if (!Array.isArray(rows)) return null;
+    const seen = new Set();
+    for (const row of rows) {
+        const name = String(row.event_name || '').trim().toLowerCase();
+        if (!name) continue;
+        if (!/^[a-zA-Z0-9_\-]+$/.test(name)) {
+            return `Event identifier "${name}" must only contain letters, numbers, hyphens and underscores`;
+        }
+        if (seen.has(name)) {
+            return `Duplicate event identifier: "${name}"`;
+        }
+        seen.add(name);
+        if (row.advertiser_amount != null && row.advertiser_amount !== '' && isNaN(Number(row.advertiser_amount))) {
+            return `Invalid revenue amount for event "${name}"`;
+        }
+        if (row.affiliate_amount != null && row.affiliate_amount !== '' && isNaN(Number(row.affiliate_amount))) {
+            return `Invalid payout amount for event "${name}"`;
+        }
+    }
+    return null;
+}
+
+export function mapOfferEventsFromOffer(offer) {
+    if (Array.isArray(offer?.offer_events) && offer.offer_events.length > 0) {
+        return offer.offer_events.map((ev) => ({
+            id: ev.id,
+            event_name: ev.event_name || '',
+            title: ev.title || '',
+            advertiser_amount: ev.advertiser_amount ?? '',
+            affiliate_amount: ev.affiliate_amount ?? '',
+            is_primary: Boolean(ev.is_primary),
+            allow_multiple: Boolean(ev.allow_multiple),
+            status: ev.status || 'active',
+        }));
+    }
+    return [];
 }
 
 export function mapOfferParamsFromOffer(offer) {
@@ -94,7 +158,7 @@ export function formatScheduleTimeForDisplay(value) {
     return formatScheduleTimeForForm(value).slice(0, 8);
 }
 
-export function buildOfferPayload(formData, { showCustomCategory = false, offerParams = [] } = {}) {
+export function buildOfferPayload(formData, { showCustomCategory = false, offerParams = [], offerEvents = [] } = {}) {
     const finalCategory = showCustomCategory ? formData.custom_category : formData.category;
     const start_time = normalizeScheduleTimeForApi(formData.start_time);
     const end_time = normalizeScheduleTimeForApi(formData.end_time);
@@ -161,6 +225,7 @@ export function buildOfferPayload(formData, { showCustomCategory = false, offerP
             : null,
         fallback_enabled: formData.capping_action === 'fallback' ? 1 : 0,
         offer_params: normalizeOfferParamsForApi(offerParams),
+        offer_events: normalizeOfferEventsForApi(offerEvents),
     };
 }
 

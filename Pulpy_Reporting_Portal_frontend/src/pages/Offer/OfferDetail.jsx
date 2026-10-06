@@ -273,6 +273,11 @@ function OfferDetail() {
         selectedRange === 'custom' && (!selectedTimelineRange.from || !selectedTimelineRange.to)
     );
 
+    const primaryEvent = useMemo(() => {
+        if (!Array.isArray(offer?.offer_events) || offer.offer_events.length === 0) return null;
+        return offer.offer_events.find(e => e.is_primary) || offer.offer_events[0];
+    }, [offer?.offer_events]);
+
     const { data: stats = null, isLoading: loadingStats } = useOfferStats(
         id,
         offerStatsQueryParams,
@@ -760,7 +765,14 @@ function OfferDetail() {
                         </div>
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Advertiser Amount:</span>
-                            <span className="detail-value" style={{ fontWeight: '600', color: '#2196F3' }}>{offer.offer_currency} {offer.advertiser_amount}</span>
+                            <span className="detail-value" style={{ fontWeight: '600', color: '#2196F3' }}>
+                                {offer.offer_currency} {offer.advertiser_amount}
+                                {primaryEvent && (
+                                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#166534', background: '#dcfce7', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                        👑 {primaryEvent.title || primaryEvent.event_name}
+                                    </span>
+                                )}
+                            </span>
                         </div>
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Publisher Model:</span>
@@ -768,7 +780,14 @@ function OfferDetail() {
                         </div>
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Publisher Amount:</span>
-                            <span className="detail-value" style={{ fontWeight: '600', color: '#4CAF50' }}>{offer.offer_currency} {offer.affiliate_amount}</span>
+                            <span className="detail-value" style={{ fontWeight: '600', color: '#4CAF50' }}>
+                                {offer.offer_currency} {offer.affiliate_amount}
+                                {primaryEvent && (
+                                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#166534', background: '#dcfce7', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                        👑 Primary Goal
+                                    </span>
+                                )}
+                            </span>
                         </div>
                         <div className="detail-item">
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Offer URL:</span>
@@ -815,6 +834,164 @@ function OfferDetail() {
                                     Publisher tracking links in the Assignments section below include these parameters automatically
                                     (required params as <code>{'{param}'}</code> placeholders, or defaults when set).
                                 </p>
+                            </div>
+                        )}
+                        {Array.isArray(offer.offer_events) && offer.offer_events.length > 0 && (
+                            <div className="detail-item" style={{ gridColumn: '1 / -1', marginTop: '16px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div>
+                                        <span className="detail-label" style={{ color: '#0f172a', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            🎯 Event Goals & Conversion Funnel:
+                                        </span>
+                                        <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                                            Advertiser sends callbacks for multiple funnel stages; only the Primary Goal creates a billable conversion.
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '11px', background: '#dcfce7', color: '#15803d', border: '1px solid #86efac', padding: '2px 8px', borderRadius: '10px', fontWeight: 700 }}>
+                                            👑 1 Main Conversion Goal
+                                        </span>
+                                        {offer.offer_events.filter(e => !e.is_primary).length > 0 && (
+                                            <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
+                                                ⚡ {offer.offer_events.filter(e => !e.is_primary).length} Funnel Signals
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                    <table className="table table-sm" style={{ marginBottom: 0, fontSize: '13px', width: '100%' }}>
+                                        <thead>
+                                            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Goal Role</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Event Code</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Display Title</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Advertiser Rev</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Affiliate Payout</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Accounting & Caps</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Per Click Rule</th>
+                                                <th style={{ padding: '8px 12px', fontWeight: 600, color: '#475569' }}>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {offer.offer_events.map((ev) => {
+                                                const isPrimary = Boolean(ev.is_primary);
+                                                return (
+                                                    <tr 
+                                                        key={ev.event_name}
+                                                        style={{ 
+                                                            background: isPrimary ? '#f0fdf4' : '#ffffff',
+                                                            borderBottom: '1px solid #f1f5f9'
+                                                        }}
+                                                    >
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                                            {isPrimary ? (
+                                                                <span style={{ 
+                                                                    display: 'inline-flex', 
+                                                                    alignItems: 'center', 
+                                                                    gap: '4px',
+                                                                    background: '#dcfce7', 
+                                                                    color: '#15803d', 
+                                                                    border: '1px solid #86efac', 
+                                                                    fontSize: '11px', 
+                                                                    fontWeight: 700, 
+                                                                    padding: '3px 8px', 
+                                                                    borderRadius: '5px' 
+                                                                }}>
+                                                                    👑 Primary Goal
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ 
+                                                                    display: 'inline-flex', 
+                                                                    alignItems: 'center', 
+                                                                    gap: '4px',
+                                                                    background: '#f1f5f9', 
+                                                                    color: '#475569', 
+                                                                    border: '1px solid #cbd5e1', 
+                                                                    fontSize: '11px', 
+                                                                    fontWeight: 600, 
+                                                                    padding: '3px 8px', 
+                                                                    borderRadius: '5px' 
+                                                                }}>
+                                                                    ⚡ Funnel Signal
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                                            <code style={{ 
+                                                                fontSize: '12px', 
+                                                                background: isPrimary ? '#bbf7d0' : '#e2e8f0', 
+                                                                color: isPrimary ? '#14532d' : '#1e293b',
+                                                                padding: '2px 6px',
+                                                                borderRadius: '4px',
+                                                                fontWeight: 600 
+                                                            }}>
+                                                                {ev.event_name}
+                                                            </code>
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle', fontWeight: 500 }}>
+                                                            {ev.title || ev.event_name}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle', color: '#059669', fontWeight: 700 }}>
+                                                            {offer.offer_currency || '$'} {Number(ev.advertiser_amount).toFixed(2)}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle', color: '#2563eb', fontWeight: 700 }}>
+                                                            {offer.offer_currency || '$'} {Number(ev.affiliate_amount).toFixed(2)}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle', fontSize: '12px' }}>
+                                                            {isPrimary ? (
+                                                                <span style={{ color: '#15803d', fontWeight: 600 }}>
+                                                                    ✅ Counts as 1 Conversion (Caps active)
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ color: '#64748b' }}>
+                                                                    ⚡ Funnel only (relayed to publisher)
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle', fontSize: '12px', color: '#475569' }}>
+                                                            {ev.allow_multiple ? 'Repeat allowed' : '1 per click'}
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                                            <span className={`badge ${ev.status === 'active' ? 'bg-success' : 'bg-secondary'}`} style={{ fontSize: '11px', padding: '3px 8px' }}>
+                                                                {ev.status}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '8px', marginTop: '10px' }}>
+                                    <div style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: '6px', borderLeft: '3px solid #16a34a', fontSize: '12px', color: '#166534' }}>
+                                        <strong>👑 Primary Goal:</strong> Creates the single billable conversion record, consumes offer caps, and appears in total conversion counts.
+                                    </div>
+                                    <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', borderLeft: '3px solid #64748b', fontSize: '12px', color: '#475569' }}>
+                                        <strong>⚡ Funnel Signals:</strong> Recorded in event journey and immediately fired to publisher with <code>{'{event}'}</code> macro for Google Ads/bidding optimization.
+                                    </div>
+                                </div>
+
+                                <div style={{ marginTop: '10px', padding: '10px 12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', color: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div>
+                                        <strong>Advertiser Postback URL:</strong>{' '}
+                                        <code style={{ background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px', color: '#0f172a' }}>
+                                            https://{window.location.hostname}/postback?click_id={'{click_id}'}&event={'{event_name}'}&amount={'{amount}'}
+                                        </code>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline-secondary"
+                                        style={{ fontSize: '11px', padding: '2px 8px' }}
+                                        onClick={() => {
+                                            safeCopyToClipboard(`https://${window.location.hostname}/postback?click_id={click_id}&event={event_name}&amount={amount}`);
+                                            toast.success('Copied advertiser postback URL');
+                                        }}
+                                    >
+                                        Copy
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -916,6 +1093,60 @@ function OfferDetail() {
                             <span className="detail-label" style={{ color: '#666', fontSize: '14px' }}>Status:</span>
                             <span className={`offer-status ${offer.advertiser.status?.toLowerCase()}`}>{offer.advertiser.status}</span>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Event Stats Breakdown */}
+            {stats?.event_stats && stats.event_stats.length > 0 && (
+                <div className="offer-detail-section" style={{ background: '#fff', padding: '25px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '30px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <h2 style={{ fontSize: '20px', fontWeight: '600', margin: 0 }}>Event Goals Breakdown</h2>
+                        <span style={{ fontSize: '13px', color: '#64748b' }}>{stats.event_stats.length} Active Event(s) Tracked</span>
+                    </div>
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Event Name</th>
+                                    <th>Total Conv</th>
+                                    <th>Approved Conv</th>
+                                    <th>Pending Conv</th>
+                                    <th>Rejected Conv</th>
+                                    <th>Revenue</th>
+                                    <th>Payout</th>
+                                    <th>Profit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {stats.event_stats.map((ev) => (
+                                    <tr key={ev.event_name}>
+                                        <td>
+                                            <span style={{ 
+                                                display: 'inline-block', 
+                                                padding: '2px 8px', 
+                                                borderRadius: '12px', 
+                                                fontSize: '12px', 
+                                                fontWeight: 600, 
+                                                background: '#e0e7ff', 
+                                                color: '#3730a3' 
+                                            }}>
+                                                {ev.event_name}
+                                            </span>
+                                        </td>
+                                        <td>{formatNumber(ev.total_conversions)}</td>
+                                        <td>{formatNumber(ev.approved_conversions)}</td>
+                                        <td>{formatNumber(ev.pending_conversions)}</td>
+                                        <td>{formatNumber(ev.rejected_conversions)}</td>
+                                        <td>{formatCurrency(ev.total_revenue)}</td>
+                                        <td>{formatCurrency(ev.approved_payout)}</td>
+                                        <td style={{ color: ev.total_profit >= 0 ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                                            {formatCurrency(ev.total_profit)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
