@@ -141,13 +141,14 @@ Caps run only for a primary goal, and only after the event is known. `rejected_c
 
 `daily_offer_event_stats` is incremented once, on the IST day (`getIstTodayYmd`), with approved / pending / rejected buckets filled from the final status:
 
-- Funnel signal: written in `postbackService` when the signal is logged. Caps are not touched. `conversions` is not written. The response says the publisher postback was sent only when that call succeeded.
+- Funnel signal: written in `postbackService` when the signal is logged. Caps are not touched. `conversions` is not written. The publisher callback is sent whenever a callback URL exists, including on a click older than 1 hour. The response says that postback was sent only when the HTTP call succeeded. Primary publisher postback still goes out only when the conversion status is `approved`.
 - Primary, Redis path: queued on `stream:conversions`. `conversionWorker.js` applies caps, then writes `daily_offer_stats` and `daily_offer_event_stats`. The postback path does not write those stats again. If the worker flips the row to `rejected_cap`, it updates the matching `event_logs` status and payout.
 - Primary, DB path: cap check first, then one `conversions` insert (with `event_name`), one event log, one event-stats row, then cap counters.
 
-Click older than 1 hour is `click_expired` with the resolved `event_name`, payout `0`, an `event_logs` row, and a single stats write. It does not increment caps.
+Click older than 1 hour is `click_expired`, payout `0`, and does not increment caps.
 
-Click older than 1 hour returns `click_expired` **before** event matching on the Redis path, and on the DB path it inserts `conversions` without `event_name` (column default `default`) and does not write `event_logs`.
+- Primary goal, and any offer with no events: a `conversions` row is still written (`click_expired`). Event offers also get one `event_logs` row. Publisher postback is not sent, because the status is not approved.
+- Funnel signal (`install`, `registration`, and any other non-primary event): the 1-hour window does not apply. The signal is logged with its real status and the publisher callback is sent whenever a callback URL exists. No `conversions` row.
 
 Publisher URL macros that are actually replaced: `{click_id}` and `{affiliate_click_id}` (both map to the publisher `tid`), `{conversion_id}`, `{rcid}`, `{event}`, `{event_name}`, `{goal}`, `{payout}`, `{amount}`, `{status}`.
 

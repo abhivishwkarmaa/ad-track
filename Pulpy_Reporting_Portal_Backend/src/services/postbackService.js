@@ -679,12 +679,15 @@ export class PostbackService {
           }
 
           const redisClickTimestamp = redisClick.created_at || redisClick.timestamp;
-          if (isClickOlderThan1Hour(redisClickTimestamp)) {
+          // Funnel signals are not billable, so the 1-hour click window does not apply to them.
+          if (isClickOlderThan1Hour(redisClickTimestamp) && (eventMode === 'legacy' || isPrimary)) {
             const expiredAmount = await resolveExpiredRevenueAmount({
               amount,
               offerId: clickData.offer_id,
               tenantId
             });
+            const expiredRcid = rcid || redisClick.rcid || uuidv4();
+
             const expiredConversionData = {
               click_uuid: click_id,
               event_name: eventName,
@@ -693,7 +696,7 @@ export class PostbackService {
               publisher_id: clickData.publisher_id,
               publisher_offer_id: clickData.publisher_offer_id,
               tenant_id: tenantId,
-              rcid: rcid || redisClick.rcid || uuidv4(),
+              rcid: expiredRcid,
               status: CLICK_EXPIRED_STATUS,
               amount: expiredAmount,
               payout: 0,
@@ -705,20 +708,22 @@ export class PostbackService {
               force_reject: redisClick.force_reject
             };
 
-            await insertEventLog({
-              tenantId,
-              offerId: clickData.offer_id,
-              publisherId: clickData.publisher_id,
-              clickUuid: click_id,
-              eventName,
-              amount: expiredAmount,
-              payout: 0,
-              isConversion: isPrimary,
-              status: CLICK_EXPIRED_STATUS,
-              ip: extractIP(request),
-              postbackPayload: { query, headers: request.headers, rejection_reason: 'click_expired' },
-              rcid: expiredConversionData.rcid,
-            });
+            if (eventMode !== 'legacy') {
+              await insertEventLog({
+                tenantId,
+                offerId: clickData.offer_id,
+                publisherId: clickData.publisher_id,
+                clickUuid: click_id,
+                eventName,
+                amount: expiredAmount,
+                payout: 0,
+                isConversion: true,
+                status: CLICK_EXPIRED_STATUS,
+                ip: extractIP(request),
+                postbackPayload: { query, headers: request.headers, rejection_reason: 'click_expired' },
+                rcid: expiredRcid,
+              });
+            }
 
             await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(expiredConversionData));
             await redis.xadd('stream:conversions', '*',
@@ -936,7 +941,7 @@ export class PostbackService {
             }
 
             let postbackResult = null;
-            if (callbackUrl && finalStatus === 'approved') {
+            if (callbackUrl) {
               try {
                 postbackResult = await this.sendPublisherPostback(
                   callbackUrl,
@@ -965,7 +970,7 @@ export class PostbackService {
               postbackResult = {
                 success: false,
                 executed: false,
-                reason: !callbackUrl ? 'no callback URL configured' : 'status is not approved',
+                reason: 'no callback URL configured',
               };
             }
 
@@ -1271,7 +1276,7 @@ export class PostbackService {
         throw new Error('Cannot process postback without click_id or rcid');
       }
 
-      if (click && isClickOlderThan1Hour(click.created_at || click.timestamp)) {
+      if (click && isClickOlderThan1Hour(click.created_at || click.timestamp) && (eventModeDb === 'legacy' || isPrimaryDb)) {
         const expiredOfferId = click.offer_id;
         const expiredPublisherId = click.publisher_id;
         const expiredPublisherOfferId = click.publisher_offer_id;
@@ -1568,7 +1573,7 @@ export class PostbackService {
         const callbackUrl = assignment?.callback_url || publisher?.global_postback_url;
 
         let postbackResult = null;
-        if (callbackUrl && finalStatus === 'approved') {
+        if (callbackUrl) {
           try {
             postbackResult = await this.sendPublisherPostback(
               callbackUrl,
@@ -1594,7 +1599,7 @@ export class PostbackService {
           postbackResult = {
             success: false,
             executed: false,
-            reason: !callbackUrl ? 'no callback URL configured' : 'status is not approved',
+            reason: 'no callback URL configured',
           };
         }
 
