@@ -57,6 +57,14 @@ export async function resolveTenant(request, reply) {
     // Special subdomains that don't require tenant resolution
     const specialSubdomains = ['admin', 'api', 'www'];
 
+    // Check if host is raw IP address or localhost (for development/testing without domains)
+    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host) || host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    if (isIpAddress) {
+      // Direct raw IP access: allow SuperAdmin by default
+      request.isAdminSubdomain = true;
+      return;
+    }
+
     // If host has at least 2 parts (subdomain.domain)
     if (hostParts.length >= 2) {
       const subdomain = hostParts[0].toLowerCase();
