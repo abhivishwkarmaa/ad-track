@@ -283,7 +283,14 @@ export default function OfferForm({
 
                     {/* Pricing Information */}
                     <div className="offer-form-section">
-                        <h3 className="offer-form-section-title">Pricing Information</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                            <h3 className="offer-form-section-title" style={{ margin: 0 }}>Pricing Information</h3>
+                            {offerEvents.length > 0 && (
+                                <span style={{ fontSize: '12px', color: '#4f46e5', background: '#eef2ff', padding: '3px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                    🔄 Synced with Primary Goal
+                                </span>
+                            )}
+                        </div>
                         <div className="offer-form-row two-col">
                             <div className="form-group">
                                 <label className="form-label">Advertiser Model (Revenue)</label>
@@ -640,6 +647,15 @@ export default function OfferForm({
                             onChange={setOfferEvents}
                             disabled={loading}
                             currency={formData.offer_currency || 'USD'}
+                            defaultAdvertiserAmount={formData.advertiser_amount}
+                            defaultAffiliateAmount={formData.affiliate_amount}
+                            onPrimaryPricingChange={({ advertiser_amount, affiliate_amount }) => {
+                                setFormData(prev => ({
+                                    ...prev,
+                                    ...(advertiser_amount !== undefined && { advertiser_amount }),
+                                    ...(affiliate_amount !== undefined && { affiliate_amount }),
+                                }));
+                            }}
                         />
                     </div>
 

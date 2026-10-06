@@ -26,6 +26,11 @@ export function useOfferFormState(initialFormData) {
             setFormData((prev) => ({ ...prev, [name]: selectedValues }));
         } else {
             setFormData((prev) => ({ ...prev, [name]: value }));
+            if ((name === 'advertiser_amount' || name === 'affiliate_amount') && offerEvents.length > 0) {
+                setOfferEvents((prev) =>
+                    prev.map((ev) => (ev.is_primary ? { ...ev, [name]: value } : ev))
+                );
+            }
             if (name === 'token_type' && value) {
                 setShowTokenTable(true);
                 if (tokenMappings.length === 0) {

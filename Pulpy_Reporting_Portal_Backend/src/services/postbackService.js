@@ -448,8 +448,8 @@ export class PostbackService {
   async processPostback(query, request) {
     try {
       const { click_id, rcid, amount, status = 'approved' } = query;
-      const rawEvent = query.event || query.event_name || query.goal || query.goal_id || 'default';
-      const eventName = String(rawEvent).trim().toLowerCase();
+      const rawEvent = query.event || query.event_name || query.goal || query.goal_id || null;
+      let eventName = rawEvent ? String(rawEvent).trim().toLowerCase() : null;
       const normalizedIncomingStatus = normalizeConversionStatus(status);
 
       if (!click_id && !rcid) {
@@ -658,24 +658,45 @@ export class PostbackService {
           let matchedEvent = null;
           let isPrimary = true;
           try {
-            matchedEvent = await offerEventsService.getOfferEvent(clickData.offer_id, eventName, tenantId);
-            if (matchedEvent) {
-              isPrimary = Boolean(matchedEvent.is_primary);
+            const configuredEvents = await offerEventsService.getOfferEvents(clickData.offer_id, tenantId);
+            if (configuredEvents && configuredEvents.length > 0) {
+              if (eventName) {
+                matchedEvent = configuredEvents.find(ev => ev.event_name.toLowerCase() === eventName) || null;
+              } else {
+                // If advertiser sent NO event parameter, map directly to the configured Primary Goal!
+                matchedEvent = configuredEvents.find(ev => ev.is_primary) || configuredEvents[0];
+              }
+
+              if (matchedEvent) {
+                eventName = matchedEvent.event_name;
+                isPrimary = Boolean(matchedEvent.is_primary);
+              } else {
+                // Unconfigured event name provided
+                isPrimary = false;
+              }
+            } else {
+              // Legacy single-event offer with no multi-events configured
+              eventName = eventName || 'default';
+              isPrimary = true;
             }
           } catch (evErr) {
             logger.warn(`Failed to fetch offer event in Redis path: ${evErr.message}`);
+            eventName = eventName || 'default';
           }
 
           // Deduplication check for this event on this click:
           const allowMultiple = matchedEvent ? Boolean(matchedEvent.allow_multiple) : false;
           if (!allowMultiple) {
             try {
-              const checkTable = isPrimary ? 'conversions' : 'event_logs';
-              const [existingRows] = await queryWithTimeout(
-                `SELECT id, status FROM ${checkTable} WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`,
-                [click_id, eventName, tenantId],
-                1500
-              );
+              // 🔒 For primary conversions: an offer can ONLY convert ONCE per click!
+              const checkSql = isPrimary
+                ? `SELECT id, status, event_name FROM conversions WHERE click_uuid = ? AND tenant_id = ? LIMIT 1`
+                : `SELECT id, status FROM event_logs WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`;
+              const checkParams = isPrimary
+                ? [click_id, tenantId]
+                : [click_id, eventName, tenantId];
+
+              const [existingRows] = await queryWithTimeout(checkSql, checkParams, 1500);
               if (existingRows && existingRows.length > 0) {
                 logger.info(`Event/Conversion already exists for click ${click_id} and event '${eventName}'`);
                 return {
@@ -1017,52 +1038,73 @@ export class PostbackService {
       let isPrimaryDb = true;
       if (click?.offer_id) {
         try {
-          matchedEventDb = await offerEventsService.getOfferEvent(click.offer_id, eventName, tenantId);
-          if (matchedEventDb) {
-            isPrimaryDb = Boolean(matchedEventDb.is_primary);
+          const configuredEventsDb = await offerEventsService.getOfferEvents(click.offer_id, tenantId);
+          if (configuredEventsDb && configuredEventsDb.length > 0) {
+            if (eventName) {
+              matchedEventDb = configuredEventsDb.find(ev => ev.event_name.toLowerCase() === eventName) || null;
+            } else {
+              matchedEventDb = configuredEventsDb.find(ev => ev.is_primary) || configuredEventsDb[0];
+            }
+
+            if (matchedEventDb) {
+              eventName = matchedEventDb.event_name;
+              isPrimaryDb = Boolean(matchedEventDb.is_primary);
+            } else {
+              isPrimaryDb = false;
+            }
+          } else {
+            eventName = eventName || 'default';
+            isPrimaryDb = true;
           }
         } catch (evErr) {
           logger.warn(`Failed to check offer event in DB path: ${evErr.message}`);
+          eventName = eventName || 'default';
         }
+      } else {
+        eventName = eventName || 'default';
       }
 
       // If rcid provided, check for existing conversion/event (dedupe)
       if (rcid) {
-        const checkTable = isPrimaryDb ? 'conversions' : 'event_logs';
-        const [existingRows] = await pool.query(
-          `SELECT id, status FROM ${checkTable} WHERE rcid = ? AND offer_id = ? AND tenant_id = ? AND event_name = ? LIMIT 1`,
-          [rcid, click ? click.offer_id : null, tenantId, eventName]
-        );
+        const checkSqlRcid = isPrimaryDb
+          ? `SELECT id, status, event_name FROM conversions WHERE rcid = ? AND offer_id = ? AND tenant_id = ? LIMIT 1`
+          : `SELECT id, status FROM event_logs WHERE rcid = ? AND offer_id = ? AND tenant_id = ? AND event_name = ? LIMIT 1`;
+        const checkParamsRcid = isPrimaryDb
+          ? [rcid, click ? click.offer_id : null, tenantId]
+          : [rcid, click ? click.offer_id : null, tenantId, eventName];
+
+        const [existingRows] = await pool.query(checkSqlRcid, checkParamsRcid);
 
         if (existingRows && existingRows.length > 0) {
           return {
             success: true,
-            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already exists for event '${eventName}' (deduplicated by rcid)`,
+            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already processed for event '${eventName}' (deduplicated by rcid)`,
             conversion: isPrimaryDb ? existingRows[0] : null,
             duplicate: true,
             is_conversion: isPrimaryDb,
           };
         }
       }
-
       const allowMultipleDb = matchedEventDb ? Boolean(matchedEventDb.allow_multiple) : false;
       if (!allowMultipleDb && click?.click_uuid) {
-        const checkTable = isPrimaryDb ? 'conversions' : 'event_logs';
-        const [existingClickConv] = await pool.query(
-          `SELECT id, status FROM ${checkTable} WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`,
-          [click.click_uuid, eventName, tenantId]
-        );
+        const checkSqlClick = isPrimaryDb
+          ? `SELECT id, status, event_name FROM conversions WHERE click_uuid = ? AND tenant_id = ? LIMIT 1`
+          : `SELECT id, status FROM event_logs WHERE click_uuid = ? AND event_name = ? AND tenant_id = ? LIMIT 1`;
+        const checkParamsClick = isPrimaryDb
+          ? [click.click_uuid, tenantId]
+          : [click.click_uuid, eventName, tenantId];
+
+        const [existingClickConv] = await pool.query(checkSqlClick, checkParamsClick);
         if (existingClickConv && existingClickConv.length > 0) {
           return {
             success: true,
-            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already exists for event '${eventName}' (deduplicated by click)`,
+            message: `${isPrimaryDb ? 'Conversion' : 'Event'} already processed for event '${eventName}' (deduplicated by click)`,
             conversion: isPrimaryDb ? existingClickConv[0] : null,
             duplicate: true,
             is_conversion: isPrimaryDb,
           };
         }
       }
-
       if (!click && !rcid) {
         throw new Error('Cannot process postback without click_id or rcid');
       }

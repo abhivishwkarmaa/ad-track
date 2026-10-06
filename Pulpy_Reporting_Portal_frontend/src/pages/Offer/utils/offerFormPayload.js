@@ -163,6 +163,17 @@ export function buildOfferPayload(formData, { showCustomCategory = false, offerP
     const start_time = normalizeScheduleTimeForApi(formData.start_time);
     const end_time = normalizeScheduleTimeForApi(formData.end_time);
 
+    const normalizedEvents = normalizeOfferEventsForApi(offerEvents);
+    const primaryEvent = normalizedEvents.find(e => e.is_primary);
+
+    let advertiserAmount = parseFloat(formData.advertiser_amount);
+    let affiliateAmount = parseFloat(formData.affiliate_amount);
+
+    if (primaryEvent) {
+        advertiserAmount = primaryEvent.advertiser_amount;
+        affiliateAmount = primaryEvent.affiliate_amount;
+    }
+
     return {
         advertiser_id: parseInt(formData.advertiser_id, 10),
         name: formData.name,
@@ -170,9 +181,9 @@ export function buildOfferPayload(formData, { showCustomCategory = false, offerP
         country: formData.country,
         timezone: formData.timezone,
         advertiser_model: formData.advertiser_model,
-        advertiser_amount: parseFloat(formData.advertiser_amount),
+        advertiser_amount: Number.isFinite(advertiserAmount) ? advertiserAmount : 0,
         affiliate_model: formData.affiliate_model,
-        affiliate_amount: parseFloat(formData.affiliate_amount),
+        affiliate_amount: Number.isFinite(affiliateAmount) ? affiliateAmount : 0,
         offer_url: formData.offer_url,
         description: formData.description,
         category: finalCategory,

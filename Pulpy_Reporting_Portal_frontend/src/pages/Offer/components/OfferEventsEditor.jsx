@@ -14,7 +14,10 @@ export default function OfferEventsEditor({
     events,
     onChange,
     disabled = false,
-    currency = 'USD'
+    currency = 'USD',
+    defaultAdvertiserAmount = '',
+    defaultAffiliateAmount = '',
+    onPrimaryPricingChange = null,
 }) {
     const [copied, setCopied] = useState(false);
     const rows = Array.isArray(events) ? events : [];
@@ -29,16 +32,33 @@ export default function OfferEventsEditor({
             is_primary: i === index,
         }));
         onChange(next);
+        if (onPrimaryPricingChange && rows[index]) {
+            onPrimaryPricingChange({
+                advertiser_amount: rows[index].advertiser_amount ?? '',
+                affiliate_amount: rows[index].affiliate_amount ?? '',
+            });
+        }
     };
 
     const updateRow = (index, field, value) => {
         const next = rows.map((row, i) => (i === index ? { ...row, [field]: value } : row));
         onChange(next);
+        if (rows[index]?.is_primary && onPrimaryPricingChange && (field === 'advertiser_amount' || field === 'affiliate_amount')) {
+            onPrimaryPricingChange({ [field]: value });
+        }
     };
 
     const addRow = (defaults = {}) => {
         const isFirst = rows.length === 0;
-        onChange([...rows, { ...emptyOfferEventRow(), is_primary: isFirst, ...defaults }]);
+        const initialAdv = isFirst ? (defaults.advertiser_amount ?? defaultAdvertiserAmount ?? '') : (defaults.advertiser_amount ?? '');
+        const initialAff = isFirst ? (defaults.affiliate_amount ?? defaultAffiliateAmount ?? '') : (defaults.affiliate_amount ?? '');
+        onChange([...rows, {
+            ...emptyOfferEventRow(),
+            is_primary: isFirst,
+            advertiser_amount: initialAdv,
+            affiliate_amount: initialAff,
+            ...defaults
+        }]);
     };
 
     const removeRow = (index) => {
@@ -46,6 +66,12 @@ export default function OfferEventsEditor({
         // If we removed the primary goal and other rows exist, make the first remaining primary
         if (rows[index]?.is_primary && remaining.length > 0 && !remaining.some(r => r.is_primary)) {
             remaining[0].is_primary = true;
+            if (onPrimaryPricingChange) {
+                onPrimaryPricingChange({
+                    advertiser_amount: remaining[0].advertiser_amount ?? '',
+                    affiliate_amount: remaining[0].affiliate_amount ?? '',
+                });
+            }
         }
         onChange(remaining);
     };
@@ -65,6 +91,8 @@ export default function OfferEventsEditor({
                           title: item.title,
                           allow_multiple: Boolean(item.multiple),
                           is_primary: row.is_primary || (isFirst && i === 0),
+                          advertiser_amount: row.advertiser_amount || ((row.is_primary || (isFirst && i === 0)) ? defaultAdvertiserAmount : ''),
+                          affiliate_amount: row.affiliate_amount || ((row.is_primary || (isFirst && i === 0)) ? defaultAffiliateAmount : ''),
                       }
                     : row
             );
@@ -77,6 +105,8 @@ export default function OfferEventsEditor({
             title: item.title,
             allow_multiple: Boolean(item.multiple),
             is_primary: isFirst,
+            advertiser_amount: isFirst ? defaultAdvertiserAmount : '',
+            affiliate_amount: isFirst ? defaultAffiliateAmount : '',
         });
     };
 
