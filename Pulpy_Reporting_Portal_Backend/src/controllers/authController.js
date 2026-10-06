@@ -24,13 +24,20 @@ const generateRefreshToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
-const getRefreshCookieOptions = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  path: '/',
-  maxAge: REFRESH_TTL_SECONDS,
-});
+const getRefreshCookieOptions = (request) => {
+  const isHttps =
+    request?.protocol === 'https' ||
+    request?.headers?.['x-forwarded-proto'] === 'https' ||
+    process.env.FORCE_COOKIE_SECURE === 'true';
+
+  return {
+    httpOnly: true,
+    secure: Boolean(isHttps),
+    sameSite: isHttps ? 'none' : 'lax',
+    path: '/',
+    maxAge: REFRESH_TTL_SECONDS,
+  };
+};
 
 export class AuthController {
   async register(request, reply) {
@@ -143,7 +150,7 @@ export class AuthController {
         REFRESH_TTL_SECONDS
       );
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(request));
 
       logger.info('[REGISTER] Registration successful', {
         adminId: adminId,
@@ -434,7 +441,7 @@ export class AuthController {
         REFRESH_TTL_SECONDS
       );
 
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(request));
 
       logger.info('[LOGIN] Login successful', {
         adminId: admin.id,
@@ -712,7 +719,7 @@ export class AuthController {
         'EX',
         REFRESH_TTL_SECONDS
       );
-      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions());
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(request));
 
       const jwtSecret = tenantId ? TENANT_JWT_SECRET : ADMIN_JWT_SECRET;
       const tokenType = tenantId ? 'tenant' : 'admin';

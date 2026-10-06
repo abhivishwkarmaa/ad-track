@@ -48,6 +48,7 @@ async function initializeServer() {
 
   await fastify.register(helmet, {
     contentSecurityPolicy: false, // Allow tracking pixels
+    hsts: false,
   });
 
   await fastify.register(cookie);
