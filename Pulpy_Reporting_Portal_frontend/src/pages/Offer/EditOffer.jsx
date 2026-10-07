@@ -6,8 +6,9 @@ import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { OFFER_COUNTRIES } from '../../utils/countries';
 import { useOfferFormState } from './hooks/useOfferFormState';
-import { createEmptyOfferFormData } from './utils/offerFormState';
+import { createEmptyOfferFormData, DEFAULT_TOKEN_MAPPINGS } from './utils/offerFormState';
 import { buildOfferPayload, mapOfferToFormData, mapOfferParamsFromOffer, mapOfferEventsFromOffer, validateOfferParamsClient, validateOfferEventsClient } from './utils/offerFormPayload';
+import { ArrowLeftIcon } from '../../shared/ui/icons';
 import OfferForm from './components/OfferForm';
 import './Offer.css';
 
@@ -48,6 +49,10 @@ function EditOffer() {
         const isStandardCountry = OFFER_COUNTRIES.some((c) => c.code === (offer.country || 'US'));
         if (!isStandardCountry && offer.country) {
             form.setShowCustomCountry(true);
+        }
+        if (offer.token_type) {
+            form.setShowTokenTable(true);
+            form.setTokenMappings(DEFAULT_TOKEN_MAPPINGS);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once when offer loads
     }, [offer, id]);
@@ -99,12 +104,36 @@ function EditOffer() {
         );
     }
 
+    const publicId = offer?.public_offer_id ?? offer?.display_id ?? id;
+
     return (
         <div className="offer-page">
-            <div className="offer-header">
-                <div className="offer-header-left">
-                    <h1>Edit Offer</h1>
-                    <p>Update offer details and settings</p>
+            <div className="offer-form-top-bar">
+                <div className="offer-form-top-left">
+                    <button
+                        type="button"
+                        className="btn-back-circle"
+                        onClick={() => navigate('/offer/list')}
+                        title="Back to Offer List"
+                    >
+                        <ArrowLeftIcon size={18} />
+                    </button>
+                    <div className="offer-form-top-info">
+                        <div className="offer-form-badge-group">
+                            <span className="offer-form-badge-id">#{publicId}</span>
+                            <span className="offer-form-badge-status" data-status={form.formData.status}>
+                                <span className="status-indicator-dot" />
+                                {form.formData.status?.toUpperCase() || 'LIVE'}
+                            </span>
+                            {form.formData.offer_currency && (
+                                <span className="offer-form-badge-currency">{form.formData.offer_currency}</span>
+                            )}
+                        </div>
+                        <h1 className="offer-form-title">Edit Offer</h1>
+                        <p className="offer-form-top-subtitle">
+                            Update tracking parameters, payout models, precision targeting, and cap rules
+                        </p>
+                    </div>
                 </div>
             </div>
 
@@ -115,9 +144,11 @@ function EditOffer() {
                     offers={offers}
                     loadingAdvertisers={loadingAdvertisers}
                     loading={loading}
-                    submitLabel="Save Offer"
+                    submitLabel="Save Changes"
                     submittingLabel="Saving..."
                     onCancel={() => navigate('/offer/list')}
+                    isEdit={true}
+                    offerId={id}
                     {...form}
                 />
             </form>

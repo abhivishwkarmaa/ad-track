@@ -6,6 +6,7 @@ import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
 import { useOfferFormState } from './hooks/useOfferFormState';
 import { createEmptyOfferFormData } from './utils/offerFormState';
 import { buildOfferPayload, validateOfferParamsClient, validateOfferEventsClient } from './utils/offerFormPayload';
+import { ArrowLeftIcon } from '../../shared/ui/icons';
 import OfferForm from './components/OfferForm';
 import './Offer.css';
 
@@ -75,16 +76,38 @@ function NewOffer() {
 
     return (
         <div className="offer-page">
-            <div className="offer-header">
-                <div className="offer-header-left">
-                    <h1>New Offer</h1>
-                    <p>Create a new offer for your campaigns</p>
+            <div className="offer-form-top-bar">
+                <div className="offer-form-top-left">
+                    <button
+                        type="button"
+                        className="btn-back-circle"
+                        onClick={() => navigate('/offer/list')}
+                        title="Back to Offer List"
+                    >
+                        <ArrowLeftIcon size={18} />
+                    </button>
+                    <div className="offer-form-top-info">
+                        <div className="offer-form-badge-group">
+                            <span className="offer-form-badge-id">NEW CAMPAIGN</span>
+                            <span className="offer-form-badge-status" data-status={form.formData.status}>
+                                <span className="status-indicator-dot" />
+                                {form.formData.status?.toUpperCase() || 'LIVE'}
+                            </span>
+                            {form.formData.offer_currency && (
+                                <span className="offer-form-badge-currency">{form.formData.offer_currency}</span>
+                            )}
+                        </div>
+                        <h1 className="offer-form-title">Create Offer</h1>
+                        <p className="offer-form-top-subtitle">
+                            Configure destination URL, partner payouts, targeting rules, and caps
+                        </p>
+                    </div>
                 </div>
             </div>
 
             <form onSubmit={handleSubmit}>
                 <OfferForm
-                    headerSubtitle="Fill in the details below to create a new offer"
+                    headerSubtitle="Fill in the details below to create a new campaign offer"
                     advertisers={advertisers}
                     offers={offers}
                     loadingAdvertisers={loadingAdvertisers}
@@ -92,6 +115,7 @@ function NewOffer() {
                     submitLabel="Create Offer"
                     submittingLabel="Creating..."
                     onCancel={() => navigate('/offer/list')}
+                    isEdit={false}
                     {...form}
                 />
             </form>
