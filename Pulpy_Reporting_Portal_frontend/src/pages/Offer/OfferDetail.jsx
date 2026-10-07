@@ -610,7 +610,7 @@ function OfferDetail() {
                 </div>
 
                 {offer.description && (
-                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5' }}>
+                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '12px', lineHeight: '1.4' }}>
                         {offer.description}
                     </p>
                 )}
@@ -621,7 +621,7 @@ function OfferDetail() {
                         <span className="bento-hero-metric-label">Advertiser Revenue</span>
                         <span className="bento-hero-metric-value primary">
                             {offer.offer_currency || 'USD'} {Number(offer.advertiser_amount || 0).toFixed(2)}
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '6px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '4px' }}>
                                 {offer.advertiser_model}
                             </span>
                         </span>
@@ -631,7 +631,7 @@ function OfferDetail() {
                         <span className="bento-hero-metric-label">Publisher Payout</span>
                         <span className="bento-hero-metric-value success">
                             {offer.offer_currency || 'USD'} {Number(offer.affiliate_amount || 0).toFixed(2)}
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '6px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '4px' }}>
                                 {offer.affiliate_model}
                             </span>
                         </span>
@@ -641,7 +641,7 @@ function OfferDetail() {
                         <span className="bento-hero-metric-label">Net Profit / Conv</span>
                         <span className="bento-hero-metric-value primary">
                             +{offer.offer_currency || 'USD'} {(Number(offer.advertiser_amount || 0) - Number(offer.affiliate_amount || 0)).toFixed(2)}
-                            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--success-color)', marginLeft: '6px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success-color)', marginLeft: '4px' }}>
                                 ({Number(offer.advertiser_amount) > 0
                                     ? `${(((Number(offer.advertiser_amount) - Number(offer.affiliate_amount)) / Number(offer.advertiser_amount)) * 100).toFixed(1)}%`
                                     : '0%'})
@@ -651,7 +651,7 @@ function OfferDetail() {
 
                     <div className="bento-hero-metric">
                         <span className="bento-hero-metric-label">Active Safeguard</span>
-                        <span className="bento-hero-metric-value" style={{ fontSize: '15px', color: offer.capping_type && offer.capping_type !== 'none' ? 'var(--brand-amber-dark)' : 'var(--text-secondary)' }}>
+                        <span className="bento-hero-metric-value" style={{ fontSize: '13px', color: offer.capping_type && offer.capping_type !== 'none' ? 'var(--brand-amber-dark)' : 'var(--text-secondary)' }}>
                             {offer.capping_type && offer.capping_type !== 'none'
                                 ? `${capAmount || 0} (${offer.capping_type}) / ${offer.capping_duration || 'daily'}`
                                 : 'Unlimited Traffic (No Cap)'}
@@ -756,7 +756,7 @@ function OfferDetail() {
                             </div>
                             <div className="bento-mini-tile">
                                 <span className="bento-mini-tile-label"><GlobeIcon size={12} /> Timezone</span>
-                                <span className="bento-mini-tile-value" style={{ fontSize: '12px' }}>{offer.timezone || 'UTC'}</span>
+                                <span className="bento-mini-tile-value" style={{ fontSize: '11px' }}>{offer.timezone || 'UTC'}</span>
                             </div>
                             <div className="bento-mini-tile">
                                 <span className="bento-mini-tile-label">Start Date</span>
@@ -770,7 +770,7 @@ function OfferDetail() {
 
                         <div className="bento-mini-tile" style={{ marginTop: 'auto' }}>
                             <span className="bento-mini-tile-label">Visibility & Delivery</span>
-                            <span className="bento-mini-tile-value" style={{ fontSize: '13px', fontWeight: 600 }}>
+                            <span className="bento-mini-tile-value" style={{ fontSize: '11.5px', fontWeight: 600 }}>
                                 {offer.offer_visibility?.toUpperCase() || 'PUBLIC'} • {offer.billing_flow || 'Standard'} ({offer.billing_type || 'Billable'})
                             </span>
                         </div>
@@ -781,7 +781,7 @@ function OfferDetail() {
                 <div className="bento-card bento-col-4">
                     <div className="bento-card-header">
                         <div className="bento-card-header-left">
-                            <BuildingIcon size={18} style={{ color: 'var(--brand-amber-dark)' }} />
+                            <BuildingIcon size={16} style={{ color: 'var(--brand-amber-dark)' }} />
                             <h3>Advertiser Account</h3>
                         </div>
                         {offer.advertiser && (
@@ -794,21 +794,21 @@ function OfferDetail() {
                         {offer.advertiser ? (
                             <>
                                 <div className="bento-mini-tile">
-                                    <span className="bento-mini-tile-label"><UserIcon size={12} /> Contact Name</span>
+                                    <span className="bento-mini-tile-label"><UserIcon size={11} /> Contact Name</span>
                                     <span className="bento-mini-tile-value">{offer.advertiser.name}</span>
                                 </div>
                                 <div className="bento-mini-tile">
-                                    <span className="bento-mini-tile-label"><BuildingIcon size={12} /> Company</span>
+                                    <span className="bento-mini-tile-label"><BuildingIcon size={11} /> Company</span>
                                     <span className="bento-mini-tile-value">{offer.advertiser.company_name}</span>
                                 </div>
                                 <div className="bento-mini-tile">
                                     <span className="bento-mini-tile-label">Email</span>
-                                    <span className="bento-mini-tile-value" style={{ fontSize: '13px', wordBreak: 'break-all' }}>{offer.advertiser.email}</span>
+                                    <span className="bento-mini-tile-value" style={{ fontSize: '11.5px', wordBreak: 'break-all' }}>{offer.advertiser.email}</span>
                                 </div>
                             </>
                         ) : (
                             <div className="offer-detail-empty-state">
-                                <BuildingIcon size={20} />
+                                <BuildingIcon size={18} />
                                 <span>Direct Network Offer (No Advertiser Assigned)</span>
                             </div>
                         )}
@@ -819,11 +819,11 @@ function OfferDetail() {
                 <div className="bento-card bento-col-4">
                     <div className="bento-card-header">
                         <div className="bento-card-header-left">
-                            <ShieldIcon size={18} style={{ color: 'var(--danger-color)' }} />
+                            <ShieldIcon size={16} style={{ color: 'var(--danger-color)' }} />
                             <h3>Capping & Smart Fallback</h3>
                         </div>
                         {isInstantRedirect && (
-                            <span className="offer-bento-tag primary" style={{ fontSize: '10px' }}>Instant Redirect</span>
+                            <span className="offer-bento-tag primary" style={{ fontSize: '9.5px' }}>Instant Redirect</span>
                         )}
                     </div>
                     <div className="bento-card-body">
@@ -840,8 +840,8 @@ function OfferDetail() {
 
                         <div className="bento-mini-tile">
                             <span className="bento-mini-tile-label">Limit & Overflow Action</span>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                                <span style={{ fontSize: '16px', fontWeight: 800 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                                <span style={{ fontSize: '12.5px', fontWeight: 700 }}>
                                     {capAmount != null
                                         ? (offer.capping_type === 'budget'
                                             ? `${offer.offer_currency || 'USD'} ${Number(capAmount).toFixed(2)}`
@@ -857,7 +857,7 @@ function OfferDetail() {
                         {offer.capping_action === 'fallback' && (
                             <div className="bento-mini-tile">
                                 <span className="bento-mini-tile-label">Fallback Destination</span>
-                                <span className="bento-mini-tile-value" style={{ fontSize: '12px' }}>
+                                <span className="bento-mini-tile-value" style={{ fontSize: '11px' }}>
                                     {offer.fallback_type === 'custom'
                                         ? (offer.fallback_url ? <a href={offer.fallback_url} target="_blank" rel="noopener noreferrer" className="detail-link-break">{offer.fallback_url}</a> : 'Custom URL')
                                         : (getFallbackOfferLabel(offer) || 'Fallback Offer')}
@@ -954,8 +954,8 @@ function OfferDetail() {
                         {offer.preview_url && (
                             <div className="bento-mini-tile">
                                 <span className="bento-mini-tile-label">Preview Landing URL</span>
-                                <div className="detail-url-row" style={{ marginTop: '4px' }}>
-                                    <code className="detail-url-code">{offer.preview_url}</code>
+                                <div className="detail-url-row" style={{ marginTop: '3px' }}>
+                                    <code className="detail-url-code" title={offer.preview_url}>{offer.preview_url}</code>
                                     <div className="detail-url-actions">
                                         <button
                                             type="button"
@@ -964,11 +964,12 @@ function OfferDetail() {
                                                 safeCopyToClipboard(offer.preview_url);
                                                 toast.success('Preview URL copied!');
                                             }}
+                                            title="Copy Preview URL"
                                         >
-                                            <CopyIcon size={13} />
+                                            <CopyIcon size={12} />
                                         </button>
-                                        <a href={offer.preview_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
-                                            <ExternalLinkIcon size={13} />
+                                        <a href={offer.preview_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" title="Open Preview URL">
+                                            <ExternalLinkIcon size={12} />
                                         </a>
                                     </div>
                                 </div>
@@ -980,7 +981,7 @@ function OfferDetail() {
                                 Dynamic URL Parameters ({offer.offer_params?.length || 0})
                             </span>
                             {Array.isArray(offer.offer_params) && offer.offer_params.length > 0 ? (
-                                <div className="offer-table-container" style={{ margin: 0, maxHeight: '200px', overflowY: 'auto' }}>
+                                <div className="offer-table-container" style={{ margin: 0, maxHeight: '180px', overflowY: 'auto' }}>
                                     <table className="offer-table">
                                         <thead>
                                             <tr>
@@ -1007,7 +1008,7 @@ function OfferDetail() {
                                     </table>
                                 </div>
                             ) : (
-                                <div style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '12px 0' }}>
+                                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', padding: '6px 0' }}>
                                     No custom tracking parameters defined for this campaign.
                                 </div>
                             )}
