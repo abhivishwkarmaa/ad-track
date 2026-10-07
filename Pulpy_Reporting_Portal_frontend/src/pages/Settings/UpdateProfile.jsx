@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
@@ -6,6 +6,26 @@ import { authAPI } from '../../services/api';
 import { REPORT_TIMEZONE_OPTIONS } from '../../utils/reportTimezone';
 import { resetAppClientData } from '../../utils/appClientLifecycle.js';
 import './Settings.css';
+
+const EXPIRY_PRESETS = [
+    { label: '30 Mins', value: 30 },
+    { label: '1 Hour (Default)', value: 60 },
+    { label: '2 Hours', value: 120 },
+    { label: '6 Hours', value: 360 },
+    { label: '24 Hours (1 Day)', value: 1440 },
+    { label: '3 Days', value: 4320 },
+    { label: '7 Days', value: 10080 },
+];
+
+function formatExpirySummary(mins) {
+    if (!mins || mins <= 0) return 'Not set';
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'}`;
+    if (mins % 1440 === 0) return `${mins / 1440} day${mins / 1440 === 1 ? '' : 's'}`;
+    if (mins % 60 === 0) return `${mins / 60} hour${mins / 60 === 1 ? '' : 's'}`;
+    const hours = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return `${hours} hr ${rem} min`;
+}
 
 function UpdateProfile() {
     const { user, updateProfile } = useAuth();
@@ -19,6 +39,36 @@ function UpdateProfile() {
         companyName: user?.companyName || '',
         phone: user?.phone || ''
     });
+
+    const [conversionExpiryMinutes, setConversionExpiryMinutes] = useState(user?.conversion_expiry_minutes || 60);
+    const [expiryLoading, setExpiryLoading] = useState(false);
+
+    // Fetch fresh profile & tenant settings on mount
+    useEffect(() => {
+        let isMounted = true;
+        const loadProfile = async () => {
+            try {
+                const res = await authAPI.getProfile();
+                if (res?.success && res?.data && isMounted) {
+                    if (res.data.conversion_expiry_minutes != null) {
+                        setConversionExpiryMinutes(Number(res.data.conversion_expiry_minutes));
+                    }
+                    if (res.data.name || res.data.company_name || res.data.phone) {
+                        setFormData(prev => ({
+                            ...prev,
+                            fullName: res.data.name || prev.fullName,
+                            companyName: res.data.company_name || prev.companyName,
+                            phone: res.data.phone || prev.phone
+                        }));
+                    }
+                }
+            } catch (err) {
+                // Silently ignore initial fetch error
+            }
+        };
+        loadProfile();
+        return () => { isMounted = false; };
+    }, []);
 
     // Password Change State
     const [passStep, setPassStep] = useState(0); // 0: Idle, 1: Verify OTP, 2: New Password
@@ -37,12 +87,34 @@ function UpdateProfile() {
         e.preventDefault();
         setLoading(true);
         try {
-            await updateProfile(formData);
+            await updateProfile({
+                ...formData,
+                conversion_expiry_minutes: parseInt(conversionExpiryMinutes, 10) || 60
+            });
             toast.success('Profile updated successfully!');
         } catch {
             toast.error('Failed to update profile');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleUpdateExpiryWindow = async (e) => {
+        e?.preventDefault();
+        const mins = parseInt(conversionExpiryMinutes, 10);
+        if (!Number.isFinite(mins) || mins < 1 || mins > 43200) {
+            toast.error('Expiry window must be between 1 and 43200 minutes (max 30 days)');
+            return;
+        }
+
+        setExpiryLoading(true);
+        try {
+            await updateProfile({ conversion_expiry_minutes: mins });
+            toast.success(`Conversion expiry window updated to ${formatExpirySummary(mins)}!`);
+        } catch (err) {
+            toast.error(err.message || 'Failed to update conversion expiry window');
+        } finally {
+            setExpiryLoading(false);
         }
     };
 
@@ -187,6 +259,66 @@ function UpdateProfile() {
                                 ))}
                             </select>
                         </div>
+                    </div>
+                </div>
+
+                <div className="settings-form-section" style={{ marginTop: '24px' }}>
+                    <h3 className="settings-form-section-title">Conversion Expiry Window (Attribution)</h3>
+                    <p style={{ color: '#666', marginBottom: '14px', fontSize: '14px', lineHeight: '1.5' }}>
+                        Set how long a click remains valid for conversion attribution. If an advertiser postback arrives after this time window, it will be marked as <strong>click_expired</strong> with <strong>$0 payout</strong>, and publisher postbacks will not fire.
+                    </p>
+
+                    <div style={{ marginBottom: '16px' }}>
+                        <label className="form-label" style={{ marginBottom: '8px', display: 'block' }}>Quick Presets</label>
+                        <div className="expiry-presets-container">
+                            {EXPIRY_PRESETS.map((p) => {
+                                const isActive = Number(conversionExpiryMinutes) === p.value;
+                                return (
+                                    <button
+                                        key={p.value}
+                                        type="button"
+                                        className={`expiry-preset-btn ${isActive ? 'active' : ''}`}
+                                        onClick={() => setConversionExpiryMinutes(p.value)}
+                                    >
+                                        {p.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="settings-form-row" style={{ maxWidth: '440px', alignItems: 'flex-end', display: 'flex', gap: '12px' }}>
+                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                            <label className="form-label" htmlFor="conversion-expiry-input">
+                                Expiry Time (in Minutes)
+                            </label>
+                            <input
+                                id="conversion-expiry-input"
+                                type="number"
+                                min="1"
+                                max="43200"
+                                className="form-control"
+                                value={conversionExpiryMinutes}
+                                onChange={(e) => setConversionExpiryMinutes(e.target.value)}
+                                placeholder="e.g. 60"
+                            />
+                            <div className="form-helper">
+                                Current duration: <strong>{formatExpirySummary(Number(conversionExpiryMinutes))}</strong>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={handleUpdateExpiryWindow}
+                            disabled={expiryLoading}
+                            style={{ height: '42px', alignSelf: 'flex-start', marginTop: '25px', whiteSpace: 'nowrap' }}
+                        >
+                            {expiryLoading ? 'Saving...' : 'Save Window'}
+                        </button>
+                    </div>
+
+                    <div className="expiry-info-card">
+                        ℹ️ <strong>Attribution rule:</strong> Primary billable conversions expire after this duration. Non-billable funnel signals (e.g., install, registration) are not blocked by this window.
                     </div>
                 </div>
 

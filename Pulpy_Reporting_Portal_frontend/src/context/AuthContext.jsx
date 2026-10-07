@@ -113,7 +113,8 @@ export function AuthProvider({ children }) {
                     tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
                     mustChangePassword: Boolean(response.data.must_change_password),
                     companyName: response.data.company_name || null,
-                    phone: response.data.phone || null
+                    phone: response.data.phone || null,
+                    conversion_expiry_minutes: response.data.conversion_expiry_minutes != null ? response.data.conversion_expiry_minutes : 60
                 };
 
                 setUser(userData);
@@ -138,7 +139,7 @@ export function AuthProvider({ children }) {
             // If it's just a local state update (e.g. password change complete flag)
             // with no actual profile fields, we can skip the API call if desired.
             // But here we check if any main profile fields are being updated.
-            const profileFields = ['fullName', 'name', 'companyName', 'phone'];
+            const profileFields = ['fullName', 'name', 'companyName', 'phone', 'conversion_expiry_minutes', 'conversionExpiryMinutes'];
             const hasProfileFields = Object.keys(updates).some(key => profileFields.includes(key));
 
             if (hasProfileFields) {
@@ -149,11 +150,14 @@ export function AuthProvider({ children }) {
                         ...updates,
                         fullName: response.data.name || updates.fullName || user.fullName,
                         companyName: response.data.company_name || updates.companyName || user.companyName,
-                        phone: response.data.phone || updates.phone || user.phone
+                        phone: response.data.phone || updates.phone || user.phone,
+                        conversion_expiry_minutes: response.data.conversion_expiry_minutes !== undefined
+                            ? response.data.conversion_expiry_minutes
+                            : (updates.conversion_expiry_minutes ?? updates.conversionExpiryMinutes ?? user?.conversion_expiry_minutes ?? 60)
                     };
                     setUser(updatedUser);
                     localStorage.setItem('track-myads_user', JSON.stringify(updatedUser));
-                    return { success: true };
+                    return { success: true, data: response.data };
                 }
             } else {
                 // Local only update (e.g. for mustChangePassword flag)

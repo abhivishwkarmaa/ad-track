@@ -82,6 +82,11 @@ export const authAPI = {
             body: JSON.stringify({ resetToken, newPassword }),
         });
     },
+    getProfile: async () => {
+        return apiRequest('/api/auth/profile', {
+            method: 'GET',
+        });
+    },
     updateProfile: async (data) => {
         return apiRequest('/api/auth/profile', {
             method: 'PATCH',

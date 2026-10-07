@@ -8,6 +8,7 @@ import emailService from '../services/emailService.js';
 import crypto from 'crypto';
 import redis from '../config/redis.js';
 import subscriptionService from '../services/subscriptionService.js';
+import tenantResolutionService from '../services/tenantResolutionService.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -480,14 +481,35 @@ export class AuthController {
         request.headers['x-forwarded-host'] ||
         request.headers.host ||
         '';
+
+      const tenantId = request.admin?.tenant_id || request.tenant?.id;
+      let tenantDetails = null;
+
+      if (tenantId) {
+        const [tRows] = await pool.query(
+          'SELECT id, name, slug, status, conversion_expiry_minutes FROM tenants WHERE id = ? LIMIT 1',
+          [tenantId]
+        );
+        if (tRows && tRows.length > 0) {
+          tenantDetails = tRows[0];
+        }
+      }
+
       return reply.send({
         success: true,
         data: {
           ...request.admin,
-          // Support debugging "works on my PC, not on client" — confirms subdomain → tenant resolution on the server
-          ...(request.tenant && {
+          ...(tenantDetails && {
+            tenant_id: tenantDetails.id,
+            tenant_slug: tenantDetails.slug,
+            tenant_name: tenantDetails.name,
+            conversion_expiry_minutes: tenantDetails.conversion_expiry_minutes != null ? tenantDetails.conversion_expiry_minutes : 60,
+          }),
+          ...(!tenantDetails && request.tenant && {
+            tenant_id: request.tenant.id,
             tenant_slug: request.tenant.slug,
             tenant_name: request.tenant.name,
+            conversion_expiry_minutes: request.tenant.conversion_expiry_minutes != null ? request.tenant.conversion_expiry_minutes : 60,
           }),
           request_host: hostUsed,
         },
@@ -501,9 +523,17 @@ export class AuthController {
   async updateProfile(request, reply) {
     try {
       const { id } = request.admin;
-      const { fullName, name, companyName, phone } = request.body;
+      const {
+        fullName,
+        name,
+        companyName,
+        phone,
+        conversion_expiry_minutes,
+        conversionExpiryMinutes
+      } = request.body;
 
       const finalName = fullName || name;
+      const rawExpiry = conversion_expiry_minutes !== undefined ? conversion_expiry_minutes : conversionExpiryMinutes;
 
       const updates = [];
       const params = [];
@@ -521,18 +551,48 @@ export class AuthController {
         params.push(phone);
       }
 
-      if (updates.length === 0) {
+      let updatedExpiry = null;
+      const tenantId = request.admin?.tenant_id || request.tenant?.id;
+
+      if (rawExpiry !== undefined && rawExpiry !== null && rawExpiry !== '') {
+        const parsedExpiry = parseInt(rawExpiry, 10);
+        if (!Number.isFinite(parsedExpiry) || parsedExpiry < 1 || parsedExpiry > 43200) {
+          return reply.code(400).send({
+            success: false,
+            message: 'Conversion expiry window must be between 1 and 43200 minutes (up to 30 days)',
+          });
+        }
+        if (!tenantId) {
+          return reply.code(400).send({
+            success: false,
+            message: 'No tenant found associated with your account to set conversion expiry',
+          });
+        }
+
+        await pool.query(
+          'UPDATE tenants SET conversion_expiry_minutes = ? WHERE id = ?',
+          [parsedExpiry, tenantId]
+        );
+
+        updatedExpiry = parsedExpiry;
+        await tenantResolutionService.invalidateTenantExpiryCache(tenantId);
+        if (request.tenant?.slug) {
+          await tenantResolutionService.invalidateTenantCache(request.tenant.slug);
+        }
+      }
+
+      if (updates.length > 0) {
+        params.push(id);
+        await pool.query(
+          `UPDATE admin_users SET ${updates.join(', ')} WHERE id = ?`,
+          params
+        );
+      } else if (rawExpiry === undefined) {
         return reply.code(400).send({
           success: false,
           message: 'No fields to update'
         });
       }
-
-      params.push(id);
-      await pool.query(
-        `UPDATE admin_users SET ${updates.join(', ')} WHERE id = ?`,
-        params
-      );
 
       // Fetch updated user
       let [rows] = [];
@@ -553,12 +613,24 @@ export class AuthController {
         }
       }
 
+      // Fetch current tenant expiry if not explicitly set in this call
+      if (updatedExpiry === null && tenantId) {
+        const [tRows] = await pool.query(
+          'SELECT conversion_expiry_minutes FROM tenants WHERE id = ?',
+          [tenantId]
+        );
+        if (tRows && tRows.length > 0) {
+          updatedExpiry = tRows[0].conversion_expiry_minutes;
+        }
+      }
+
       return reply.send({
         success: true,
         message: 'Profile updated successfully',
         data: {
           ...rows[0],
-          fullName: rows[0].name // Support both frontend naming conventions
+          fullName: rows[0].name, // Support both frontend naming conventions
+          conversion_expiry_minutes: updatedExpiry != null ? updatedExpiry : 60,
         }
       });
     } catch (error) {

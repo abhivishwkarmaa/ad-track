@@ -19,6 +19,7 @@ import redis from '../config/redis.js';
 
 import cacheService, { PUBLISHER_OFFERS_TRACKING_COLUMNS } from './cacheService.js';
 import postbackService from './postbackService.js';
+import tenantResolutionService from './tenantResolutionService.js';
 
 const getIstDateString = () => {
   const now = new Date();
@@ -704,9 +705,11 @@ export class TrackingService {
         throw new Error('Cannot add click to stream without tenant_id. This indicates a system failure.');
       }
 
+      const expiryMinutes = await tenantResolutionService.getTenantConversionExpiryMinutes(finalTenantId);
+      const redisTtlSeconds = Math.min(86400 * 7, Math.max(3600, (expiryMinutes || 60) * 60));
       const pipeline = redis.pipeline();
       pipeline.hset(redisKey, clickData);
-      pipeline.expire(redisKey, 3600);
+      pipeline.expire(redisKey, redisTtlSeconds);
       pipeline.xadd('stream:clicks', '*',
         'tenant_id', tenantIdStr,
         'offer_id', String(offerId),

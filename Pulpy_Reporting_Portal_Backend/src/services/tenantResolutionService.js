@@ -45,7 +45,7 @@ class TenantResolutionService {
         // 2. Fallback to DB
         try {
             const [rows] = await this.pool.query(
-                'SELECT id, name, slug, status, created_at FROM tenants WHERE slug = ? LIMIT 1',
+                'SELECT id, name, slug, status, conversion_expiry_minutes, created_at FROM tenants WHERE slug = ? LIMIT 1',
                 [slug]
             );
 
@@ -70,6 +70,63 @@ class TenantResolutionService {
         } catch (dbError) {
             logger.error(`Database tenant resolution failed for ${slug}: ${dbError.message}`);
             throw dbError; // DB failure is critical, propagate error
+        }
+    }
+
+    /**
+     * Gets conversion expiry window in minutes for a tenant.
+     * Cached in Redis for ultra-low latency on tracking and postback hot paths.
+     * 
+     * @param {number|string} tenantId 
+     * @returns {Promise<number>} Expiry window in minutes (default: 60)
+     */
+    async getTenantConversionExpiryMinutes(tenantId) {
+        if (!tenantId) return 60;
+
+        const cacheKey = `tenant:expiry:${tenantId}`;
+        try {
+            const cached = await this.redis.get(cacheKey);
+            if (cached !== null) {
+                const parsed = parseInt(cached, 10);
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    return parsed;
+                }
+            }
+        } catch (err) {
+            logger.debug(`Redis lookup failed for ${cacheKey}: ${err.message}`);
+        }
+
+        try {
+            const [rows] = await this.pool.query(
+                'SELECT conversion_expiry_minutes FROM tenants WHERE id = ? LIMIT 1',
+                [tenantId]
+            );
+
+            const minutes = (rows && rows[0]?.conversion_expiry_minutes != null)
+                ? parseInt(rows[0].conversion_expiry_minutes, 10)
+                : 60;
+
+            const finalMinutes = (Number.isFinite(minutes) && minutes > 0) ? minutes : 60;
+
+            await this.redis.set(cacheKey, String(finalMinutes), 'EX', TENANT_CACHE_TTL).catch(() => {});
+            return finalMinutes;
+        } catch (dbErr) {
+            logger.warn(`Failed to query tenant conversion expiry window for tenant ${tenantId}: ${dbErr.message}`);
+            return 60;
+        }
+    }
+
+    /**
+     * Invalidate conversion expiry window cache for a tenant.
+     * 
+     * @param {number|string} tenantId 
+     */
+    async invalidateTenantExpiryCache(tenantId) {
+        if (!tenantId) return;
+        try {
+            await this.redis.del(`tenant:expiry:${tenantId}`);
+        } catch (err) {
+            logger.warn(`Failed to invalidate tenant expiry cache for tenant ${tenantId}: ${err.message}`);
         }
     }
 

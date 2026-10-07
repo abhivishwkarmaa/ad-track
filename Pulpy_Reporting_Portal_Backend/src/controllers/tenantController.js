@@ -79,7 +79,7 @@ export class TenantController {
    */
   async createTenant(request, reply) {
     try {
-      const { name, slug, status = 'TRIAL', adminEmail, adminName } = request.body;
+      const { name, slug, status = 'TRIAL', adminEmail, adminName, conversion_expiry_minutes = 60 } = request.body;
 
       // Validate input
       if (!name || !slug) {
@@ -128,9 +128,12 @@ export class TenantController {
           });
         }
 
+        const parsedExpiry = parseInt(conversion_expiry_minutes, 10);
+        const finalExpiry = (Number.isFinite(parsedExpiry) && parsedExpiry > 0) ? parsedExpiry : 60;
+
         const [tenantResult] = await pool.query(
-          'INSERT INTO tenants (name, slug, status) VALUES (?, ?, ?)',
-          [name, slug, normalizedStatus]
+          'INSERT INTO tenants (name, slug, status, conversion_expiry_minutes) VALUES (?, ?, ?, ?)',
+          [name, slug, normalizedStatus, finalExpiry]
         );
 
         const tenantId = tenantResult.insertId || tenantResult[0]?.insertId;
@@ -249,7 +252,7 @@ export class TenantController {
       const { status, page = 1, limit = 50 } = request.query;
       const offset = (page - 1) * limit;
 
-      let query = 'SELECT id, name, slug, status, created_at, updated_at FROM tenants';
+      let query = 'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants';
       const params = [];
 
       if (status) {
@@ -296,7 +299,7 @@ export class TenantController {
       const { id } = request.params;
 
       const [rows] = await pool.query(
-        'SELECT id, name, slug, status, created_at, updated_at FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -324,14 +327,14 @@ export class TenantController {
   async updateTenant(request, reply) {
     try {
       const { id } = request.params;
-      const { name, status } = request.body;
+      const { name, status, conversion_expiry_minutes } = request.body;
 
       // Validate that at least one field is provided
-      if (!name && !status) {
+      if (!name && !status && conversion_expiry_minutes === undefined) {
         return reply.code(400).send({
           success: false,
           error: 'Validation Error',
-          message: 'At least one field (name or status) is required',
+          message: 'At least one field (name, status, or conversion_expiry_minutes) is required',
         });
       }
 
@@ -359,6 +362,19 @@ export class TenantController {
         params.push(name);
       }
 
+      if (conversion_expiry_minutes !== undefined) {
+        const parsed = parseInt(conversion_expiry_minutes, 10);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 43200) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: 'conversion_expiry_minutes must be between 1 and 43200 minutes',
+          });
+        }
+        updates.push('conversion_expiry_minutes = ?');
+        params.push(parsed);
+      }
+
       if (updates.length > 0) {
         params.push(id);
         await pool.query(
@@ -378,14 +394,15 @@ export class TenantController {
         }
       }
 
-      // Invalidate cache
+      // Invalidate caches
+      await tenantResolutionService.invalidateTenantExpiryCache(id);
       if (existingRows[0] && existingRows[0].slug) {
         await tenantResolutionService.invalidateTenantCache(existingRows[0].slug);
       }
 
       // Fetch updated tenant
       const [tenantRows] = await pool.query(
-        'SELECT id, name, slug, status, created_at, updated_at FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants WHERE id = ?',
         [id]
       );
 

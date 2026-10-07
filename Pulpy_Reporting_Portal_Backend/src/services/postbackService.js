@@ -9,6 +9,7 @@ import http from 'http';
 import crypto from 'crypto';
 
 import redis from '../config/redis.js';
+import tenantResolutionService from './tenantResolutionService.js';
 import { checkOfferValidity, validateConversionSchedule } from './offer.validation.js';
 import offerEventsService from './offerEventsService.js';
 import {
@@ -307,11 +308,16 @@ const generateConversionUuid = (tenantId, offerId, publisherId) => {
   return generateClickId(tenantId || 0, offerId || 0, publisherId || 0, 96);
 };
 
-const isClickOlderThan1Hour = (clickTimeValue) => {
+const isClickExpiredForTenant = (clickTimeValue, expiryMinutes = 60) => {
   if (!clickTimeValue) return false;
   const clickTime = new Date(clickTimeValue).getTime();
   if (!Number.isFinite(clickTime)) return false;
-  return (Date.now() - clickTime) >= CLICK_EXPIRY_WINDOW_MS;
+  const windowMs = Math.max(1, Number(expiryMinutes) || 60) * 60 * 1000;
+  return (Date.now() - clickTime) >= windowMs;
+};
+
+const isClickOlderThan1Hour = (clickTimeValue) => {
+  return isClickExpiredForTenant(clickTimeValue, 60);
 };
 
 const resolveExpiredRevenueAmount = async ({ amount, offerId, tenantId }) => {
@@ -679,8 +685,9 @@ export class PostbackService {
           }
 
           const redisClickTimestamp = redisClick.created_at || redisClick.timestamp;
-          // Funnel signals are not billable, so the 1-hour click window does not apply to them.
-          if (isClickOlderThan1Hour(redisClickTimestamp) && (eventMode === 'legacy' || isPrimary)) {
+          const tenantExpiryMinutes = await tenantResolutionService.getTenantConversionExpiryMinutes(tenantId);
+          // Funnel signals are not billable, so the click expiry window does not apply to them.
+          if (isClickExpiredForTenant(redisClickTimestamp, tenantExpiryMinutes) && (eventMode === 'legacy' || isPrimary)) {
             const expiredAmount = await resolveExpiredRevenueAmount({
               amount,
               offerId: clickData.offer_id,
@@ -736,12 +743,13 @@ export class PostbackService {
             logger.info('⏰ Conversion rejected: click expired (Redis path)', {
               click_id,
               tenantId,
-              click_timestamp: redisClickTimestamp
+              click_timestamp: redisClickTimestamp,
+              expiry_minutes: tenantExpiryMinutes
             });
 
             return {
               success: true,
-              message: 'Click expired (older than 1 hour)',
+              message: `Click expired (older than ${tenantExpiryMinutes} minutes)`,
               error_type: 'click_expired',
               status: CLICK_EXPIRED_STATUS,
               duplicate: false
@@ -1276,7 +1284,8 @@ export class PostbackService {
         throw new Error('Cannot process postback without click_id or rcid');
       }
 
-      if (click && isClickOlderThan1Hour(click.created_at || click.timestamp) && (eventModeDb === 'legacy' || isPrimaryDb)) {
+      const tenantExpiryMinutes = await tenantResolutionService.getTenantConversionExpiryMinutes(tenantId);
+      if (click && isClickExpiredForTenant(click.created_at || click.timestamp, tenantExpiryMinutes) && (eventModeDb === 'legacy' || isPrimaryDb)) {
         const expiredOfferId = click.offer_id;
         const expiredPublisherId = click.publisher_id;
         const expiredPublisherOfferId = click.publisher_offer_id;
@@ -1362,12 +1371,13 @@ export class PostbackService {
           click_id,
           click_uuid: click.click_uuid,
           tenantId,
-          click_created_at: click.created_at || click.timestamp
+          click_created_at: click.created_at || click.timestamp,
+          expiry_minutes: tenantExpiryMinutes
         });
 
         return {
           success: true,
-          message: 'Conversion rejected(click_expired)',
+          message: `Conversion rejected(click_expired: older than ${tenantExpiryMinutes} minutes)`,
           error_type: 'click_expired',
           status: CLICK_EXPIRED_STATUS,
           conversion: null,
