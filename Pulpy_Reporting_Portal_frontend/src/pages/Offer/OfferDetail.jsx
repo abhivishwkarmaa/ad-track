@@ -37,32 +37,41 @@ import TrackingUrlPanel from './components/TrackingUrlPanel';
 import {
     ArrowLeftIcon,
     EditIcon,
-    LinkIcon,
     CopyIcon,
     ShareIcon,
-    ExternalLinkIcon,
     SearchIcon,
     ClickIcon,
     ConversionIcon,
     RevenueIcon,
     RateIcon,
-    DocumentIcon,
     WalletIcon,
-    ShieldIcon,
-    TargetIcon,
-    GlobeIcon,
-    MobileIcon,
-    MonitorIcon,
-    ZapIcon,
-    InfoIcon,
-    BuildingIcon,
-    UserIcon,
     UsersIcon,
     TrendingUpIcon,
     ClockIcon,
     CircleSlashIcon,
 } from '../../shared/ui/icons';
 import './Offer.css';
+
+const DetailField = ({ label, children, wide = false }) => (
+    <div className={`offer-detail-row${wide ? ' span-2' : ''}`}>
+        <span className="offer-detail-row-label">{label}</span>
+        <span className="offer-detail-row-value">{children}</span>
+    </div>
+);
+
+const UrlField = ({ label, url, onCopy }) => (
+    <DetailField label={label} wide>
+        {url ? (
+            <span className="offer-detail-url-line">
+                <a href={url} target="_blank" rel="noopener noreferrer" className="offer-detail-url">{url}</a>
+                <span className="offer-detail-url-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={onCopy}>Copy</button>
+                    <a href={url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">Open</a>
+                </span>
+            </span>
+        ) : '-'}
+    </DetailField>
+);
 
 const OfferStatCard = ({ loading, icon, value, label, className }) => (
     <div className={`offer-stat-item ${className || ''}`}>
@@ -484,225 +493,120 @@ function OfferDetail() {
     const deviceTargetingList = parseTargetingList(offer?.device_targeting_json, 'device');
     const osTargetingList = parseTargetingList(offer?.os_targeting_json, 'os');
 
+    const primaryEvent = Array.isArray(offer.offer_events)
+        ? offer.offer_events.find((event) => event.is_primary)
+        : null;
+    const advertiserAmount = Number(offer.advertiser_amount || 0);
+    const publisherAmount = Number(offer.affiliate_amount || 0);
+    const profitPerConversion = advertiserAmount - publisherAmount;
+    const profitMargin = advertiserAmount > 0
+        ? `${((profitPerConversion / advertiserAmount) * 100).toFixed(1)}%`
+        : '0%';
+
+    const formatTargetingSummary = (list, action, emptyLabel) => {
+        if (!list.length || list.includes('all')) return emptyLabel;
+        const names = list.map((item) => String(item).replace(/_/g, ' ')).join(', ');
+        return action ? `${names} (${String(action).toUpperCase()})` : names;
+    };
+
     const statsCards = [
-        { key: 'clicks', label: 'Total Clicks', value: formatNumber(stats?.total_clicks), className: 'stat-item-purple', icon: <ClickIcon size={14} /> },
-        { key: 'conversions', label: 'Total Conversions', value: formatNumber(stats?.total_conversions), className: 'stat-item-teal', icon: <ConversionIcon size={14} /> },
-        { key: 'approved', label: 'Approved Conversions', value: formatNumber(stats?.approved_conversions), className: 'stat-item-green', icon: <ConversionIcon size={14} /> },
-        { key: 'pending', label: 'Pending Conversions', value: formatNumber(stats?.pending_conversions), className: 'stat-item-amber', icon: <ConversionIcon size={14} /> },
-        { key: 'rejected', label: 'Rejected Conversions', value: formatNumber(stats?.rejected_conversions), className: 'stat-item-red', icon: <CircleSlashIcon size={14} /> },
-        { key: 'click-expired', label: 'Click Expired', value: formatNumber(stats?.click_expired_conversions || stats?.click_expired || 0), className: 'stat-item-neutral', icon: <ClockIcon size={14} /> },
-        { key: 'conversion-rate', label: 'Conversion Rate', value: `${Number(stats?.conversion_rate || 0).toFixed(2)}%`, className: 'stat-item-amber', icon: <RateIcon size={14} /> },
-        { key: 'revenue', label: 'Total Revenue', value: formatCurrency(stats?.total_revenue), className: 'stat-item-red', icon: <RevenueIcon size={14} /> },
-        { key: 'payout', label: 'Payout', value: formatCurrency(stats?.approved_payout), className: 'stat-item-green', icon: <WalletIcon size={14} /> },
-        { key: 'profit', label: 'Total Profit', value: formatCurrency(stats?.total_profit), className: 'stat-item-profit', icon: <TrendingUpIcon size={14} /> },
+        { key: 'clicks', label: 'Total Clicks', value: formatNumber(stats?.total_clicks), className: 'stat-item-purple', icon: <ClickIcon size={18} /> },
+        { key: 'conversions', label: 'Total Conversions', value: formatNumber(stats?.total_conversions), className: 'stat-item-teal', icon: <ConversionIcon size={18} /> },
+        { key: 'approved', label: 'Approved Conversions', value: formatNumber(stats?.approved_conversions), className: 'stat-item-green', icon: <ConversionIcon size={18} /> },
+        { key: 'pending', label: 'Pending Conversions', value: formatNumber(stats?.pending_conversions), className: 'stat-item-amber', icon: <ConversionIcon size={18} /> },
+        { key: 'rejected', label: 'Rejected Conversions', value: formatNumber(stats?.rejected_conversions), className: 'stat-item-red', icon: <CircleSlashIcon size={18} /> },
+        { key: 'click-expired', label: 'Click Expired', value: formatNumber(stats?.click_expired_conversions || stats?.click_expired || 0), className: 'stat-item-neutral', icon: <ClockIcon size={18} /> },
+        { key: 'conversion-rate', label: 'Conversion Rate', value: `${Number(stats?.conversion_rate || 0).toFixed(2)}%`, className: 'stat-item-amber', icon: <RateIcon size={18} /> },
+        { key: 'revenue', label: 'Total Revenue', value: formatCurrency(stats?.total_revenue), className: 'stat-item-red', icon: <RevenueIcon size={18} /> },
+        { key: 'payout', label: 'Payout', value: formatCurrency(stats?.approved_payout), className: 'stat-item-green', icon: <WalletIcon size={18} /> },
+        { key: 'profit', label: 'Total Profit', value: formatCurrency(stats?.total_profit), className: 'stat-item-profit', icon: <TrendingUpIcon size={18} /> },
     ];
 
     return (
-        <div className="offer-page">
-            {/* Header Navigation & Breadcrumbs */}
-            <div className="offer-page-nav">
-                <button
-                    type="button"
-                    className="offer-back-btn"
-                    onClick={() => navigate('/offer/list')}
-                >
-                    <ArrowLeftIcon size={14} />
-                    <span>Back</span>
-                </button>
-                <div className="offer-breadcrumb">
-                    <span className="breadcrumb-item" onClick={() => navigate('/offer/list')}>Offers</span>
-                    <span className="breadcrumb-separator">/</span>
-                    <span className="breadcrumb-item current">{offer.name}</span>
-                </div>
-            </div>
-
-            {/* 1. Bento Hero Banner */}
-            <div className="offer-bento-hero">
-                <div className="offer-bento-hero-top">
-                    <div className="offer-bento-hero-title-group">
-                        <h1>
-                            <span>{offer.name}</span>
-                            <span className="offer-detail-id-pill">#{offer.public_offer_id || offer.display_id}</span>
+        <div className="offer-page offer-detail-page">
+            <div className="offer-header">
+                <div className="offer-header-left">
+                    <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => navigate('/offer/list')}
+                    >
+                        <ArrowLeftIcon size={16} />
+                        Back
+                    </button>
+                    <div className="offer-header-title">
+                        <h1>{offer.name}</h1>
+                        <p>
+                            <span>Offer ID: {offer.public_offer_id || offer.display_id}</span>
                             <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span>
-                        </h1>
-                        <div className="offer-bento-hero-tags">
-                            <span className="offer-bento-tag primary">
-                                <DocumentIcon size={13} />
-                                {offer.category || 'General'}
-                            </span>
-                            <span className="offer-bento-tag">
-                                <GlobeIcon size={13} />
-                                {offer.country || 'Global'}
-                            </span>
-                            <span className="offer-bento-tag">
-                                {offer.offer_currency || 'USD'}
-                            </span>
-                            {offer.carrier_name && (
-                                <span className="offer-bento-tag">
-                                    Carrier: {offer.carrier_name}
-                                </span>
-                            )}
-                            <span className="offer-bento-tag">
-                                {offer.billing_flow || 'Standard Flow'} • {offer.billing_type || 'Billable'}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div className="offer-header-actions">
-                        <div className="offer-search offer-detail-search" ref={searchContainerRef}>
-                            <SearchIcon size={15} />
-                            <input
-                                type="text"
-                                placeholder="Jump to offer..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                onFocus={() => setShowSearchResults(true)}
-                            />
-                            {showSearchResults && (
-                                <div className="offer-detail-search-dropdown">
-                                    {searchLoading ? (
-                                        <div className="offer-detail-search-item muted">Searching...</div>
-                                    ) : !debouncedSearchTerm ? (
-                                        <div className="offer-detail-search-item muted">Type to search offers</div>
-                                    ) : debouncedSearchTerm && searchResults.length === 0 ? (
-                                        <div className="offer-detail-search-item muted">No offers found</div>
-                                    ) : (
-                                        searchResults.map((result) => {
-                                            const offerPublicId = result.public_offer_id || result.display_id;
-                                            return (
-                                                <button
-                                                    key={result.id}
-                                                    type="button"
-                                                    className="offer-detail-search-item"
-                                                    onClick={() => {
-                                                        setShowSearchResults(false);
-                                                        setSearchTerm('');
-                                                        setDebouncedSearchTerm('');
-                                                        navigate(`/offer/detail/${offerPublicId}`);
-                                                    }}
-                                                >
-                                                    <span className="result-name">{result.name}</span>
-                                                    <span className="result-meta">ID: {offerPublicId} | {result.status}</span>
-                                                </button>
-                                            );
-                                        })
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                        <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary">
-                            <EditIcon size={15} />
-                            <span>Edit Offer</span>
-                        </Link>
-                        <button
-                            className="btn btn-secondary"
-                            onClick={() => {
-                                const element = document.getElementById('publisherSection');
-                                if (element) {
-                                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                }
-                            }}
-                        >
-                            <UsersIcon size={15} />
-                            <span>Publishers</span>
-                        </button>
+                        </p>
                     </div>
                 </div>
-
-                {offer.description && (
-                    <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '12px', lineHeight: '1.4' }}>
-                        {offer.description}
-                    </p>
-                )}
-
-                {/* Hero Financials Ribbon */}
-                <div className="offer-bento-hero-financials">
-                    <div className="bento-hero-metric">
-                        <span className="bento-hero-metric-label">Advertiser Revenue</span>
-                        <span className="bento-hero-metric-value primary">
-                            {offer.offer_currency || 'USD'} {Number(offer.advertiser_amount || 0).toFixed(2)}
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '4px' }}>
-                                {offer.advertiser_model}
-                            </span>
-                        </span>
+                <div className="offer-header-actions">
+                    <div className="offer-search offer-detail-search" ref={searchContainerRef}>
+                        <SearchIcon size={16} />
+                        <input
+                            type="text"
+                            placeholder="Search offers and jump..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onFocus={() => setShowSearchResults(true)}
+                        />
+                        {showSearchResults && (
+                            <div className="offer-detail-search-dropdown">
+                                {searchLoading ? (
+                                    <div className="offer-detail-search-item muted">Searching...</div>
+                                ) : !debouncedSearchTerm ? (
+                                    <div className="offer-detail-search-item muted">Type to search offers</div>
+                                ) : searchResults.length === 0 ? (
+                                    <div className="offer-detail-search-item muted">No offers found</div>
+                                ) : (
+                                    searchResults.map((result) => {
+                                        const offerPublicId = result.public_offer_id || result.display_id;
+                                        return (
+                                            <button
+                                                key={result.id}
+                                                type="button"
+                                                className="offer-detail-search-item"
+                                                onClick={() => {
+                                                    setShowSearchResults(false);
+                                                    setSearchTerm('');
+                                                    setDebouncedSearchTerm('');
+                                                    navigate(`/offer/detail/${offerPublicId}`);
+                                                }}
+                                            >
+                                                <span className="result-name">{result.name}</span>
+                                                <span className="result-meta">ID: {offerPublicId} | {result.status}</span>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
                     </div>
-
-                    <div className="bento-hero-metric">
-                        <span className="bento-hero-metric-label">Publisher Payout</span>
-                        <span className="bento-hero-metric-value success">
-                            {offer.offer_currency || 'USD'} {Number(offer.affiliate_amount || 0).toFixed(2)}
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '4px' }}>
-                                {offer.affiliate_model}
-                            </span>
-                        </span>
-                    </div>
-
-                    <div className="bento-hero-metric">
-                        <span className="bento-hero-metric-label">Net Profit / Conv</span>
-                        <span className="bento-hero-metric-value primary">
-                            +{offer.offer_currency || 'USD'} {(Number(offer.advertiser_amount || 0) - Number(offer.affiliate_amount || 0)).toFixed(2)}
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--success-color)', marginLeft: '4px' }}>
-                                ({Number(offer.advertiser_amount) > 0
-                                    ? `${(((Number(offer.advertiser_amount) - Number(offer.affiliate_amount)) / Number(offer.advertiser_amount)) * 100).toFixed(1)}%`
-                                    : '0%'})
-                            </span>
-                        </span>
-                    </div>
-
-                    <div className="bento-hero-metric">
-                        <span className="bento-hero-metric-label">Active Safeguard</span>
-                        <span className="bento-hero-metric-value" style={{ fontSize: '13px', color: offer.capping_type && offer.capping_type !== 'none' ? 'var(--brand-amber-dark)' : 'var(--text-secondary)' }}>
-                            {offer.capping_type && offer.capping_type !== 'none'
-                                ? `${capAmount || 0} (${offer.capping_type}) / ${offer.capping_duration || 'daily'}`
-                                : 'Unlimited Traffic (No Cap)'}
-                        </span>
-                    </div>
-                </div>
-
-                {/* Direct Landing Link Strip */}
-                <div className="detail-url-row">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                        <LinkIcon size={15} style={{ color: 'var(--brand-blue)' }} />
-                        <code className="detail-url-code">{offer.offer_url}</code>
-                    </div>
-                    <div className="detail-url-actions">
-                        <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => {
-                                safeCopyToClipboard(offer.offer_url);
-                                toast.success('Offer landing URL copied!');
-                            }}
-                            title="Copy Landing URL"
-                        >
-                            <CopyIcon size={14} />
-                            <span>Copy</span>
-                        </button>
-                        <a
-                            href={offer.offer_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-secondary btn-sm"
-                            title="Open in new tab"
-                        >
-                            <ExternalLinkIcon size={14} />
-                            <span>Test URL</span>
-                        </a>
-                    </div>
+                    <Link to={`/offer/edit/${offer.public_offer_id || offer.display_id}`} className="btn btn-primary">
+                        <EditIcon size={16} />
+                        <span>Edit Offer</span>
+                    </Link>
+                    <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                            const element = document.getElementById('publisherSection');
+                            if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
+                    >
+                        <UsersIcon size={16} />
+                        <span>View Publishers</span>
+                    </button>
                 </div>
             </div>
 
-            {/* Performance Overview Bento Tile */}
-            <div className="offer-form-card u-mb-24">
-                <div className="offer-form-card-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                        <div className="card-header-icon amber">
-                            <ZapIcon size={20} />
-                        </div>
-                        <div className="card-header-text">
-                            <h3>Performance Overview</h3>
-                            <p>Metrics use {reportTzLabel} day boundaries</p>
-                        </div>
+            <section className="offer-detail-section">
+                <div className="offer-detail-section-head">
+                    <div>
+                        <h2>Performance Overview</h2>
+                        <p>Metrics use {reportTzLabel} day boundaries</p>
                     </div>
                     <TimelineFilter
                         value={selectedRange}
@@ -712,519 +616,362 @@ function OfferDetail() {
                         onCustomRangeChange={setCustomRange}
                     />
                 </div>
-                <div className="offer-form-card-body">
-                    <div className="offer-stats-cards-grid">
-                        {statsCards.map((card) => (
-                            <OfferStatCard
-                                key={card.key}
-                                loading={loadingStats}
-                                icon={card.icon}
-                                value={card.value}
-                                label={card.label}
-                                className={card.className}
-                            />
-                        ))}
-                    </div>
-                    {!loadingStats && !stats && (
-                        <div className="offer-detail-empty-state u-mt-14">
-                            <InfoIcon size={20} />
-                            <span>No performance data recorded for this timeline.</span>
-                        </div>
-                    )}
+                <div className="offer-stats-cards-grid">
+                    {statsCards.map((card) => (
+                        <OfferStatCard
+                            key={card.key}
+                            loading={loadingStats}
+                            icon={card.icon}
+                            value={card.value}
+                            label={card.label}
+                            className={card.className}
+                        />
+                    ))}
                 </div>
-            </div>
-
-            {/* Main Bento Layout (12-column Grid) */}
-            <div className="offer-bento-layout">
-                {/* Tile 1: Schedule & Delivery (4 cols) */}
-                <div className="bento-card bento-col-4">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <ClockIcon size={18} style={{ color: 'var(--brand-blue)' }} />
-                            <h3>Schedule & Delivery</h3>
-                        </div>
+                {!loadingStats && !stats && (
+                    <div className="offer-detail-empty-state">
+                        No data available for this timeline.
                     </div>
-                    <div className="bento-card-body">
-                        <div className="bento-tile-grid-2">
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label"><ClockIcon size={12} /> Daily Hours</span>
-                                <span className="bento-mini-tile-value">
-                                    {formatScheduleTimeForDisplay(offer.start_time)
-                                        ? `${formatScheduleTimeForDisplay(offer.start_time)} - ${formatScheduleTimeForDisplay(offer.end_time)}`
-                                        : '24/7 Active'}
-                                </span>
-                            </div>
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label"><GlobeIcon size={12} /> Timezone</span>
-                                <span className="bento-mini-tile-value" style={{ fontSize: '11px' }}>{offer.timezone || 'UTC'}</span>
-                            </div>
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">Start Date</span>
-                                <span className="bento-mini-tile-value">{formatDate(offer.start_date)}</span>
-                            </div>
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">End Date</span>
-                                <span className="bento-mini-tile-value">{formatDate(offer.end_date)}</span>
-                            </div>
-                        </div>
+                )}
+            </section>
 
-                        <div className="bento-mini-tile" style={{ marginTop: 'auto' }}>
-                            <span className="bento-mini-tile-label">Visibility & Delivery</span>
-                            <span className="bento-mini-tile-value" style={{ fontSize: '11.5px', fontWeight: 600 }}>
-                                {offer.offer_visibility?.toUpperCase() || 'PUBLIC'} • {offer.billing_flow || 'Standard'} ({offer.billing_type || 'Billable'})
-                            </span>
-                        </div>
+            <div className="offer-detail-info-layout">
+                <section className="offer-detail-section">
+                    <h2>Basic Information</h2>
+                    <div className="offer-detail-fields two-col">
+                        <DetailField label="Name">{offer.name}</DetailField>
+                        <DetailField label="Category">{offer.category || '-'}</DetailField>
+                        <DetailField label="Status">
+                            <span className={`offer-status ${offer.status?.toLowerCase()}`}>{offer.status}</span>
+                        </DetailField>
+                        <DetailField label="Country">{offer.country || 'Global'}</DetailField>
+                        <DetailField label="Currency">{offer.offer_currency || 'USD'}</DetailField>
+                        <DetailField label="Carrier">{offer.carrier_name || '-'}</DetailField>
+                        <DetailField label="Billing Flow">{offer.billing_flow || '-'}</DetailField>
+                        <DetailField label="Billing Type">{offer.billing_type || '-'}</DetailField>
+                        <DetailField label="Visibility">{offer.offer_visibility || 'Public'}</DetailField>
+                        <DetailField label="Description" wide>{offer.description || '-'}</DetailField>
                     </div>
-                </div>
+                </section>
 
-                {/* Tile 2: Advertiser Partner (4 cols) */}
-                <div className="bento-card bento-col-4">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <BuildingIcon size={16} style={{ color: 'var(--brand-amber-dark)' }} />
-                            <h3>Advertiser Account</h3>
-                        </div>
-                        {offer.advertiser && (
-                            <span className={`offer-status ${offer.advertiser.status?.toLowerCase()}`}>
-                                {offer.advertiser.status}
-                            </span>
-                        )}
-                    </div>
-                    <div className="bento-card-body">
-                        {offer.advertiser ? (
-                            <>
-                                <div className="bento-mini-tile">
-                                    <span className="bento-mini-tile-label"><UserIcon size={11} /> Contact Name</span>
-                                    <span className="bento-mini-tile-value">{offer.advertiser.name}</span>
-                                </div>
-                                <div className="bento-mini-tile">
-                                    <span className="bento-mini-tile-label"><BuildingIcon size={11} /> Company</span>
-                                    <span className="bento-mini-tile-value">{offer.advertiser.company_name}</span>
-                                </div>
-                                <div className="bento-mini-tile">
-                                    <span className="bento-mini-tile-label">Email</span>
-                                    <span className="bento-mini-tile-value" style={{ fontSize: '11.5px', wordBreak: 'break-all' }}>{offer.advertiser.email}</span>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="offer-detail-empty-state">
-                                <BuildingIcon size={18} />
-                                <span>Direct Network Offer (No Advertiser Assigned)</span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Tile 3: Capping & Fail-Safe Protection (4 cols) */}
-                <div className="bento-card bento-col-4">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <ShieldIcon size={16} style={{ color: 'var(--danger-color)' }} />
-                            <h3>Capping & Smart Fallback</h3>
-                        </div>
-                        {isInstantRedirect && (
-                            <span className="offer-bento-tag primary" style={{ fontSize: '9.5px' }}>Instant Redirect</span>
-                        )}
-                    </div>
-                    <div className="bento-card-body">
-                        <div className="bento-tile-grid-2">
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">Capping Type</span>
-                                <span className="bento-mini-tile-value">{formatCappingType(offer.capping_type)}</span>
-                            </div>
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">Duration</span>
-                                <span className="bento-mini-tile-value">{formatCappingDuration(offer.capping_duration)}</span>
-                            </div>
-                        </div>
-
-                        <div className="bento-mini-tile">
-                            <span className="bento-mini-tile-label">Limit & Overflow Action</span>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                                <span style={{ fontSize: '12.5px', fontWeight: 700 }}>
-                                    {capAmount != null
-                                        ? (offer.capping_type === 'budget'
-                                            ? `${offer.offer_currency || 'USD'} ${Number(capAmount).toFixed(2)}`
-                                            : formatNumber(capAmount))
-                                        : 'Unlimited'}
-                                </span>
-                                <span className={`targeting-action-tag ${offer.capping_action === 'stop' ? 'block' : 'allow'}`}>
-                                    {formatCappingAction(offer.capping_action)}
-                                </span>
-                            </div>
-                        </div>
-
-                        {offer.capping_action === 'fallback' && (
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">Fallback Destination</span>
-                                <span className="bento-mini-tile-value" style={{ fontSize: '11px' }}>
-                                    {offer.fallback_type === 'custom'
-                                        ? (offer.fallback_url ? <a href={offer.fallback_url} target="_blank" rel="noopener noreferrer" className="detail-link-break">{offer.fallback_url}</a> : 'Custom URL')
-                                        : (getFallbackOfferLabel(offer) || 'Fallback Offer')}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Tile 4: Precision Targeting Rules (6 cols) */}
-                <div className="bento-card bento-col-6">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <TargetIcon size={18} style={{ color: 'var(--brand-blue)' }} />
-                            <h3>Precision Targeting Rules</h3>
-                        </div>
-                    </div>
-                    <div className="bento-card-body">
-                        <div className="bento-targeting-block">
-                            <div className="bento-targeting-header">
-                                <span className="bento-targeting-title"><MonitorIcon size={14} /> Browsers</span>
-                                <span className={`targeting-action-tag ${browserTargetingList.length === 0 || browserTargetingList.includes('all') ? 'allow' : (offer.browser_action === 'allow' ? 'allow' : 'block')}`}>
-                                    {browserTargetingList.length === 0 || browserTargetingList.includes('all') ? 'ALL' : offer.browser_action?.toUpperCase() || 'ALLOW'}
-                                </span>
-                            </div>
-                            <div className="detail-targeting-pills">
-                                {browserTargetingList.length === 0 || browserTargetingList.includes('all') ? (
-                                    <span className="targeting-pill all">All Browsers Allowed</span>
-                                ) : (
-                                    browserTargetingList.map((b) => <span key={b} className="targeting-pill">{b}</span>)
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="bento-targeting-block">
-                            <div className="bento-targeting-header">
-                                <span className="bento-targeting-title"><MobileIcon size={14} /> Devices</span>
-                                <span className={`targeting-action-tag ${deviceTargetingList.length === 0 || deviceTargetingList.includes('all') ? 'allow' : (offer.device_action === 'allow' ? 'allow' : 'block')}`}>
-                                    {deviceTargetingList.length === 0 || deviceTargetingList.includes('all') ? 'ALL' : offer.device_action?.toUpperCase() || 'ALLOW'}
-                                </span>
-                            </div>
-                            <div className="detail-targeting-pills">
-                                {deviceTargetingList.length === 0 || deviceTargetingList.includes('all') ? (
-                                    <span className="targeting-pill all">All Devices Allowed</span>
-                                ) : (
-                                    deviceTargetingList.map((d) => <span key={d} className="targeting-pill">{d.replace(/_/g, ' ')}</span>)
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="bento-targeting-block">
-                            <div className="bento-targeting-header">
-                                <span className="bento-targeting-title"><MonitorIcon size={14} /> Operating Systems</span>
-                                <span className={`targeting-action-tag ${osTargetingList.length === 0 || osTargetingList.includes('all') ? 'allow' : (offer.os_action === 'allow' ? 'allow' : 'block')}`}>
-                                    {osTargetingList.length === 0 || osTargetingList.includes('all') ? 'ALL' : offer.os_action?.toUpperCase() || 'ALLOW'}
-                                </span>
-                            </div>
-                            <div className="detail-targeting-pills">
-                                {osTargetingList.length === 0 || osTargetingList.includes('all') ? (
-                                    <span className="targeting-pill all">All Operating Systems Allowed</span>
-                                ) : (
-                                    osTargetingList.map((o) => <span key={o} className="targeting-pill">{o}</span>)
-                                )}
-                            </div>
-                        </div>
-
-                        {offer.country_list && (
-                            <div className="bento-targeting-block">
-                                <div className="bento-targeting-header">
-                                    <span className="bento-targeting-title"><GlobeIcon size={14} /> Country Filter</span>
-                                    <span className={`targeting-action-tag ${offer.country_action === 'allow' ? 'allow' : 'block'}`}>
-                                        {offer.country_action?.toUpperCase() || 'ALLOW'}
-                                    </span>
-                                </div>
-                                <div className="detail-targeting-pills">
-                                    {offer.country_list.split(',').map((c) => (
-                                        <span key={c} className="targeting-pill">{c.trim()}</span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Tile 5: Destination & Parameters Hub (6 cols) */}
-                <div className="bento-card bento-col-6">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <LinkIcon size={18} style={{ color: 'var(--brand-blue)' }} />
-                            <h3>Tracking & Parameters Hub</h3>
-                        </div>
-                    </div>
-                    <div className="bento-card-body">
-                        {offer.preview_url && (
-                            <div className="bento-mini-tile">
-                                <span className="bento-mini-tile-label">Preview Landing URL</span>
-                                <div className="detail-url-row" style={{ marginTop: '3px' }}>
-                                    <code className="detail-url-code" title={offer.preview_url}>{offer.preview_url}</code>
-                                    <div className="detail-url-actions">
-                                        <button
-                                            type="button"
-                                            className="btn btn-secondary btn-sm"
-                                            onClick={() => {
-                                                safeCopyToClipboard(offer.preview_url);
-                                                toast.success('Preview URL copied!');
-                                            }}
-                                            title="Copy Preview URL"
-                                        >
-                                            <CopyIcon size={12} />
-                                        </button>
-                                        <a href={offer.preview_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm" title="Open Preview URL">
-                                            <ExternalLinkIcon size={12} />
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="bento-targeting-block" style={{ flex: 1 }}>
-                            <span className="bento-targeting-title">
-                                Dynamic URL Parameters ({offer.offer_params?.length || 0})
-                            </span>
-                            {Array.isArray(offer.offer_params) && offer.offer_params.length > 0 ? (
-                                <div className="offer-table-container" style={{ margin: 0, maxHeight: '180px', overflowY: 'auto' }}>
-                                    <table className="offer-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Parameter</th>
-                                                <th>Type</th>
-                                                <th>Required</th>
-                                                <th>Default</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {offer.offer_params.map((p) => (
-                                                <tr key={p.param_key}>
-                                                    <td><code>{p.param_key}</code></td>
-                                                    <td><span className="targeting-pill">{p.param_type || 'text'}</span></td>
-                                                    <td>
-                                                        <span className={`targeting-action-tag ${p.is_required ? 'block' : 'allow'}`}>
-                                                            {p.is_required ? 'YES' : 'NO'}
-                                                        </span>
-                                                    </td>
-                                                    <td>{p.default_value || '—'}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', padding: '6px 0' }}>
-                                    No custom tracking parameters defined for this campaign.
-                                </div>
+                <div className="offer-detail-side-stack">
+                    <section className="offer-detail-section">
+                        <h2>Pricing Information</h2>
+                        <div className="offer-detail-fields">
+                            <DetailField label="Advertiser Model">{offer.advertiser_model || '-'}</DetailField>
+                            <DetailField label="Advertiser Amount">
+                                {offer.offer_currency || 'USD'} {advertiserAmount.toFixed(2)}
+                            </DetailField>
+                            <DetailField label="Publisher Model">{offer.affiliate_model || '-'}</DetailField>
+                            <DetailField label="Publisher Amount">
+                                {offer.offer_currency || 'USD'} {publisherAmount.toFixed(2)}
+                            </DetailField>
+                            <DetailField label="Profit / Conv">
+                                {offer.offer_currency || 'USD'} {profitPerConversion.toFixed(2)} ({profitMargin})
+                            </DetailField>
+                            {primaryEvent && (
+                                <DetailField label="Primary Goal">
+                                    {primaryEvent.title || primaryEvent.event_name}
+                                </DetailField>
                             )}
                         </div>
-                    </div>
-                </div>
+                    </section>
 
-                {/* Tile 6: Event Goals & Conversion Funnel (12 cols) if present */}
-                {Array.isArray(offer.offer_events) && offer.offer_events.length > 0 && (
-                    <div className="bento-card bento-col-12">
-                        <div className="bento-card-header">
-                            <div className="bento-card-header-left">
-                                <TargetIcon size={18} style={{ color: 'var(--brand-blue)' }} />
-                                <h3>Event Goals & Conversion Funnel</h3>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                <span className="targeting-pill all">
-                                    👑 1 Primary Goal
-                                </span>
-                                {offer.offer_events.filter(e => !e.is_primary).length > 0 && (
-                                    <span className="targeting-pill">
-                                        ⚡ {offer.offer_events.filter(e => !e.is_primary).length} Funnel Signals
-                                    </span>
-                                )}
-                            </div>
+                    <section className="offer-detail-section">
+                        <h2>Capping Information</h2>
+                        <div className="offer-detail-fields">
+                            <DetailField label="Capping Type">{formatCappingType(offer.capping_type)}</DetailField>
+                            {offer.capping_type && offer.capping_type !== 'none' ? (
+                                <>
+                                    <DetailField label="Duration">{formatCappingDuration(offer.capping_duration)}</DetailField>
+                                    <DetailField label={offer.capping_type === 'budget' ? 'Budget Amount' : 'Conversion Limit'}>
+                                        {capAmount != null
+                                            ? (offer.capping_type === 'budget'
+                                                ? `${offer.offer_currency || 'USD'} ${Number(capAmount).toFixed(2)}`
+                                                : formatNumber(capAmount))
+                                            : '-'}
+                                        {isInstantRedirect && (
+                                            <span className="offer-capping-badge">Instant redirect active</span>
+                                        )}
+                                    </DetailField>
+                                    <DetailField label="If Exceeded">{formatCappingAction(offer.capping_action)}</DetailField>
+                                    {offer.capping_action === 'fallback' && (
+                                        <>
+                                            <DetailField label="Fallback Type">
+                                                {offer.fallback_type === 'custom' ? 'Custom URL' : offer.fallback_type === 'offer' ? 'Fallback Offer' : '-'}
+                                            </DetailField>
+                                            {offer.fallback_type === 'custom' && (
+                                                <DetailField label="Fallback URL">
+                                                    {offer.fallback_url ? (
+                                                        <a href={offer.fallback_url} target="_blank" rel="noopener noreferrer" className="offer-detail-url">
+                                                            {offer.fallback_url}
+                                                        </a>
+                                                    ) : '-'}
+                                                </DetailField>
+                                            )}
+                                            {offer.fallback_type === 'offer' && (
+                                                <DetailField label="Fallback Offer">{getFallbackOfferLabel(offer) || '-'}</DetailField>
+                                            )}
+                                        </>
+                                    )}
+                                </>
+                            ) : (
+                                <DetailField label="Status">No capping configured</DetailField>
+                            )}
                         </div>
-                        <div className="bento-card-body">
-                            <div className="offer-table-container" style={{ margin: 0 }}>
-                                <table className="offer-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Goal Role</th>
-                                            <th>Event Code</th>
-                                            <th>Display Title</th>
-                                            <th>Advertiser Rev</th>
-                                            <th>Affiliate Payout</th>
-                                            <th>Accounting & Caps</th>
-                                            <th>Per Click Rule</th>
-                                            <th>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {offer.offer_events.map((ev) => {
-                                            const isPrimary = Boolean(ev.is_primary);
-                                            return (
-                                                <tr key={ev.event_name} style={{ background: isPrimary ? 'rgba(22, 163, 74, 0.04)' : undefined }}>
-                                                    <td>
-                                                        <span className={`targeting-action-tag ${isPrimary ? 'allow' : 'block'}`} style={!isPrimary ? { background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', borderColor: 'var(--border-color)' } : {}}>
-                                                            {isPrimary ? '👑 PRIMARY GOAL' : '⚡ FUNNEL SIGNAL'}
-                                                        </span>
-                                                    </td>
-                                                    <td><code>{ev.event_name}</code></td>
-                                                    <td><strong>{ev.title || ev.event_name}</strong></td>
-                                                    <td style={{ color: 'var(--success-color)', fontWeight: 700 }}>
-                                                        {offer.offer_currency || '$'} {Number(ev.advertiser_amount).toFixed(2)}
-                                                    </td>
-                                                    <td style={{ color: 'var(--brand-blue)', fontWeight: 700 }}>
-                                                        {offer.offer_currency || '$'} {Number(ev.affiliate_amount).toFixed(2)}
-                                                    </td>
-                                                    <td style={{ fontSize: '12px' }}>
-                                                        {isPrimary ? (
-                                                            <span style={{ color: 'var(--success-color)', fontWeight: 600 }}>Counts as 1 Conversion</span>
-                                                        ) : (
-                                                            <span style={{ color: 'var(--text-muted)' }}>Funnel only</span>
-                                                        )}
-                                                    </td>
-                                                    <td style={{ fontSize: '12px' }}>{ev.allow_multiple ? 'Repeat allowed' : '1 per click'}</td>
-                                                    <td>
-                                                        <span className={`offer-status ${ev.status?.toLowerCase()}`}>{ev.status}</span>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div className="detail-url-row" style={{ marginTop: '8px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                    <strong style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>Advertiser Postback URL:</strong>
-                                    <code className="detail-url-code">
-                                        https://{window.location.hostname}/postback?click_id={'{click_id}'}&event={'{event_name}'}&amount={'{amount}'}
-                                    </code>
-                                </div>
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => {
-                                        safeCopyToClipboard(`https://${window.location.hostname}/postback?click_id={click_id}&event={event_name}&amount={amount}`);
-                                        toast.success('Copied advertiser postback URL');
-                                    }}
-                                >
-                                    <CopyIcon size={13} />
-                                    <span>Copy</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Tile 7: Event Goals Performance Breakdown (if available) */}
-                {stats?.event_stats && stats.event_stats.length > 0 && (
-                    <div className="bento-card bento-col-12">
-                        <div className="bento-card-header">
-                            <div className="bento-card-header-left">
-                                <TrendingUpIcon size={18} style={{ color: 'var(--brand-blue)' }} />
-                                <h3>Event Performance Breakdown</h3>
-                            </div>
-                            <span className="offer-bento-tag">{stats.event_stats.length} Tracked Events</span>
-                        </div>
-                        <div className="bento-card-body">
-                            <div className="offer-table-container" style={{ margin: 0 }}>
-                                <table className="offer-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Event Name</th>
-                                            <th>Total Conv</th>
-                                            <th>Approved Conv</th>
-                                            <th>Pending Conv</th>
-                                            <th>Rejected Conv</th>
-                                            <th>Revenue</th>
-                                            <th>Payout</th>
-                                            <th>Profit</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {stats.event_stats.map((ev) => (
-                                            <tr key={ev.event_name}>
-                                                <td><code>{ev.event_name}</code></td>
-                                                <td>{formatNumber(ev.total_conversions)}</td>
-                                                <td>{formatNumber(ev.approved_conversions)}</td>
-                                                <td>{formatNumber(ev.pending_conversions)}</td>
-                                                <td>{formatNumber(ev.rejected_conversions)}</td>
-                                                <td>{formatCurrency(ev.total_revenue)}</td>
-                                                <td>{formatCurrency(ev.approved_payout)}</td>
-                                                <td style={{ color: ev.total_profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)', fontWeight: 700 }}>
-                                                    {formatCurrency(ev.total_profit)}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Tile 8: Publisher Stats (12 cols) */}
-                <div className="bento-card bento-col-12">
-                    <div className="bento-card-header">
-                        <div className="bento-card-header-left">
-                            <TrendingUpIcon size={18} style={{ color: 'var(--success-color)' }} />
-                            <h3>Publisher Performance Analytics</h3>
-                        </div>
-                    </div>
-                    <div className="bento-card-body">
-                        {loadingPublisherStats ? (
-                            <div className="loading-spinner-small" style={{ display: 'block', margin: '20px auto' }}></div>
-                        ) : publisherStats.length > 0 ? (
-                            <div className="offer-table-container" style={{ margin: 0 }}>
-                                <table className="offer-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Publisher</th>
-                                            <th>Clicks</th>
-                                            <th>Total Conv</th>
-                                            <th>Pending Conv</th>
-                                            <th>Approved Conv</th>
-                                            <th>Approved Payout</th>
-                                            <th>Total Profit</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {publisherStats.map((pub) => (
-                                            <tr key={pub.publisher_id}>
-                                                <td><strong>{pub.publisher_name || pub.publisher_email || '-'}</strong></td>
-                                                <td>{formatNumber(pub.clicks)}</td>
-                                                <td>{formatNumber(pub.conversions)}</td>
-                                                <td>{formatNumber(pub.pending_conversions)}</td>
-                                                <td>{formatNumber(pub.approved_conversions)}</td>
-                                                <td>{formatCurrency(pub.approved_payout)}</td>
-                                                <td style={{ color: 'var(--success-color)', fontWeight: 700 }}>{formatCurrency(pub.total_profit)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="offer-detail-empty-state">
-                                <InfoIcon size={20} />
-                                <span>No publisher stats recorded for this timeline.</span>
-                            </div>
-                        )}
-                    </div>
+                    </section>
                 </div>
             </div>
 
-            {/* Publisher Assignments Management */}
-            <div id="publisherSection" className="offer-form-card u-mt-24">
-                <div className="offer-form-card-header" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                        <div className="card-header-icon purple">
-                            <UsersIcon size={20} />
+            <div className="offer-detail-info-layout">
+                <section className="offer-detail-section">
+                    <h2>Schedule</h2>
+                    <div className="offer-detail-fields">
+                        <DetailField label="Daily Hours">
+                            {formatScheduleTimeForDisplay(offer.start_time)
+                                ? `${formatScheduleTimeForDisplay(offer.start_time)} - ${formatScheduleTimeForDisplay(offer.end_time)}`
+                                : '24/7 (no restriction)'}
+                        </DetailField>
+                        <DetailField label="Timezone">{offer.timezone || 'UTC'}</DetailField>
+                        <DetailField label="Start Date">{formatDate(offer.start_date)}</DetailField>
+                        <DetailField label="End Date">{formatDate(offer.end_date)}</DetailField>
+                    </div>
+                </section>
+
+                <section className="offer-detail-section">
+                    <h2>Advertiser Information</h2>
+                    {offer.advertiser ? (
+                        <div className="offer-detail-fields">
+                            <DetailField label="Name">{offer.advertiser.name || '-'}</DetailField>
+                            <DetailField label="Company">{offer.advertiser.company_name || '-'}</DetailField>
+                            <DetailField label="Email">{offer.advertiser.email || '-'}</DetailField>
+                            <DetailField label="Status">
+                                <span className={`offer-status ${offer.advertiser.status?.toLowerCase()}`}>{offer.advertiser.status}</span>
+                            </DetailField>
                         </div>
-                        <div className="card-header-text">
-                            <h3>Publisher Assignments & Access</h3>
-                            <p>Manage affiliate access, custom payouts, and specific traffic capping</p>
+                    ) : (
+                        <div className="offer-detail-empty-state">No advertiser assigned</div>
+                    )}
+                </section>
+            </div>
+
+            <section className="offer-detail-section">
+                <h2>Targeting</h2>
+                <div className="offer-detail-fields two-col">
+                    <DetailField label="Browsers">
+                        {formatTargetingSummary(browserTargetingList, offer.browser_action, 'All browsers')}
+                    </DetailField>
+                    <DetailField label="Devices">
+                        {formatTargetingSummary(deviceTargetingList, offer.device_action, 'All devices')}
+                    </DetailField>
+                    <DetailField label="Operating Systems">
+                        {formatTargetingSummary(osTargetingList, offer.os_action, 'All operating systems')}
+                    </DetailField>
+                    <DetailField label="Countries">
+                        {offer.country_list
+                            ? `${offer.country_list}${offer.country_action ? ` (${String(offer.country_action).toUpperCase()})` : ''}`
+                            : (offer.country || 'Global')}
+                    </DetailField>
+                </div>
+            </section>
+
+            <section className="offer-detail-section">
+                <h2>Links</h2>
+                <div className="offer-detail-fields">
+                    <UrlField
+                        label="Offer URL"
+                        url={offer.offer_url}
+                        onCopy={() => {
+                            safeCopyToClipboard(offer.offer_url);
+                            toast.success('Offer URL copied');
+                        }}
+                    />
+                    <UrlField
+                        label="Preview URL"
+                        url={offer.preview_url}
+                        onCopy={() => {
+                            safeCopyToClipboard(offer.preview_url);
+                            toast.success('Preview URL copied');
+                        }}
+                    />
+                </div>
+                {Array.isArray(offer.offer_params) && offer.offer_params.length > 0 && (
+                    <div className="offer-detail-table-block">
+                        <h3>Tracking URL Parameters</h3>
+                        <div className="offer-table-container">
+                            <table className="offer-table">
+                                <thead>
+                                    <tr>
+                                        <th>Parameter</th>
+                                        <th>Type</th>
+                                        <th>Required</th>
+                                        <th>Default</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {offer.offer_params.map((param) => (
+                                        <tr key={param.param_key}>
+                                            <td><code>{param.param_key}</code></td>
+                                            <td>{param.param_type || 'text'}</td>
+                                            <td>{param.is_required ? 'Yes' : 'No'}</td>
+                                            <td>{param.default_value || '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    <span className="offer-form-badge-currency">{publisherAssignments.length} Publisher(s)</span>
+                )}
+            </section>
+
+            {Array.isArray(offer.offer_events) && offer.offer_events.length > 0 && (
+                <section className="offer-detail-section">
+                    <div className="offer-detail-section-head">
+                        <div>
+                            <h2>Event Goals</h2>
+                            <p>Only the primary goal creates a billable conversion.</p>
+                        </div>
+                    </div>
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Role</th>
+                                    <th>Event Code</th>
+                                    <th>Title</th>
+                                    <th>Advertiser Rev</th>
+                                    <th>Affiliate Payout</th>
+                                    <th>Accounting</th>
+                                    <th>Per Click</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {offer.offer_events.map((event) => {
+                                    const isPrimary = Boolean(event.is_primary);
+                                    return (
+                                        <tr key={event.event_name}>
+                                            <td>{isPrimary ? 'Primary' : 'Funnel'}</td>
+                                            <td><code>{event.event_name}</code></td>
+                                            <td>{event.title || event.event_name}</td>
+                                            <td>{offer.offer_currency || 'USD'} {Number(event.advertiser_amount || 0).toFixed(2)}</td>
+                                            <td>{offer.offer_currency || 'USD'} {Number(event.affiliate_amount || 0).toFixed(2)}</td>
+                                            <td>{isPrimary ? 'Counts as 1 conversion' : 'Funnel only'}</td>
+                                            <td>{event.allow_multiple ? 'Repeat allowed' : '1 per click'}</td>
+                                            <td>
+                                                <span className={`offer-status ${event.status?.toLowerCase()}`}>{event.status}</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="offer-detail-postback">
+                        <span>Advertiser postback</span>
+                        <code>https://{window.location.hostname}/postback?click_id={'{click_id}'}&event={'{event_name}'}&amount={'{amount}'}</code>
+                        <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                                safeCopyToClipboard(`https://${window.location.hostname}/postback?click_id={click_id}&event={event_name}&amount={amount}`);
+                                toast.success('Postback URL copied');
+                            }}
+                        >
+                            Copy
+                        </button>
+                    </div>
+                </section>
+            )}
+
+            {stats?.event_stats && stats.event_stats.length > 0 && (
+                <section className="offer-detail-section">
+                    <h2>Event Performance</h2>
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Event Name</th>
+                                    <th>Total Conv</th>
+                                    <th>Approved</th>
+                                    <th>Pending</th>
+                                    <th>Rejected</th>
+                                    <th>Revenue</th>
+                                    <th>Payout</th>
+                                    <th>Profit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {stats.event_stats.map((event) => (
+                                    <tr key={event.event_name}>
+                                        <td><code>{event.event_name}</code></td>
+                                        <td>{formatNumber(event.total_conversions)}</td>
+                                        <td>{formatNumber(event.approved_conversions)}</td>
+                                        <td>{formatNumber(event.pending_conversions)}</td>
+                                        <td>{formatNumber(event.rejected_conversions)}</td>
+                                        <td>{formatCurrency(event.total_revenue)}</td>
+                                        <td>{formatCurrency(event.approved_payout)}</td>
+                                        <td>{formatCurrency(event.total_profit)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
+
+            <section className="offer-detail-section">
+                <h2>Publisher Stats</h2>
+                {loadingPublisherStats ? (
+                    <div className="offer-detail-empty-state">Loading publisher stats...</div>
+                ) : publisherStats.length > 0 ? (
+                    <div className="offer-table-container">
+                        <table className="offer-table">
+                            <thead>
+                                <tr>
+                                    <th>Publisher</th>
+                                    <th>Clicks</th>
+                                    <th>Total Conv</th>
+                                    <th>Pending</th>
+                                    <th>Approved</th>
+                                    <th>Approved Payout</th>
+                                    <th>Profit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {publisherStats.map((pub) => (
+                                    <tr key={pub.publisher_id}>
+                                        <td>{pub.publisher_name || pub.publisher_email || '-'}</td>
+                                        <td>{formatNumber(pub.clicks)}</td>
+                                        <td>{formatNumber(pub.conversions)}</td>
+                                        <td>{formatNumber(pub.pending_conversions)}</td>
+                                        <td>{formatNumber(pub.approved_conversions)}</td>
+                                        <td>{formatCurrency(pub.approved_payout)}</td>
+                                        <td>{formatCurrency(pub.total_profit)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="offer-detail-empty-state">No publisher stats for this timeline.</div>
+                )}
+            </section>
+
+            {/* Publisher Assignments Management */}
+            <section id="publisherSection" className="offer-detail-section">
+                <div className="offer-detail-section-head">
+                    <div>
+                        <h2>Publisher Assignments</h2>
+                        <p>Manage affiliate access, custom payouts, and traffic capping</p>
+                    </div>
+                    <span className="offer-detail-count">{publisherAssignments.length} Publisher(s)</span>
                 </div>
-                <div className="offer-form-card-body">
+                <div>
 
                 {/* Add Publisher Dropdown */}
-                <div className="form-group" style={{ marginBottom: '20px' }}>
-                    <label className="form-label" style={{ fontWeight: 600 }}>Add Publisher</label>
+                <div className="form-group publisher-add-row">
+                    <label className="form-label">Add Publisher</label>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                         <select
                             className="form-control u-flex-1"
@@ -1623,7 +1370,7 @@ function OfferDetail() {
 
                 {/* Save Assignments Button */}
                 {publisherAssignments.length > 0 && (
-                    <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="publisher-assignments-footer">
                         <button
                             type="button"
                             className="btn btn-success"
@@ -1667,11 +1414,11 @@ function OfferDetail() {
                     </div>
                 )}
                 </div>
-            </div>
+            </section>
 
             {/* Recent Clicks */}
             {offer.recent_clicks && offer.recent_clicks.length > 0 && (
-                <div className="offer-detail-section-card u-mt-24">
+                <section className="offer-detail-section">
                     <h2>Recent Clicks</h2>
                     <div className="offer-table-container">
                         <table className="offer-table">
@@ -1715,12 +1462,12 @@ function OfferDetail() {
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </section>
             )}
 
             {/* Recent Conversions */}
             {offer.recent_conversions && offer.recent_conversions.length > 0 && (
-                <div className="offer-detail-section-card u-mt-24">
+                <section className="offer-detail-section">
                     <h2>Recent Conversions</h2>
                     <div className="offer-table-container">
                         <table className="offer-table">
@@ -1752,7 +1499,7 @@ function OfferDetail() {
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </section>
             )}
 
         </div>

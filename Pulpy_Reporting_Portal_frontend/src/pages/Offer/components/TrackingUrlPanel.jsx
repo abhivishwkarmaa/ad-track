@@ -69,7 +69,7 @@ export default function TrackingUrlPanel({
     return (
         <div className="tracking-url-panel">
             <div className={`tracking-url-wrapper has-url${compact ? ' tracking-url-wrapper-compact' : ''}`}>
-                <div className="tracking-url-display">{trackingUrl}</div>
+                <div className="tracking-url-display" title={trackingUrl}>{trackingUrl}</div>
                 <button
                     type="button"
                     className={`copy-btn${copied ? ' copied' : ''}`}
@@ -93,17 +93,16 @@ export default function TrackingUrlPanel({
                     className="copy-btn generate"
                     onClick={() => window.open(trackingUrl, '_blank')}
                     title="Open tracking URL"
-                    style={{ marginLeft: '8px' }}
                 >
                     <ExternalLinkIcon />
                     <span>Open</span>
                 </button>
             </div>
 
-            {offerParams.length > 0 && (
-                <div className="tracking-url-params-help" style={{ marginTop: '10px', fontSize: '13px', color: '#64748b' }}>
-                    <strong style={{ color: '#334155' }}>URL parameters included:</strong>
-                    <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>
+            {!compact && offerParams.length > 0 && (
+                <div className="tracking-url-params-help">
+                    <strong>URL parameters included:</strong>
+                    <ul>
                         {offerParams.map((p) => (
                             <li key={p.param_key}>
                                 <code>{p.param_key}</code>
@@ -113,7 +112,7 @@ export default function TrackingUrlPanel({
                         ))}
                     </ul>
                     {requiredParams.length > 0 && (
-                        <p style={{ margin: '8px 0 0' }}>
+                        <p>
                             Replace placeholders before sending traffic:{' '}
                             <code>{requiredParams.map((k) => `{${k}}`).join(', ')}</code>
                         </p>
@@ -121,9 +120,9 @@ export default function TrackingUrlPanel({
                 </div>
             )}
 
-            {offerParams.length === 0 && (
-                <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#64748b' }}>
-                    No extra parameters on this offer. Send this link as-is to your publisher.
+            {compact && requiredParams.length > 0 && (
+                <p className="tracking-url-params-note">
+                    Replace {requiredParams.map((key) => `{${key}}`).join(', ')} before sending this link.
                 </p>
             )}
         </div>
