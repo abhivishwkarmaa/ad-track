@@ -676,7 +676,7 @@ class OfferService {
       // Get advertiser details if advertiser_id exists (with tenant isolation)
       let advertiser = null;
       if (parsedOffer.advertiser_id) {
-        let advertiserQuery = 'SELECT id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE id = ?';
+        let advertiserQuery = 'SELECT id, public_advertiser_id, name, email, company_name, country, website, notes, status, tenant_id, created_at, updated_at FROM advertisers WHERE id = ?';
         const advertiserParams = [parsedOffer.advertiser_id];
 
         if (tenantId) {
@@ -690,6 +690,14 @@ class OfferService {
         // Verify advertiser belongs to tenant
         if (tenantId && advertiser && advertiser.tenant_id !== tenantId) {
           advertiser = null;
+        }
+      }
+
+      if (parsedOffer.fallback_offer_id) {
+        const fallbackOffer = await this.getOfferById(parsedOffer.fallback_offer_id, tenantId, true);
+        if (fallbackOffer) {
+          parsedOffer.fallback_offer_name = fallbackOffer.name;
+          parsedOffer.fallback_public_offer_id = fallbackOffer.public_offer_id;
         }
       }
 
@@ -1454,11 +1462,11 @@ class OfferService {
 
   async searchOffers(filters = {}, tenantId = null) {
     const term = (filters.q || '').trim();
-    if (!term || term.length < 3) {
+    if (!term) {
       return [];
     }
 
-    const limit = Number(filters.limit) > 0 ? Math.min(Number(filters.limit), 50) : 10;
+    const limit = Number(filters.limit) > 0 ? Math.min(Number(filters.limit), 20) : 20;
     const wildcardTerm = `%${term}%`;
 
     const conditions = [];

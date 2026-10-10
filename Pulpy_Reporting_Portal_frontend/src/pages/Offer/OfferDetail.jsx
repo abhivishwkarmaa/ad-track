@@ -6,12 +6,12 @@ import { isAbortError } from '../../hooks/useAbortableRequest';
 import { useToast } from '../../context/ToastContext';
 import {
     useOfferDetail,
-    useOffersList,
     useOfferAssignments,
     useOfferStats,
     useOfferPublisherStats,
 } from '../../hooks/queries/useOffersQuery';
-import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
+import { LIST_PAGE_SIZE } from '../../constants/listLimits';
 import {
     useCreateOrUpdateAssignments,
     useAssignmentsTrackingUrls,
@@ -119,16 +119,12 @@ function OfferDetail() {
         isLoading: loading,
         error: offerQueryError,
     } = useOfferDetail(id);
-    const { data: publishersResult, isLoading: loadingPublishers } = usePublishersList({ status: 'active', limit: 100 });
-    const { data: offersResult } = useOffersList({ limit: 100 });
     const {
         data: assignmentRows = [],
         isLoading: loadingAssignments,
         refetch: refetchAssignments,
     } = useOfferAssignments(id, { enabled: Boolean(id) });
 
-    const publishers = publishersResult?.data ?? [];
-    const offers = offersResult?.data ?? [];
     const error = offerQueryError?.message ?? null;
 
     const [publisherAssignments, setPublisherAssignments] = useState([]);
@@ -246,6 +242,8 @@ function OfferDetail() {
             offer_id: assignment.offer_id?.toString() || '',
             publisher_id: assignment.publisher_id,
             publisher_email: assignment.publisher_email,
+            publisher_first_name: assignment.publisher_first_name || '',
+            publisher_company: assignment.publisher_company || '',
             payout_override: assignment.payout_override ?? null,
             conversion_approval_percentage: assignment.conversion_approval_percentage || '',
             capping_type: assignment.capping_type || 'none',
@@ -276,7 +274,7 @@ function OfferDetail() {
         const controller = new AbortController();
 
         const fetchSearchResults = async () => {
-            if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
+            if (!debouncedSearchTerm) {
                 setSearchResults([]);
                 setSearchLoading(false);
                 return;
@@ -285,7 +283,7 @@ function OfferDetail() {
             try {
                 setSearchLoading(true);
                 const response = await offersAPI.searchOffers(
-                    { q: debouncedSearchTerm, limit: 8 },
+                    { q: debouncedSearchTerm, limit: LIST_PAGE_SIZE },
                     { signal: controller.signal }
                 );
                 if (controller.signal.aborted) return;
@@ -463,13 +461,11 @@ function OfferDetail() {
     };
 
     const getFallbackOfferLabel = (offerObj) => {
-        if (!offerObj?.fallback_offer_id) return null;
-        const fallbackOffer = offers.find((o) =>
-            String(o.id) === String(offerObj.fallback_offer_id) ||
-            String(o.public_offer_id) === String(offerObj.fallback_offer_id)
-        );
-        if (!fallbackOffer) return `Offer #${offerObj.fallback_offer_id}`;
-        return `${fallbackOffer.name} (${fallbackOffer.public_offer_id || fallbackOffer.display_id || fallbackOffer.id})`;
+        if (!offerObj?.fallback_offer_id && !offerObj?.fallback_public_offer_id) return null;
+        if (offerObj.fallback_public_offer_id) {
+            return `${offerObj.fallback_offer_name || 'Offer'} (#${offerObj.fallback_public_offer_id})`;
+        }
+        return offerObj.fallback_offer_name || 'Fallback offer';
     };
 
     const capAmount = getOfferCapAmount(offer);
@@ -547,7 +543,7 @@ function OfferDetail() {
                         <SearchIcon size={16} />
                         <input
                             type="text"
-                            placeholder="Search offers and jump..."
+                            placeholder="Search by name or public offer ID"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             onFocus={() => setShowSearchResults(true)}
@@ -562,7 +558,7 @@ function OfferDetail() {
                                     <div className="offer-detail-search-item muted">No offers found</div>
                                 ) : (
                                     searchResults.map((result) => {
-                                        const offerPublicId = result.public_offer_id || result.display_id;
+                                        const offerPublicId = result.public_offer_id;
                                         return (
                                             <button
                                                 key={result.id}
@@ -973,46 +969,37 @@ function OfferDetail() {
                 <div className="form-group publisher-add-row">
                     <label className="form-label">Add Publisher</label>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                        <select
-                            className="form-control u-flex-1"
-                            value={''}
-                            onChange={(e) => {
-                                if (e.target.value) {
-                                    const publisherId = e.target.value;
-                                    const publisher = publishers.find(p => String(p.public_publisher_id) === String(publisherId));
-                                    if (publisher && !publisherAssignments.find(a => String(a.publisher_id) === String(publisherId))) {
-                                        setPublisherAssignments(prev => [...prev, {
-                                            publisher_id: publisher.public_publisher_id,
-                                            publisher_email: publisher.email,
-                                            payout_override: '',
-                                            conversion_approval_percentage: '',
-                                            capping_type: 'none',
-                                            capping_duration: 'daily',
-                                            capping_amount: '',
-                                            capping_action: 'stop',
-                                            callback_url: '',
-                                            offer_url: '',
-                                            notes: '',
-                                            status: 'active',
-                                            assignment_id: null,
-                                            tracking_url: '',
-                                            selectedTokens: []
-                                        }]);
-                                    }
-                                    e.target.value = '';
-                                }
+                        <EntityPicker
+                            type="publisher"
+                            value=""
+                            valueField="public"
+                            status="active"
+                            excludeValues={publisherAssignments.map((row) => row.publisher_id)}
+                            emptyLabel="Select publisher to add"
+                            onChange={(_id, publisher) => {
+                                if (!publisher?.public_publisher_id) return;
+                                if (publisherAssignments.find((row) => String(row.publisher_id) === String(publisher.public_publisher_id))) return;
+                                setPublisherAssignments((prev) => [...prev, {
+                                    publisher_id: publisher.public_publisher_id,
+                                    publisher_email: publisher.email,
+                                    publisher_first_name: publisher.first_name || '',
+                                    publisher_company: publisher.company_name || '',
+                                    payout_override: '',
+                                    conversion_approval_percentage: '',
+                                    capping_type: 'none',
+                                    capping_duration: 'daily',
+                                    capping_amount: '',
+                                    capping_action: 'stop',
+                                    callback_url: '',
+                                    offer_url: '',
+                                    notes: '',
+                                    status: 'active',
+                                    assignment_id: null,
+                                    tracking_url: '',
+                                    selectedTokens: [],
+                                }]);
                             }}
-                            disabled={loadingPublishers}
-                        >
-                            <option value="">Select Publisher to Add</option>
-                            {publishers
-                                .filter(p => !publisherAssignments.find(a => String(a.publisher_id) === String(p.public_publisher_id)))
-                                .map(p => (
-                                    <option key={p.id} value={p.public_publisher_id}>
-                                        {p.first_name} {p.last_name || ''} ({p.email}) - {p.company_name}
-                                    </option>
-                                ))}
-                        </select>
+                        />
                     </div>
                 </div>
 
@@ -1028,10 +1015,6 @@ function OfferDetail() {
                         </div>
 
                         {publisherAssignments.map((assignment, index) => {
-                            const publisher = publishers.find(p =>
-                                String(p.public_publisher_id) === String(assignment.publisher_id) ||
-                                String(p.id) === String(assignment.publisher_id)
-                            );
                             const isEditing = editingAssignmentIndex === index;
 
                             if (isEditing) {
@@ -1040,42 +1023,38 @@ function OfferDetail() {
                                         <div className="edit-form-grid">
                                             <div className="form-group">
                                                 <label className="form-label required">Offer</label>
-                                                <select
-                                                    className="form-control"
-                                                    value={assignment.offer_id || (offer?.id?.toString() || '')}
-                                                    onChange={(e) => {
+                                                <EntityPicker
+                                                    type="offer"
+                                                    value={assignment.offer_id || offer?.id || ''}
+                                                    selectedLabel={offer?.public_offer_id ? `#${offer.public_offer_id} — ${offer.name}` : (offer?.name || '')}
+                                                    emptyLabel="Select an offer"
+                                                    onChange={(nextValue) => {
                                                         const updated = [...publisherAssignments];
-                                                        updated[index].offer_id = e.target.value;
+                                                        updated[index].offer_id = nextValue;
                                                         setPublisherAssignments(updated);
                                                     }}
-                                                >
-                                                    <option value="">Select an offer</option>
-                                                    {offers.map(o => (
-                                                        <option key={o.id} value={o.id}>
-                                                            {o.name} ({o.category})
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                />
                                             </div>
 
                                             <div className="form-group">
                                                 <label className="form-label required">Publisher</label>
-                                                <select
-                                                    className="form-control"
+                                                <EntityPicker
+                                                    type="publisher"
+                                                    valueField="public"
                                                     value={assignment.publisher_id || ''}
-                                                    onChange={(e) => {
+                                                    selectedLabel={assignment.publisher_first_name || assignment.publisher_email || ''}
+                                                    emptyLabel="Select a publisher"
+                                                    onChange={(nextValue, publisher) => {
                                                         const updated = [...publisherAssignments];
-                                                        updated[index].publisher_id = e.target.value;
+                                                        updated[index].publisher_id = nextValue;
+                                                        if (publisher) {
+                                                            updated[index].publisher_email = publisher.email || '';
+                                                            updated[index].publisher_first_name = publisher.first_name || '';
+                                                            updated[index].publisher_company = publisher.company_name || '';
+                                                        }
                                                         setPublisherAssignments(updated);
                                                     }}
-                                                >
-                                                    <option value="">Select a publisher</option>
-                                                    {publishers.map(p => (
-                                                        <option key={p.id} value={p.public_publisher_id || p.id}>
-                                                            {p.first_name} ({p.email})
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                />
                                             </div>
 
                                             <div className="form-group">
@@ -1226,10 +1205,10 @@ function OfferDetail() {
                                         <div className="publisher-main-info">
                                             <span className={`status-indicator ${assignment.status === 'active' ? 'active' : 'inactive'}`}></span>
                                             <div className="publisher-name">
-                                                {publisher ? `${publisher.first_name} ${publisher.last_name || ''}` : assignment.publisher_email}
+                                                {assignment.publisher_first_name || assignment.publisher_email}
                                             </div>
                                         </div>
-                                        {publisher && <div className="publisher-company">{publisher.company_name}</div>}
+                                        {assignment.publisher_company ? <div className="publisher-company">{assignment.publisher_company}</div> : null}
 
                                         <div className="publisher-meta-row">
                                             <span className="meta-item">

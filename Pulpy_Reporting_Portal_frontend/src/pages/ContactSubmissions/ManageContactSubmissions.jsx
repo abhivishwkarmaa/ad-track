@@ -83,7 +83,7 @@ function ManageContactSubmissions() {
             setLoading(true);
             const params = {
                 page,
-                limit: 50,
+                limit: 20,
             };
             if (statusFilter) params.status = statusFilter;
             if (searchQuery) params.search = searchQuery;

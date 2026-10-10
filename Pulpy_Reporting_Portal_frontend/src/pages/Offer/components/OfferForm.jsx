@@ -19,6 +19,8 @@ import {
 import OfferParamsEditor from './OfferParamsEditor';
 import OfferEventsEditor from './OfferEventsEditor';
 import TargetingChipSelect from './TargetingChipSelect';
+import SearchableSelect from '../../../components/SearchableSelect/SearchableSelect';
+import EntityPicker from '../../../components/SearchableSelect/EntityPicker';
 import {
     DocumentIcon,
     WalletIcon,
@@ -98,13 +100,12 @@ export default function OfferForm({
     tokenMappings,
     handleTokenMappingChange,
     handleTestOfferLink,
-    advertisers,
-    offers,
+    advertiserLabel = '',
+    fallbackOfferLabel = '',
     offerParams,
     setOfferParams,
     offerEvents,
     setOfferEvents,
-    loadingAdvertisers = false,
     loading,
     submitLabel,
     submittingLabel,
@@ -174,23 +175,15 @@ export default function OfferForm({
 
                         <div className="form-group">
                             <label className="form-label">Advertiser <span className="required-star">*</span></label>
-                            <select
-                                className="form-control"
-                                name="advertiser_id"
+                            <EntityPicker
+                                type="advertiser"
                                 value={formData.advertiser_id}
-                                onChange={handleChange}
+                                selectedLabel={advertiserLabel}
+                                status="active"
                                 required
-                                disabled={loadingAdvertisers}
-                            >
-                                <option value="">
-                                    {loadingAdvertisers ? 'Loading advertisers...' : 'Select Advertiser Account'}
-                                </option>
-                                {advertisers.map((advertiser) => (
-                                    <option key={advertiser.id} value={advertiser.id}>
-                                        {advertiser.name} {advertiser.company_name ? `(${advertiser.company_name})` : ''}
-                                    </option>
-                                ))}
-                            </select>
+                                emptyLabel="Select advertiser account"
+                                onChange={(nextValue) => handleChange({ target: { name: 'advertiser_id', value: nextValue } })}
+                            />
                             <small className="form-helper">The client/account providing this offer</small>
                         </div>
                     </div>
@@ -213,39 +206,39 @@ export default function OfferForm({
                     <div className="offer-grid-row four-col">
                         <div className="form-group">
                             <label className="form-label">Offer Currency</label>
-                            <select
-                                className="form-control"
-                                name="offer_currency"
+                            <SearchableSelect
                                 value={formData.offer_currency}
-                                onChange={handleChange}
-                            >
-                                {currencies.map((curr) => (
-                                    <option key={curr} value={curr}>{curr}</option>
-                                ))}
-                            </select>
+                                options={currencies.map((curr) => ({ value: curr, label: curr }))}
+                                placeholder="Search currency"
+                                emptyLabel="Select currency"
+                                onChange={(nextValue) => handleChange({ target: { name: 'offer_currency', value: nextValue } })}
+                            />
                         </div>
 
                         <div className="form-group">
                             <label className="form-label">Country</label>
                             {!showCustomCountry ? (
-                                <select
-                                    className="form-control"
-                                    name="country"
+                                <SearchableSelect
                                     value={formData.country}
-                                    onChange={(e) => {
-                                        if (e.target.value === 'CUSTOM') {
+                                    options={[
+                                        ...OFFER_COUNTRIES.map((country) => ({
+                                            value: country.code,
+                                            label: `${country.name} (${country.code})`,
+                                            keywords: country.code,
+                                        })),
+                                        { value: 'CUSTOM', label: '+ Custom Country...' },
+                                    ]}
+                                    placeholder="Search country or code"
+                                    emptyLabel="Select country"
+                                    onChange={(nextValue) => {
+                                        if (nextValue === 'CUSTOM') {
                                             setShowCustomCountry(true);
                                             setFormData((prev) => ({ ...prev, country: '' }));
                                         } else {
-                                            setFormData((prev) => ({ ...prev, country: e.target.value }));
+                                            setFormData((prev) => ({ ...prev, country: nextValue }));
                                         }
                                     }}
-                                >
-                                    {OFFER_COUNTRIES.map((country) => (
-                                        <option key={country.code} value={country.code}>{country.name}</option>
-                                    ))}
-                                    <option value="CUSTOM">+ Custom Country...</option>
-                                </select>
+                                />
                             ) : (
                                 <div className="inline-input-action">
                                     <input
@@ -274,25 +267,23 @@ export default function OfferForm({
                         <div className="form-group">
                             <label className="form-label">Category</label>
                             {!showCustomCategory ? (
-                                <select
-                                    className="form-control"
-                                    name="category"
+                                <SearchableSelect
                                     value={formData.category}
-                                    onChange={(e) => {
-                                        if (e.target.value === '__custom__') {
+                                    options={[
+                                        ...categories.map((cat) => ({ value: cat, label: cat })),
+                                        { value: '__custom__', label: '+ Add Custom Category' },
+                                    ]}
+                                    placeholder="Search category"
+                                    emptyLabel="Select category"
+                                    onChange={(nextValue) => {
+                                        if (nextValue === '__custom__') {
                                             setShowCustomCategory(true);
                                             setFormData((prev) => ({ ...prev, category: '', custom_category: '' }));
                                         } else {
-                                            setFormData((prev) => ({ ...prev, category: e.target.value, custom_category: '' }));
+                                            setFormData((prev) => ({ ...prev, category: nextValue, custom_category: '' }));
                                         }
                                     }}
-                                >
-                                    <option value="">Select Category</option>
-                                    {categories.map((cat) => (
-                                        <option key={cat} value={cat}>{cat}</option>
-                                    ))}
-                                    <option value="__custom__">+ Add Custom Category</option>
-                                </select>
+                                />
                             ) : (
                                 <div className="inline-input-action">
                                     <input
@@ -336,31 +327,24 @@ export default function OfferForm({
                     <div className="offer-grid-row three-col">
                         <div className="form-group">
                             <label className="form-label">Timezone</label>
-                            <select
-                                className="form-control"
-                                name="timezone"
+                            <SearchableSelect
                                 value={formData.timezone}
-                                onChange={handleChange}
-                            >
-                                {timeZones.map((tz) => (
-                                    <option key={tz} value={tz}>{tz}</option>
-                                ))}
-                            </select>
+                                options={timeZones.map((tz) => ({ value: tz, label: tz }))}
+                                placeholder="Search timezone"
+                                emptyLabel="Select timezone"
+                                onChange={(nextValue) => handleChange({ target: { name: 'timezone', value: nextValue } })}
+                            />
                         </div>
 
                         <div className="form-group">
                             <label className="form-label">Billing Flow (Optional)</label>
-                            <select
-                                className="form-control"
-                                name="billing_flow"
+                            <SearchableSelect
                                 value={formData.billing_flow}
-                                onChange={handleChange}
-                            >
-                                <option value="">Select Flow</option>
-                                {billingFlows.map((flow) => (
-                                    <option key={flow} value={flow}>{flow}</option>
-                                ))}
-                            </select>
+                                options={billingFlows.map((flow) => ({ value: flow, label: flow }))}
+                                placeholder="Search billing flow"
+                                emptyLabel="Select flow"
+                                onChange={(nextValue) => handleChange({ target: { name: 'billing_flow', value: nextValue } })}
+                            />
                         </div>
 
                         <div className="form-group">
@@ -750,26 +734,22 @@ export default function OfferForm({
                                                     />
                                                 </td>
                                                 <td>
-                                                    <select
-                                                        className="form-control form-control-sm"
+                                                    <SearchableSelect
                                                         value={mapping.advertiserParam}
-                                                        onChange={(e) => handleTokenMappingChange(mapping.id, 'advertiserParam', e.target.value)}
-                                                    >
-                                                        {advertiserParameters.map((param) => (
-                                                            <option key={param} value={param}>{param}</option>
-                                                        ))}
-                                                    </select>
+                                                        options={advertiserParameters.map((param) => ({ value: param, label: param }))}
+                                                        placeholder="Search parameter"
+                                                        emptyLabel="Select parameter"
+                                                        onChange={(nextValue) => handleTokenMappingChange(mapping.id, 'advertiserParam', nextValue)}
+                                                    />
                                                 </td>
                                                 <td>
-                                                    <select
-                                                        className="form-control form-control-sm"
+                                                    <SearchableSelect
                                                         value={mapping.platformToken}
-                                                        onChange={(e) => handleTokenMappingChange(mapping.id, 'platformToken', e.target.value)}
-                                                    >
-                                                        {platformTokens.map((token) => (
-                                                            <option key={token} value={token}>{token}</option>
-                                                        ))}
-                                                    </select>
+                                                        options={platformTokens.map((token) => ({ value: token, label: token }))}
+                                                        placeholder="Search token"
+                                                        emptyLabel="Select token"
+                                                        onChange={(nextValue) => handleTokenMappingChange(mapping.id, 'platformToken', nextValue)}
+                                                    />
                                                 </td>
                                             </tr>
                                         ))}
@@ -1282,20 +1262,15 @@ export default function OfferForm({
                                 ) : (
                                     <div className="form-group">
                                         <label className="form-label required">Select Fallback Offer</label>
-                                        <select
-                                            className="form-control"
-                                            name="fallback_offer_id"
+                                        <EntityPicker
+                                            type="offer"
                                             value={formData.fallback_offer_id}
-                                            onChange={handleChange}
+                                            selectedLabel={fallbackOfferLabel}
+                                            excludePublicOfferId={offerId}
                                             required={formData.capping_action === 'fallback'}
-                                        >
-                                            <option value="">Select Offer...</option>
-                                            {offers.map((offer) => (
-                                                <option key={offer.id} value={offer.id}>
-                                                    #{offer.public_offer_id ?? offer.id} - {offer.name}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            emptyLabel="Select offer..."
+                                            onChange={(nextValue) => handleChange({ target: { name: 'fallback_offer_id', value: nextValue } })}
+                                        />
                                     </div>
                                 )}
                             </div>

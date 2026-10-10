@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import { assignmentsAPI } from '../../services/api';
@@ -7,8 +7,8 @@ import {
     useDeleteAssignment,
     useUpdateAssignment,
 } from '../../hooks/queries/useAssignmentsQuery';
-import { useOffersList } from '../../hooks/queries/useOffersQuery';
-import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
+import { LIST_PAGE_SIZE } from '../../constants/listLimits';
 import { copyToClipboard as safeCopyToClipboard } from '../../utils/clipboard';
 import { normalizeTrackingUrlMeta } from '../Offer/utils/trackingUrlUtils';
 import { formatDateIST } from '../../utils/dateTime';
@@ -24,6 +24,7 @@ import {
     EntityListBody,
     EntityListTableWrap,
     EntityListEmpty,
+    EntityListPagination,
     StatusBadge,
 } from '../../shared/ui/EntityList';
 import {
@@ -39,18 +40,12 @@ import {
 
 const DEFAULT_FILTERS = { offer: 'all', publisher: 'all', status: 'all' };
 
-function getOfferFilterId(offer) {
-    return String(offer.public_offer_id || offer.display_id || offer.id);
-}
-
-function getPublisherFilterId(publisher) {
-    return String(publisher.public_publisher_id || publisher.id);
-}
-
 function ManageAssignment() {
     const toast = useToast();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchDebounced, setSearchDebounced] = useState('');
+    const [page, setPage] = useState(1);
     const [draftOfferFilter, setDraftOfferFilter] = useState('all');
     const [draftPublisherFilter, setDraftPublisherFilter] = useState('all');
     const [draftStatusFilter, setDraftStatusFilter] = useState('all');
@@ -61,16 +56,22 @@ function ManageAssignment() {
     const [deleting, setDeleting] = useState(false);
     const [togglingStatus, setTogglingStatus] = useState({});
 
-    const { data: offersResult } = useOffersList({ limit: 100 });
-    const { data: publishersResult } = usePublishersList({ limit: 100 });
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearchDebounced(searchTerm.trim());
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
 
     const listParams = useMemo(() => {
-        const params = { page: 1, limit: 100 };
+        const params = { page, limit: LIST_PAGE_SIZE };
+        if (searchDebounced) params.search = searchDebounced;
         if (appliedFilters.offer !== 'all') params.offer_id = appliedFilters.offer;
         if (appliedFilters.publisher !== 'all') params.publisher_id = appliedFilters.publisher;
         if (appliedFilters.status !== 'all') params.status = appliedFilters.status;
         return params;
-    }, [appliedFilters]);
+    }, [appliedFilters, page, searchDebounced]);
 
     const assignmentsQuery = useAssignmentsList(listParams);
     const {
@@ -83,21 +84,14 @@ function ManageAssignment() {
     const updateAssignmentMutation = useUpdateAssignment();
 
     const assignments = assignmentsQuery.data?.data ?? [];
-    const offers = offersResult?.data ?? [];
-    const publishers = publishersResult?.data ?? [];
+    const pagination = assignmentsQuery.data?.pagination ?? { total: 0, totalPages: 1 };
 
     const filtersDirty =
         draftOfferFilter !== appliedFilters.offer
         || draftPublisherFilter !== appliedFilters.publisher
         || draftStatusFilter !== appliedFilters.status;
 
-    const filteredAssignments = assignments.filter((assignment) => {
-        const matchesSearch =
-            assignment.offer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            assignment.publisher_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            assignment.publisher_company?.toLowerCase().includes(searchTerm.toLowerCase());
-        return matchesSearch;
-    });
+    const filteredAssignments = assignments;
 
     const handleApplyFilters = () => {
         setAppliedFilters({
@@ -105,6 +99,7 @@ function ManageAssignment() {
             publisher: draftPublisherFilter,
             status: draftStatusFilter,
         });
+        setPage(1);
     };
 
     const handleResetFilters = () => {
@@ -112,6 +107,7 @@ function ManageAssignment() {
         setDraftPublisherFilter('all');
         setDraftStatusFilter('all');
         setAppliedFilters(DEFAULT_FILTERS);
+        setPage(1);
     };
 
     const handleGetTrackingUrl = async (assignmentId) => {
@@ -203,31 +199,23 @@ function ManageAssignment() {
                 <EntityListSearch
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search assignments..."
+                    placeholder="Search name, email, or public offer ID"
                     onClear={() => setSearchTerm('')}
                 />
-                <EntityListFilterSelect
-                    value={draftOfferFilter}
-                    onChange={(e) => setDraftOfferFilter(e.target.value)}
-                >
-                    <option value="all">All Offers</option>
-                    {offers.map((offer) => (
-                        <option key={offer.id} value={getOfferFilterId(offer)}>
-                            {offer.name}
-                        </option>
-                    ))}
-                </EntityListFilterSelect>
-                <EntityListFilterSelect
-                    value={draftPublisherFilter}
-                    onChange={(e) => setDraftPublisherFilter(e.target.value)}
-                >
-                    <option value="all">All Publishers</option>
-                    {publishers.map((publisher) => (
-                        <option key={publisher.id} value={getPublisherFilterId(publisher)}>
-                            {publisher.first_name} ({publisher.email})
-                        </option>
-                    ))}
-                </EntityListFilterSelect>
+                <EntityPicker
+                    type="offer"
+                    valueField="public"
+                    value={draftOfferFilter === 'all' ? '' : draftOfferFilter}
+                    emptyLabel="All offers"
+                    onChange={(next) => setDraftOfferFilter(next ? String(next) : 'all')}
+                />
+                <EntityPicker
+                    type="publisher"
+                    valueField="public"
+                    value={draftPublisherFilter === 'all' ? '' : draftPublisherFilter}
+                    emptyLabel="All publishers"
+                    onChange={(next) => setDraftPublisherFilter(next ? String(next) : 'all')}
+                />
                 <EntityListFilterSelect
                     value={draftStatusFilter}
                     onChange={(e) => setDraftStatusFilter(e.target.value)}
@@ -369,6 +357,13 @@ function ManageAssignment() {
                         </tbody>
                     </table>
                 </EntityListTableWrap>
+                <EntityListPagination
+                    currentPage={page}
+                    totalPages={pagination.totalPages || 1}
+                    total={pagination.total || 0}
+                    itemsPerPage={LIST_PAGE_SIZE}
+                    onPageChange={setPage}
+                />
             </EntityListBody>
 
             <ConfirmModal

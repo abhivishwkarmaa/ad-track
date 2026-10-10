@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useRefresh } from '../../context/RefreshContext';
 import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useToast } from '../../context/ToastContext';
-import { dashboardAPI, offersAPI, publishersAPI } from '../../services/api';
+import { dashboardAPI } from '../../services/api';
 import { isAbortError } from '../../hooks/useAbortableRequest';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
 import { formatDateTimeIST } from '../../utils/dateTime';
 import { formatYmdInTimeZone, userRangeYmdToBackendIstRange } from '../../utils/reportTimezone';
 import { SkeletonTable } from '../../components/Skeleton/Skeleton';
@@ -35,14 +36,11 @@ const LiveLogs = () => {
     const [activeTab, setActiveTab] = useState('clicks');
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [limit, setLimit] = useState(100);
+    const [limit, setLimit] = useState(20);
     const [approvingId, setApprovingId] = useState(null);
 
-    // Filter State
-    const [offers, setOffers] = useState([]);
-    const [publishers, setPublishers] = useState([]);
-    const [selectedOffer, setSelectedOffer] = useState('');
-    const [selectedPublisher, setSelectedPublisher] = useState('');
+    const [selectedOffer, setSelectedOffer] = useState('all');
+    const [selectedPublisher, setSelectedPublisher] = useState('all');
 
     // Date Filter (calendar days in report timezone; API receives IST range)
     const [dateFrom, setDateFrom] = useState(() => formatYmdInTimeZone(new Date(), reportTimezone));
@@ -51,44 +49,6 @@ const LiveLogs = () => {
     // Auto-refresh timer reference
     const [autoRefresh, setAutoRefresh] = useState(false);
 
-
-    // Fetch Filter Options
-    useEffect(() => {
-        const controller = new AbortController();
-        const { signal } = controller;
-
-        const fetchFilters = async () => {
-            try {
-                const results = await Promise.allSettled([
-                    offersAPI.getOffers({ limit: 1000 }, { signal }),
-                    publishersAPI.getPublishers({ limit: 1000 }, { signal })
-                ]);
-
-                if (signal.aborted) return;
-
-                const offersResult = results[0];
-                const publishersResult = results[1];
-
-                if (offersResult.status === 'fulfilled' && offersResult.value.success) {
-                    setOffers(offersResult.value.data);
-                } else if (offersResult.status === 'rejected' && !isAbortError(offersResult.reason)) {
-                    console.error("Failed to fetch offers", offersResult.reason || "API Error");
-                }
-
-                if (publishersResult.status === 'fulfilled' && publishersResult.value.success) {
-                    setPublishers(publishersResult.value.data);
-                } else if (publishersResult.status === 'rejected' && !isAbortError(publishersResult.reason)) {
-                    console.error("Failed to fetch publishers", publishersResult.reason || "API Error");
-                }
-            } catch (err) {
-                if (!isAbortError(err)) {
-                    console.error("Error fetching filters", err);
-                }
-            }
-        };
-        fetchFilters();
-        return () => controller.abort();
-    }, []);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -108,8 +68,8 @@ const LiveLogs = () => {
         setLoading(true);
         try {
             const params = { limit, page: 1 };
-            if (selectedOffer) params.offer_id = selectedOffer;
-            if (selectedPublisher) params.publisher_id = selectedPublisher;
+            if (selectedOffer && selectedOffer !== 'all') params.offer_id = selectedOffer;
+            if (selectedPublisher && selectedPublisher !== 'all') params.publisher_id = selectedPublisher;
             if (dateFrom && dateTo) {
                 const { date_from, date_to } = userRangeYmdToBackendIstRange(dateFrom, dateTo, reportTimezone);
                 if (date_from) params.date_from = date_from;
@@ -202,21 +162,23 @@ const LiveLogs = () => {
                     </div>
 
                     <div className="control-group">
-                        <select value={selectedOffer} onChange={(e) => setSelectedOffer(e.target.value)}>
-                            <option value="">All Offers</option>
-                            {offers.map(o => (
-                                <option key={o.id} value={o.public_offer_id ?? o.display_id ?? o.id}>{o.name} ({o.display_id || o.public_offer_id || o.id})</option>
-                            ))}
-                        </select>
+                        <EntityPicker
+                            type="offer"
+                            valueField="public"
+                            value={selectedOffer === 'all' ? '' : selectedOffer}
+                            emptyLabel="All offers"
+                            onChange={(next) => setSelectedOffer(next ? String(next) : 'all')}
+                        />
                     </div>
 
                     <div className="control-group">
-                        <select value={selectedPublisher} onChange={(e) => setSelectedPublisher(e.target.value)}>
-                            <option value="">All Publishers</option>
-                            {publishers.map(p => (
-                                <option key={p.id} value={p.public_publisher_id ?? p.id}>{p.company_name || p.email} ({p.public_publisher_id ?? p.id})</option>
-                            ))}
-                        </select>
+                        <EntityPicker
+                            type="publisher"
+                            valueField="public"
+                            value={selectedPublisher === 'all' ? '' : selectedPublisher}
+                            emptyLabel="All publishers"
+                            onChange={(next) => setSelectedPublisher(next ? String(next) : 'all')}
+                        />
                     </div>
 
                     <div className="tab-group">
@@ -237,10 +199,8 @@ const LiveLogs = () => {
                     <div className="control-group">
                         <label>Limit:</label>
                         <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
-                            <option value="50">50</option>
-                            <option value="100">100</option>
-                            <option value="500">500</option>
-                            <option value="1000">1000</option>
+                            <option value="10">10</option>
+                            <option value="20">20</option>
                         </select>
                     </div>
 

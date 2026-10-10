@@ -117,7 +117,7 @@ function TenantDetail() {
 
     // Offers Tab State
     const [offersData, setOffersData] = useState([]);
-    const [offersPagination, setOffersPagination] = useState({ page: 1, limit: 15, total: 0, totalPages: 1 });
+    const [offersPagination, setOffersPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
     const [offersSearch, setOffersSearch] = useState('');
     const [offersStatusFilter, setOffersStatusFilter] = useState('');
     const [offersLoading, setOffersLoading] = useState(false);

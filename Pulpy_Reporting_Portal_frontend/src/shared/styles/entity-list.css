@@ -55,6 +55,12 @@
     box-shadow: var(--shadow-sm);
 }
 
+.entity-list-toolbar .searchable-select {
+    flex: 1 1 220px;
+    min-width: 220px;
+    max-width: 280px;
+}
+
 .entity-list-search {
     position: relative;
     flex: 1;

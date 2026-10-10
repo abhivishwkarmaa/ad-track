@@ -293,6 +293,8 @@ export class AssignmentService {
       fallback_type: assignment.fallback_type,
       fallback_url: assignment.fallback_url,
       fallback_offer_id: assignment.fallback_offer_id,
+      fallback_offer_name: assignment.fallback_offer_name || null,
+      fallback_public_offer_id: assignment.fallback_public_offer_id || null,
       capping_amount: assignment.capping_type === 'budget'
         ? assignment.capping_budget_amount
         : (assignment.capping_type === 'conversion' ? assignment.capping_conversions_amount : null),
@@ -430,10 +432,12 @@ export class AssignmentService {
           `SELECT po.*, 
                   p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
                   o.name as offer_name, o.category as offer_category, o.public_offer_id,
-                  o.affiliate_amount as offer_affiliate_amount
+                  o.affiliate_amount as offer_affiliate_amount,
+                  fo.name as fallback_offer_name, fo.public_offer_id as fallback_public_offer_id
            FROM publisher_offers po
            JOIN publishers p ON po.publisher_id = p.id
            JOIN offers o ON po.offer_id = o.id
+           LEFT JOIN offers fo ON fo.id = po.fallback_offer_id
            WHERE po.public_assignment_id = ? AND po.tenant_id = ? LIMIT 1`,
           [numericId, tenantId]
         );
@@ -453,10 +457,12 @@ export class AssignmentService {
     let query = `SELECT po.*, 
               p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
               o.name as offer_name, o.category as offer_category, o.public_offer_id,
-              o.affiliate_amount as offer_affiliate_amount
+              o.affiliate_amount as offer_affiliate_amount,
+              fo.name as fallback_offer_name, fo.public_offer_id as fallback_public_offer_id
        FROM publisher_offers po
        JOIN publishers p ON po.publisher_id = p.id
        JOIN offers o ON po.offer_id = o.id
+       LEFT JOIN offers fo ON fo.id = po.fallback_offer_id
        WHERE po.id = ?`;
     const params = [numericId];
 
@@ -499,10 +505,12 @@ export class AssignmentService {
       SELECT po.*, 
              p.email as publisher_email, p.company_name as publisher_company, p.public_publisher_id,
              o.name as offer_name, o.category as offer_category, o.public_offer_id,
-             o.affiliate_amount as offer_affiliate_amount
+             o.affiliate_amount as offer_affiliate_amount,
+             fo.name as fallback_offer_name, fo.public_offer_id as fallback_public_offer_id
       FROM publisher_offers po
       JOIN publishers p ON po.publisher_id = p.id
       JOIN offers o ON po.offer_id = o.id
+      LEFT JOIN offers fo ON fo.id = po.fallback_offer_id
       WHERE po.tenant_id = ?
     `;
     const params = [tenantId]; // ✅ CRITICAL: Always filter by tenant_id
@@ -522,10 +530,42 @@ export class AssignmentService {
       params.push(filters.status);
     }
 
-    query += ' ORDER BY po.assigned_at DESC';
+    if (filters.search && String(filters.search).trim()) {
+      const term = `%${String(filters.search).trim()}%`;
+      query += ` AND (
+        o.name LIKE ?
+        OR CAST(o.public_offer_id AS CHAR) LIKE ?
+        OR p.email LIKE ?
+        OR IFNULL(p.company_name, '') LIKE ?
+        OR IFNULL(p.first_name, '') LIKE ?
+        OR CAST(p.public_publisher_id AS CHAR) LIKE ?
+      )`;
+      params.push(term, term, term, term, term, term);
+    }
 
-    const [rows] = await pool.query(query, params);
-    return rows.map(row => this.formatAssignment(row));
+    const page = Math.max(1, parseInt(filters.page, 10) || 1);
+    const requestedLimit = parseInt(filters.limit, 10);
+    const limit = Math.min(20, Math.max(1, requestedLimit > 0 ? requestedLimit : 20));
+    const offset = (page - 1) * limit;
+
+    const countQuery = query.replace(
+      /SELECT[\s\S]*?FROM publisher_offers po/,
+      'SELECT COUNT(*) AS total FROM publisher_offers po'
+    );
+    const [countRows] = await pool.query(countQuery, params);
+    const total = Number(countRows?.[0]?.total || 0);
+
+    query += ' ORDER BY po.assigned_at DESC LIMIT ? OFFSET ?';
+    const [rows] = await pool.query(query, [...params, limit, offset]);
+    return {
+      data: rows.map(row => this.formatAssignment(row)),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: total ? Math.ceil(total / limit) : 0,
+      },
+    };
   }
 
   async generateTrackingURL(assignmentId, baseURL, format = 'standard', tenantId = null, overridePublicOfferId = null) {

@@ -6,12 +6,10 @@ import TrackingUrlPanel from '../Offer/components/TrackingUrlPanel';
 import { normalizeTrackingUrlMeta } from '../Offer/utils/trackingUrlUtils';
 import {
     useAssignmentDetail,
-    useAssignmentsList,
     useUpdateAssignment,
 } from '../../hooks/queries/useAssignmentsQuery';
-import { useOffersList } from '../../hooks/queries/useOffersQuery';
-import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
+import AssignedOfferPicker from '../../components/SearchableSelect/AssignedOfferPicker';
 import './Assignment.css';
 
 function EditAssignment() {
@@ -36,7 +34,6 @@ function EditAssignment() {
         navigate('/assignment/manage');
     }, [navigate, returnTo]);
     const [loading, setLoading] = useState(false);
-    const [publisherAssignedOfferIds, setPublisherAssignedOfferIds] = useState([]);
     const [formData, setFormData] = useState({
         offer_id: '',
         publisher_id: '',
@@ -57,15 +54,6 @@ function EditAssignment() {
         tracking_meta: null,
     });
     const { data: assignment, isLoading: loadingAssignment, error: assignmentError } = useAssignmentDetail(id);
-    const { data: offersResult } = useOffersList({ limit: 100 });
-    const { data: publishersResult } = usePublishersList({ limit: 100 });
-    const { data: publisherAssignmentsResult } = useAssignmentsList(
-        { publisher_id: formData.publisher_id, status: 'active' },
-        { enabled: Boolean(formData.publisher_id) }
-    );
-
-    const offers = offersResult?.data ?? [];
-    const publishers = publishersResult?.data ?? [];
 
     useEffect(() => {
         if (assignmentError) {
@@ -73,15 +61,6 @@ function EditAssignment() {
             goBackToOrigin();
         }
     }, [assignmentError, goBackToOrigin, toast]);
-
-    useEffect(() => {
-        const rows = publisherAssignmentsResult?.data ?? [];
-        if (!formData.publisher_id) {
-            setPublisherAssignedOfferIds([]);
-            return;
-        }
-        setPublisherAssignedOfferIds(rows.map((a) => String(a.offer_id)));
-    }, [formData.publisher_id, publisherAssignmentsResult?.data]);
 
     useEffect(() => {
         if (!assignment) return;
@@ -190,12 +169,15 @@ function EditAssignment() {
         );
     }
 
-    const fallbackOfferOptions = offers.filter(offer => {
-        const id = String(offer.id);
-        if (id === String(formData.fallback_offer_id)) return true;
-        if (id === String(formData.offer_id)) return false;
-        return publisherAssignedOfferIds.includes(id);
-    });
+    const offerLabel = assignment?.public_offer_id
+        ? `#${assignment.public_offer_id} — ${assignment.offer_name || 'Offer'}`
+        : (assignment?.offer_name || '');
+    const publisherLabel = assignment?.public_publisher_id
+        ? `#${assignment.public_publisher_id} — ${assignment.publisher_company || assignment.publisher_email || 'Publisher'}`
+        : (assignment?.publisher_email || '');
+    const fallbackSelectedLabel = assignment?.fallback_public_offer_id
+        ? `#${assignment.fallback_public_offer_id} — ${assignment.fallback_offer_name || 'Offer'}`
+        : '';
 
     return (
         <div className="assignment-page">
@@ -210,37 +192,11 @@ function EditAssignment() {
                         <div className="assignment-form-row two-col">
                             <div className="form-group">
                                 <label className="form-label required">Offer</label>
-                                <select
-                                    className="form-control"
-                                    value={formData.offer_id}
-                                    onChange={(e) => handleChange('offer_id', e.target.value)}
-                                    required
-                                    disabled
-                                >
-                                    <option value="">Select an offer</option>
-                                    {offers.map(offer => (
-                                        <option key={offer.id} value={offer.id}>
-                                            {offer.name} ({offer.category})
-                                        </option>
-                                    ))}
-                                </select>
+                                <input className="form-control" value={offerLabel} disabled readOnly />
                             </div>
                             <div className="form-group">
                                 <label className="form-label required">Publisher</label>
-                                <select
-                                    className="form-control"
-                                    value={formData.publisher_id}
-                                    onChange={(e) => handleChange('publisher_id', e.target.value)}
-                                    required
-                                    disabled
-                                >
-                                    <option value="">Select a publisher</option>
-                                    {publishers.map(publisher => (
-                                        <option key={publisher.id} value={publisher.id}>
-                                            {publisher.first_name} ({publisher.email})
-                                        </option>
-                                    ))}
-                                </select>
+                                <input className="form-control" value={publisherLabel} disabled readOnly />
                             </div>
                         </div>
 
@@ -358,24 +314,19 @@ function EditAssignment() {
                                     ) : (
                                         <div className="form-group">
                                             <label className="form-label required">Fallback offer</label>
-                                            <select
-                                                className="form-control"
+                                            <AssignedOfferPicker
+                                                publisherId={assignment?.public_publisher_id || formData.publisher_id}
+                                                excludeOfferId={formData.offer_id}
                                                 value={formData.fallback_offer_id}
-                                                onChange={(e) => handleChange('fallback_offer_id', e.target.value)}
+                                                selectedLabel={fallbackSelectedLabel}
+                                                onChange={(nextValue) => handleChange('fallback_offer_id', nextValue)}
                                                 required
-                                            >
-                                                <option value="">Select offer…</option>
-                                                {fallbackOfferOptions.map(offer => (
-                                                    <option key={offer.id} value={offer.id}>
-                                                        #{offer.public_offer_id ?? offer.id} — {offer.name}
-                                                    </option>
-                                                ))}
-                                            </select>
+                                            />
                                         </div>
                                     )}
                                 </div>
                                 <p className="form-hint" style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
-                                    Only offers this publisher is already assigned to (active) are listed. Clicks after redirect are counted on the fallback offer only — not on this offer.
+                                    Only this publisher's active assigned offers are listed. Search by name or public offer ID. Clicks after redirect are counted on the fallback offer only — not on this offer.
                                 </p>
                             </div>
                         )}

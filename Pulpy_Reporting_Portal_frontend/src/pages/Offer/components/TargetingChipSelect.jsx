@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { LIST_PAGE_SIZE } from '../../../constants/listLimits';
 
 /**
  * Chip-based interactive selector for targeting rules (Browsers, Devices, OS).
@@ -14,6 +15,14 @@ export default function TargetingChipSelect({
     helperText = '',
 }) {
     const safeSelected = Array.isArray(selected) ? selected : [];
+    const [query, setQuery] = useState('');
+    const visibleItems = useMemo(() => {
+        const term = query.trim().toLowerCase();
+        const matched = term
+            ? items.filter((item) => String(item).toLowerCase().includes(term))
+            : items;
+        return matched.slice(0, LIST_PAGE_SIZE);
+    }, [items, query]);
 
     const isAllSelected =
         safeSelected.length === 0 ||
@@ -95,8 +104,17 @@ export default function TargetingChipSelect({
                 </div>
             </div>
 
+            <input
+                type="text"
+                className="form-control"
+                value={query}
+                placeholder={`Search ${label || 'options'}`}
+                onChange={(event) => setQuery(event.target.value)}
+                style={{ marginBottom: 10 }}
+            />
+
             <div className="targeting-chips-group">
-                {items.map((item) => {
+                {visibleItems.map((item) => {
                     const value = formatValue(item);
                     const isAll = String(value).toLowerCase() === 'all';
                     const active = isAll
@@ -118,6 +136,9 @@ export default function TargetingChipSelect({
                     );
                 })}
             </div>
+            {items.length > LIST_PAGE_SIZE && (
+                <div className="targeting-chip-helper-text">Showing {visibleItems.length} of {items.length}. Search to find the rest.</div>
+            )}
 
             {helperText && (
                 <div className="targeting-chip-helper-text">{helperText}</div>

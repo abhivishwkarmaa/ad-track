@@ -22,6 +22,7 @@ import {
     EntityListPagination,
 } from '../../shared/ui/EntityList';
 import { PlusIcon, EditIcon, TrashIcon, EyeIcon } from '../../shared/ui/icons';
+import { LIST_PAGE_SIZE } from '../../constants/listLimits';
 
 function OfferList() {
     const toast = useToast();
@@ -30,10 +31,10 @@ function OfferList() {
     const [statusFilter, setStatusFilter] = useState('all');
     const [deleteModal, setDeleteModal] = useState({ open: false, offer: null });
     const currentPage = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const itemsPerPage = 10;
+    const itemsPerPage = LIST_PAGE_SIZE;
     const [searchDebounced, setSearchDebounced] = useState('');
     const [updatingStatus, setUpdatingStatus] = useState({});
-    const effectiveSearch = searchDebounced.trim().length >= 3 ? searchDebounced.trim() : '';
+    const effectiveSearch = searchDebounced.trim();
     const prevSearchAndFilter = useRef({ search: effectiveSearch, filter: statusFilter });
 
     const listParams = useMemo(() => {
@@ -133,7 +134,7 @@ function OfferList() {
                 <EntityListSearch
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search offers (min 3 characters)..."
+                    placeholder="Search name or public offer ID"
                     onClear={() => setSearchTerm('')}
                 />
                 <EntityListFilterSelect

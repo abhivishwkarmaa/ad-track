@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -19,8 +19,10 @@ import {
     EntityListBody,
     EntityListTableWrap,
     EntityListEmpty,
+    EntityListPagination,
     StatusBadge,
 } from '../../shared/ui/EntityList';
+import { LIST_PAGE_SIZE } from '../../constants/listLimits';
 import {
     PlusIcon,
     EyeIcon,
@@ -50,14 +52,25 @@ const getStatusLabel = (status) => {
 function ManageTenant() {
     const toast = useToast();
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchDebounced, setSearchDebounced] = useState('');
+    const [page, setPage] = useState(1);
     const [statusFilter, setStatusFilter] = useState('all');
     const [actionModal, setActionModal] = useState({ open: false, type: null, tenant: null });
 
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearchDebounced(searchTerm.trim());
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
     const listParams = useMemo(() => {
-        const params = { page: 1, limit: 100 };
+        const params = { page, limit: LIST_PAGE_SIZE };
         if (statusFilter !== 'all') params.status = statusFilter;
+        if (searchDebounced) params.search = searchDebounced;
         return params;
-    }, [statusFilter]);
+    }, [statusFilter, page, searchDebounced]);
 
     const tenantsQuery = useTenantsList(listParams);
     const { isInitialLoad, isRefreshing, error, refetch } = useEntityListQueryState(tenantsQuery);
@@ -66,6 +79,7 @@ function ManageTenant() {
     const deleteTenantMutation = useDeleteTenant();
 
     const tenants = tenantsQuery.data?.data ?? [];
+    const pagination = tenantsQuery.data?.pagination ?? { total: 0, totalPages: 1 };
 
     const handleSuspend = async (tenant) => {
         try {
@@ -99,13 +113,6 @@ function ManageTenant() {
             toast.error(err.message || 'Failed to delete tenant');
         }
     };
-
-    const filteredTenants = tenants.filter((tenant) => {
-        const matchesSearch =
-            tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            tenant.slug.toLowerCase().includes(searchTerm.toLowerCase());
-        return matchesSearch;
-    });
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
@@ -166,7 +173,10 @@ function ManageTenant() {
                 />
                 <EntityListFilterSelect
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                        setStatusFilter(e.target.value);
+                        setPage(1);
+                    }}
                 >
                     <option value="all">All Status</option>
                     <option value="TRIAL">Trial</option>
@@ -196,10 +206,10 @@ function ManageTenant() {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredTenants.length === 0 ? (
+                            {tenants.length === 0 ? (
                                 <EntityListEmpty colSpan={5} message="No tenants found" />
                             ) : (
-                                filteredTenants.map((tenant) => (
+                                tenants.map((tenant) => (
                                     <tr key={tenant.id}>
                                         <td>
                                             <div className="entity-list-cell-primary">{tenant.name}</div>
@@ -262,6 +272,13 @@ function ManageTenant() {
                         </tbody>
                     </table>
                 </EntityListTableWrap>
+                <EntityListPagination
+                    currentPage={page}
+                    totalPages={pagination.totalPages || 1}
+                    total={pagination.total || 0}
+                    itemsPerPage={LIST_PAGE_SIZE}
+                    onPageChange={setPage}
+                />
             </EntityListBody>
 
             <ConfirmModal

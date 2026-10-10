@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useToast } from '../../context/ToastContext';
-import { useRefresh } from '../../context/RefreshContext';
-import { publishersAPI, offersAPI } from '../../services/api';
+import { publishersAPI } from '../../services/api';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
 import { formatTimeIST } from '../../utils/dateTime';
 import './Affiliate.css';
 
@@ -22,14 +22,9 @@ const CopyIcon = () => (
 
 function PostbackTest() {
     const toast = useToast();
-    const { refreshKey } = useRefresh();
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
-    const [affiliates, setAffiliates] = useState([]);
-    const [loadingAffiliates, setLoadingAffiliates] = useState(true);
     const [selectedAffiliate, setSelectedAffiliate] = useState(null);
-    const [offers, setOffers] = useState([]);
-    const [loadingOffers, setLoadingOffers] = useState(true);
 
     const [formData, setFormData] = useState({
         trackingUrl: '',
@@ -38,58 +33,9 @@ function PostbackTest() {
         rcid: '',
     });
 
-    useEffect(() => {
-        const fetchAffiliates = async () => {
-            try {
-                const response = await publishersAPI.getPublishers({ limit: 1000 });
-                if (response.success) {
-                    setAffiliates(response.data);
-                } else {
-                    toast.error('Failed to load publishers');
-                }
-            } catch (error) {
-                console.error('Error fetching affiliates:', error);
-                toast.error('Error fetching affiliates');
-            } finally {
-                setLoadingAffiliates(false);
-            }
-        };
-
-        const fetchOffers = async () => {
-            try {
-                const response = await offersAPI.getOffers({ limit: 1000 });
-                if (response.success) {
-                    setOffers(response.data);
-                } else {
-                    toast.error('Failed to load offers');
-                }
-            } catch (error) {
-                console.error('Error fetching offers:', error);
-                toast.error('Error fetching offers');
-            } finally {
-                setLoadingOffers(false);
-            }
-        };
-
-        fetchAffiliates();
-        fetchOffers();
-    }, [refreshKey]);
-
-
-
-    const handleAffiliateChange = (e) => {
-        const id = e.target.value;
-        setFormData(prev => ({ ...prev, affiliateId: id }));
-
-        if (id) {
-            const affiliate = affiliates.find(a =>
-                (a.public_publisher_id && a.public_publisher_id.toString() === id) ||
-                (a.id && a.id.toString() === id)
-            );
-            setSelectedAffiliate(affiliate || null);
-        } else {
-            setSelectedAffiliate(null);
-        }
+    const handleAffiliateChange = (id, affiliate) => {
+        setFormData(prev => ({ ...prev, affiliateId: id || '' }));
+        setSelectedAffiliate(affiliate || null);
     };
 
 
@@ -304,23 +250,14 @@ function PostbackTest() {
 
                                 <div className="form-group">
                                     <label className="form-label required">Offer (Public ID)</label>
-                                    <select
-                                        className="form-control"
-                                        name="offerId"
+                                    <EntityPicker
+                                        type="offer"
+                                        valueField="public"
                                         value={formData.offerId}
-                                        onChange={handleChange}
-                                        disabled={loadingOffers}
                                         required
-                                    >
-                                        <option value="">
-                                            {loadingOffers ? 'Loading offers...' : 'Select Offer'}
-                                        </option>
-                                        {offers.map(offer => (
-                                            <option key={offer.id} value={offer.public_offer_id || offer.id}>
-                                                {offer.name} (Public ID: {offer.public_offer_id || offer.id})
-                                            </option>
-                                        ))}
-                                    </select>
+                                        emptyLabel="Select offer"
+                                        onChange={(nextValue) => setFormData((prev) => ({ ...prev, offerId: nextValue || '' }))}
+                                    />
                                     <small className="form-hint">
                                         Use the public offer ID that appears in your tracking URLs
                                     </small>
@@ -328,22 +265,13 @@ function PostbackTest() {
 
                                 <div className="form-group">
                                     <label className="form-label required">Publisher</label>
-                                    <select
-                                        className="form-control"
-                                        name="affiliateId"
+                                    <EntityPicker
+                                        type="publisher"
+                                        valueField="public"
                                         value={formData.affiliateId}
+                                        emptyLabel="Select publisher"
                                         onChange={handleAffiliateChange}
-                                        disabled={loadingAffiliates}
-                                    >
-                                        <option value="">
-                                            {loadingAffiliates ? 'Loading publishers...' : 'Select Publisher'}
-                                        </option>
-                                        {affiliates.map(affiliate => (
-                                            <option key={affiliate.id} value={affiliate.public_publisher_id || affiliate.id}>
-                                                {affiliate.companyName || affiliate.fullName || affiliate.company_name} (ID: {affiliate.public_publisher_id || affiliate.id})
-                                            </option>
-                                        ))}
-                                    </select>
+                                    />
                                 </div>
 
                                 {selectedAffiliate && (

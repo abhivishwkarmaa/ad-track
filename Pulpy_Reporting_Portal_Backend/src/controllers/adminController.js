@@ -641,11 +641,21 @@ export class AdminController {
       if (request.query.status) {
         filters.status = request.query.status;
       }
+      if (request.query.search) {
+        filters.search = request.query.search;
+      }
+      if (request.query.page) {
+        filters.page = request.query.page;
+      }
+      if (request.query.limit) {
+        filters.limit = request.query.limit;
+      }
 
       const assignments = await assignmentService.findAll(filters, tenantId);
       return reply.send({
         success: true,
-        data: assignments,
+        data: assignments.data,
+        pagination: assignments.pagination,
       });
     } catch (error) {
       logger.error('AdminController.listAssignments error:', error);

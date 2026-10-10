@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useOffersList, useCreateOffer } from '../../hooks/queries/useOffersQuery';
-import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
+import { useCreateOffer } from '../../hooks/queries/useOffersQuery';
 import { useOfferFormState } from './hooks/useOfferFormState';
 import { createEmptyOfferFormData } from './utils/offerFormState';
 import { buildOfferPayload, validateOfferParamsClient, validateOfferEventsClient } from './utils/offerFormPayload';
@@ -15,11 +14,6 @@ function NewOffer() {
     const toast = useToast();
     const createOfferMutation = useCreateOffer();
     const [loading, setLoading] = useState(false);
-
-    const { data: advertisersResult, isLoading: loadingAdvertisers } = useAdvertisersList({ status: 'active', limit: 100 });
-    const { data: offersResult } = useOffersList({ limit: 1000, status: 'live' });
-    const advertisers = advertisersResult?.data ?? [];
-    const offers = offersResult?.data ?? [];
 
     const form = useOfferFormState(createEmptyOfferFormData());
 
@@ -108,9 +102,6 @@ function NewOffer() {
             <form onSubmit={handleSubmit}>
                 <OfferForm
                     headerSubtitle="Fill in the details below to create a new campaign offer"
-                    advertisers={advertisers}
-                    offers={offers}
-                    loadingAdvertisers={loadingAdvertisers}
                     loading={loading}
                     submitLabel="Create Offer"
                     submittingLabel="Creating..."

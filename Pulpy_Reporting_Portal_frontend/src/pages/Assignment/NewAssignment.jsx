@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { assignmentsAPI } from '../../services/api';
 import { useCreateOrUpdateAssignments } from '../../hooks/queries/useAssignmentsQuery';
-import { useOffersList } from '../../hooks/queries/useOffersQuery';
-import { usePublishersList } from '../../hooks/queries/usePublishersQuery';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
+import AssignedOfferPicker from '../../components/SearchableSelect/AssignedOfferPicker';
 import './Assignment.css';
 
 function NewAssignment() {
@@ -12,52 +11,16 @@ function NewAssignment() {
     const toast = useToast();
     const createOrUpdateAssignmentsMutation = useCreateOrUpdateAssignments();
     const [loading, setLoading] = useState(false);
-    const { data: offersResult } = useOffersList({ limit: 100 });
-    const { data: publishersResult } = usePublishersList({ limit: 100 });
-    const offers = offersResult?.data ?? [];
-    const publishers = publishersResult?.data ?? [];
     const [selectedOffer, setSelectedOffer] = useState('');
-    const [selectedPublishers, setSelectedPublishers] = useState([]);
     const [publisherAssignments, setPublisherAssignments] = useState([]);
-    /** publisher_id -> list of internal offer_ids that publisher already has an active assignment for */
-    const [assignedOffersByPublisher, setAssignedOffersByPublisher] = useState({});
 
-    const publisherIdsKey = publisherAssignments.map(a => a.publisher_id).sort((a, b) => a - b).join(',');
-
-    useEffect(() => {
-        const loadAssignedOffers = async () => {
-            const ids = [...new Set(publisherAssignments.map(a => a.publisher_id))];
-            if (ids.length === 0) {
-                setAssignedOffersByPublisher({});
-                return;
-            }
-            const next = {};
-            await Promise.all(
-                ids.map(async (pid) => {
-                    try {
-                        const res = await assignmentsAPI.getAssignments({ publisher_id: pid, status: 'active' });
-                        if (res.success && Array.isArray(res.data)) {
-                            next[pid] = res.data.map(a => String(a.offer_id));
-                        } else {
-                            next[pid] = [];
-                        }
-                    } catch (err) {
-                        console.error('Error loading assignments for publisher', pid, err);
-                        next[pid] = [];
-                    }
-                })
-            );
-            setAssignedOffersByPublisher(next);
-        };
-        loadAssignedOffers();
-    }, [publisherIdsKey]);
-
-    const handleAddPublisher = (publisherId) => {
-        if (!publisherId) return;
-        const publisher = publishers.find(p => p.id === parseInt(publisherId));
-        if (publisher && !publisherAssignments.find(a => a.publisher_id === publisher.id)) {
+    const handleAddPublisher = (publisher) => {
+        if (!publisher?.id) return;
+        if (!publisherAssignments.find(a => a.publisher_id === publisher.id)) {
             setPublisherAssignments(prev => [...prev, {
                 publisher_id: publisher.id,
+                public_publisher_id: publisher.public_publisher_id,
+                publisher_label: publisher.company_name || publisher.first_name || publisher.email,
                 payout_override: '',
                 conversion_approval_percentage: '',
                 capping_type: 'none',
@@ -149,19 +112,13 @@ function NewAssignment() {
                         <div className="assignment-form-row">
                             <div className="form-group">
                                 <label className="form-label required">Select Offer</label>
-                                <select
-                                    className="form-control"
+                                <EntityPicker
+                                    type="offer"
                                     value={selectedOffer}
-                                    onChange={(e) => setSelectedOffer(e.target.value)}
+                                    onChange={(nextValue) => setSelectedOffer(nextValue ? String(nextValue) : '')}
                                     required
-                                >
-                                    <option value="">Select an offer</option>
-                                    {offers.map(offer => (
-                                        <option key={offer.id} value={offer.id}>
-                                            {offer.name} ({offer.category})
-                                        </option>
-                                    ))}
-                                </select>
+                                    emptyLabel="Select an offer"
+                                />
                             </div>
                         </div>
 
@@ -169,31 +126,21 @@ function NewAssignment() {
                             <h3 className="assignment-form-section-title">Add Publishers</h3>
                             <div className="form-group">
                                 <label className="form-label">Add Publisher</label>
-                                <select
-                                    className="form-control"
+                                <EntityPicker
+                                    type="publisher"
                                     value=""
-                                    onChange={(e) => {
-                                        if (e.target.value) {
-                                            handleAddPublisher(e.target.value);
-                                            e.target.value = '';
-                                        }
+                                    status="active"
+                                    excludeValues={publisherAssignments.map((row) => row.publisher_id)}
+                                    emptyLabel="Select publisher to add"
+                                    onChange={(_id, publisher) => {
+                                        if (publisher) handleAddPublisher(publisher);
                                     }}
-                                >
-                                    <option value="">Select Publisher to Add</option>
-                                    {publishers
-                                        .filter(p => !publisherAssignments.find(a => a.publisher_id === p.id))
-                                        .map(p => (
-                                            <option key={p.id} value={p.id}>
-                                                {p.first_name} ({p.email}) - {p.company_name}
-                                            </option>
-                                        ))}
-                                </select>
+                                />
                             </div>
 
                             {publisherAssignments.length > 0 && (
                                 <div style={{ marginTop: '20px' }}>
                                     {publisherAssignments.map((assignment, index) => {
-                                        const publisher = publishers.find(p => p.id === assignment.publisher_id);
                                         return (
                                             <div key={index} style={{
                                                 border: '1px solid #ddd',
@@ -204,7 +151,9 @@ function NewAssignment() {
                                             }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                                                     <h5 style={{ margin: 0 }}>
-                                                        {publisher ? `${publisher.first_name} (${publisher.email})` : `Publisher ID: ${assignment.publisher_id}`}
+                                                        {assignment.public_publisher_id
+                                                            ? `#${assignment.public_publisher_id} — ${assignment.publisher_label}`
+                                                            : (assignment.publisher_label || `Publisher ${assignment.publisher_id}`)}
                                                     </h5>
                                                     <button
                                                         type="button"
@@ -329,30 +278,18 @@ function NewAssignment() {
                                                             ) : (
                                                                 <div className="form-group">
                                                                     <label className="form-label required">Fallback offer</label>
-                                                                    <select
-                                                                        className="form-control"
+                                                                    <AssignedOfferPicker
+                                                                        publisherId={assignment.public_publisher_id || assignment.publisher_id}
+                                                                        excludeOfferId={selectedOffer}
                                                                         value={assignment.fallback_offer_id}
-                                                                        onChange={(e) => handlePublisherChange(index, 'fallback_offer_id', e.target.value)}
+                                                                        onChange={(nextValue) => handlePublisherChange(index, 'fallback_offer_id', nextValue)}
                                                                         required
-                                                                    >
-                                                                        <option value="">Select offer…</option>
-                                                                        {(offers.filter(o => {
-                                                                            const id = String(o.id);
-                                                                            const assignedIds = assignedOffersByPublisher[assignment.publisher_id] || [];
-                                                                            if (id === String(assignment.fallback_offer_id)) return true;
-                                                                            if (id === String(selectedOffer)) return false;
-                                                                            return assignedIds.includes(id);
-                                                                        })).map(offer => (
-                                                                                <option key={offer.id} value={offer.id}>
-                                                                                    #{offer.public_offer_id ?? offer.id} — {offer.name}
-                                                                                </option>
-                                                                            ))}
-                                                                    </select>
+                                                                    />
                                                                 </div>
                                                             )}
                                                         </div>
                                                         <p style={{ fontSize: '13px', color: '#666', marginTop: '8px' }}>
-                                                            Only offers this publisher is already assigned to (excluding the offer above). If the list is empty, assign them to the fallback offer first, then return here. Clicks after redirect are counted on the fallback offer only.
+                                                            Only this publisher's other active assigned offers are listed. Search by name or public offer ID. If nothing matches, assign that offer to the publisher first. Clicks after redirect are counted on the fallback offer only.
                                                         </p>
                                                     </div>
                                                 )}

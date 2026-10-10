@@ -482,9 +482,9 @@ export class TenantMetricsService {
       }
 
       if (search && search.trim()) {
-        whereConditions.push('(o.name LIKE ? OR o.public_offer_id LIKE ? OR CAST(o.id AS CHAR) LIKE ?)');
+        whereConditions.push('(o.name LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)');
         const searchPattern = `%${search.trim()}%`;
-        params.push(searchPattern, searchPattern, searchPattern);
+        params.push(searchPattern, searchPattern);
       }
 
       const whereClause = whereConditions.join(' AND ');
@@ -497,9 +497,9 @@ export class TenantMetricsService {
         countParams.push(status);
       }
       if (search && search.trim()) {
-        countConditions.push('(o.name LIKE ? OR o.public_offer_id LIKE ? OR CAST(o.id AS CHAR) LIKE ?)');
+        countConditions.push('(o.name LIKE ? OR CAST(o.public_offer_id AS CHAR) LIKE ?)');
         const searchPattern = `%${search.trim()}%`;
-        countParams.push(searchPattern, searchPattern, searchPattern);
+        countParams.push(searchPattern, searchPattern);
       }
 
       const [countRows] = await pool.query(

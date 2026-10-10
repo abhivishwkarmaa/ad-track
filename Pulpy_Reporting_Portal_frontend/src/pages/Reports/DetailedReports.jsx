@@ -5,7 +5,7 @@ import { useReportTimezone } from '../../context/ReportTimezoneContext';
 import { useRefresh } from '../../context/RefreshContext';
 import { dashboardAPI } from '../../services/api';
 import { isAbortError } from '../../hooks/useAbortableRequest';
-import EntitySearchSelect from '../../components/EntitySearchSelect/EntitySearchSelect';
+import EntityPicker from '../../components/SearchableSelect/EntityPicker';
 import {
     formatDateIST,
     formatDateTimeIST,
@@ -129,7 +129,7 @@ function DetailedReports() {
     // Initial state from URL params
     const [pagination, setPagination] = useState({
         page: parseInt(searchParams.get('page') || '1'),
-        limit: parseInt(searchParams.get('limit') || '50'),
+        limit: Math.min(20, Math.max(10, parseInt(searchParams.get('limit') || '20', 10) || 20)),
         total: 0,
         totalPages: 1
     });
@@ -622,27 +622,33 @@ function DetailedReports() {
                             </div>
                         </div>
                         <div className="filter-group">
-                            <EntitySearchSelect
+                            <label>Offer</label>
+                            <EntityPicker
                                 type="offer"
-                                label="Offer"
-                                value={offerFilter}
-                                onChange={setOfferFilter}
+                                valueField="public"
+                                value={offerFilter === 'all' ? '' : offerFilter}
+                                emptyLabel="All offers"
+                                onChange={(next) => setOfferFilter(next ? String(next) : 'all')}
                             />
                         </div>
                         <div className="filter-group">
-                            <EntitySearchSelect
+                            <label>Publisher</label>
+                            <EntityPicker
                                 type="publisher"
-                                label="Publisher"
-                                value={publisherFilter}
-                                onChange={setPublisherFilter}
+                                valueField="public"
+                                value={publisherFilter === 'all' ? '' : publisherFilter}
+                                emptyLabel="All publishers"
+                                onChange={(next) => setPublisherFilter(next ? String(next) : 'all')}
                             />
                         </div>
                         <div className="filter-group">
-                            <EntitySearchSelect
+                            <label>Advertiser</label>
+                            <EntityPicker
                                 type="advertiser"
-                                label="Advertiser"
-                                value={advertiserFilter}
-                                onChange={setAdvertiserFilter}
+                                valueField="public"
+                                value={advertiserFilter === 'all' ? '' : advertiserFilter}
+                                emptyLabel="All advertisers"
+                                onChange={(next) => setAdvertiserFilter(next ? String(next) : 'all')}
                             />
                         </div>
                         <div className="filter-group">

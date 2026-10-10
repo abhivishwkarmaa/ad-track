@@ -249,15 +249,26 @@ export class TenantController {
         throw tableError;
       }
 
-      const { status, page = 1, limit = 50 } = request.query;
+      const page = Math.max(1, parseInt(request.query.page, 10) || 1);
+      const limit = Math.min(20, Math.max(1, parseInt(request.query.limit, 10) || 20));
       const offset = (page - 1) * limit;
+      const { status, search } = request.query;
 
       let query = 'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants';
       const params = [];
+      const where = [];
 
       if (status) {
-        query += ' WHERE UPPER(status) = UPPER(?)';
+        where.push('UPPER(status) = UPPER(?)');
         params.push(status);
+      }
+      if (search && String(search).trim()) {
+        const term = `%${String(search).trim()}%`;
+        where.push('(name LIKE ? OR slug LIKE ?)');
+        params.push(term, term);
+      }
+      if (where.length) {
+        query += ` WHERE ${where.join(' AND ')}`;
       }
 
       query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
@@ -268,9 +279,18 @@ export class TenantController {
       // Get total count
       let countQuery = 'SELECT COUNT(*) as total FROM tenants';
       const countParams = [];
+      const countWhere = [];
       if (status) {
-        countQuery += ' WHERE UPPER(status) = UPPER(?)';
+        countWhere.push('UPPER(status) = UPPER(?)');
         countParams.push(status);
+      }
+      if (search && String(search).trim()) {
+        const term = `%${String(search).trim()}%`;
+        countWhere.push('(name LIKE ? OR slug LIKE ?)');
+        countParams.push(term, term);
+      }
+      if (countWhere.length) {
+        countQuery += ` WHERE ${countWhere.join(' AND ')}`;
       }
       const [countRows] = await pool.query(countQuery, countParams);
       const total = countRows[0]?.total || 0;

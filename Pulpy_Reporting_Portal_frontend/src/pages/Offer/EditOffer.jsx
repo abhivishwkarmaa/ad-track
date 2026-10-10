@@ -1,8 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useToast } from '../../context/ToastContext';
-import { useOfferDetail, useOffersList, useUpdateOffer } from '../../hooks/queries/useOffersQuery';
-import { useAdvertisersList } from '../../hooks/queries/useAdvertisersQuery';
+import { useOfferDetail, useUpdateOffer } from '../../hooks/queries/useOffersQuery';
 import { SkeletonDetail } from '../../components/Skeleton/Skeleton';
 import { OFFER_COUNTRIES } from '../../utils/countries';
 import { useOfferFormState } from './hooks/useOfferFormState';
@@ -20,17 +19,6 @@ function EditOffer() {
     const [loading, setLoading] = useState(false);
 
     const { data: offer, isLoading: loadingOffer, error: offerError } = useOfferDetail(id);
-    const { data: advertisersResult, isLoading: loadingAdvertisers } = useAdvertisersList({ status: 'active', limit: 100 });
-    const { data: offersResult } = useOffersList({ limit: 1000 });
-
-    const advertisers = advertisersResult?.data ?? [];
-    const offers = useMemo(() => {
-        const allOffers = offersResult?.data ?? [];
-        return allOffers.filter((o) => {
-            const publicId = o.public_offer_id ?? o.display_id ?? o.id;
-            return String(publicId) !== String(id);
-        });
-    }, [offersResult?.data, id]);
 
     const form = useOfferFormState(createEmptyOfferFormData());
 
@@ -140,9 +128,12 @@ function EditOffer() {
             <form onSubmit={handleSubmit}>
                 <OfferForm
                     headerSubtitle="Update the details below to modify the offer"
-                    advertisers={advertisers}
-                    offers={offers}
-                    loadingAdvertisers={loadingAdvertisers}
+                    advertiserLabel={offer?.advertiser?.public_advertiser_id
+                        ? `#${offer.advertiser.public_advertiser_id} — ${offer.advertiser.name}`
+                        : (offer?.advertiser?.name || '')}
+                    fallbackOfferLabel={offer?.fallback_public_offer_id
+                        ? `#${offer.fallback_public_offer_id} — ${offer.fallback_offer_name || 'Offer'}`
+                        : ''}
                     loading={loading}
                     submitLabel="Save Changes"
                     submittingLabel="Saving..."

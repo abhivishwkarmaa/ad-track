@@ -321,7 +321,7 @@ export function useSummaryReport(filters = {}) {
  * @param {number} limit - Items per page
  * @returns {Object} - { data, pagination, loading, error, refetch }
  */
-export function useDetailedReport(filters = {}, page = 1, limit = 50) {
+export function useDetailedReport(filters = {}, page = 1, limit = 20) {
     const [data, setData] = useState([]);
     const [pagination, setPagination] = useState(null);
     const [loading, setLoading] = useState(false);
