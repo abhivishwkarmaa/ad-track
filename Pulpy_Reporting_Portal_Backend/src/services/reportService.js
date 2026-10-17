@@ -10,6 +10,86 @@ import {
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 import { runRollupDetailedAggregated } from './reportRollupDetailed.js';
 
+/**
+ * Click-grouped reports list every click, so a status-only metric (for example
+ * approved conversions by TID) is full of zeros. Drop groups whose selected
+ * outcomes are all zero. Click volume and total-conversion metrics stay unfiltered.
+ */
+function outcomeOnlyHavingSql(wantsMetric, includeAllMetrics) {
+  if (includeAllMetrics) return '';
+  const askedBroadVolume =
+    wantsMetric('clicks') ||
+    wantsMetric('unique_clicks') ||
+    wantsMetric('impressions') ||
+    wantsMetric('conversions') ||
+    wantsMetric('revenue') ||
+    wantsMetric('profit');
+  if (askedBroadVolume) return '';
+
+  const parts = [];
+  if (
+    wantsMetric('approved_conversions') ||
+    wantsMetric('approved_payout') ||
+    wantsMetric('payout')
+  ) {
+    parts.push(`SUM(CASE WHEN conv.status = 'approved' THEN 1 ELSE 0 END) > 0`);
+  }
+  if (wantsMetric('pending_conversions') || wantsMetric('pending_payout')) {
+    parts.push(`SUM(CASE WHEN conv.status = 'pending' THEN 1 ELSE 0 END) > 0`);
+  }
+  if (wantsMetric('rejected_conversions')) {
+    parts.push(`SUM(CASE WHEN conv.status IN ('rejected', 'rejected_cap', 'click_expired') THEN 1 ELSE 0 END) > 0`);
+  }
+  if (!parts.length) return '';
+  return ` HAVING (${parts.join(' OR ')})`;
+}
+
+/** Statuses that fully describe a status-only report. Empty when click volume is also requested. */
+function outcomeStatusList(wantsMetric, includeAllMetrics) {
+  if (includeAllMetrics) return [];
+  const askedBroadVolume =
+    wantsMetric('clicks') ||
+    wantsMetric('unique_clicks') ||
+    wantsMetric('impressions') ||
+    wantsMetric('conversions') ||
+    wantsMetric('revenue') ||
+    wantsMetric('profit');
+  if (askedBroadVolume) return [];
+
+  const statuses = [];
+  if (
+    wantsMetric('approved_conversions') ||
+    wantsMetric('approved_payout') ||
+    wantsMetric('payout')
+  ) {
+    statuses.push('approved');
+  }
+  if (wantsMetric('pending_conversions') || wantsMetric('pending_payout')) {
+    statuses.push('pending');
+  }
+  if (wantsMetric('rejected_conversions')) {
+    statuses.push('rejected', 'rejected_cap', 'click_expired');
+  }
+  return statuses;
+}
+
+/** IST report range as UTC MySQL datetimes. Null means no date restriction. */
+function reportUtcRange(filters = {}) {
+  const allDates = filters.all_dates === true || filters.all_dates === 'true';
+  if (allDates) return null;
+  const todayIST = new Date(Date.now() + 330 * 60 * 1000).toISOString().split('T')[0];
+  const fromDate = filters.date_from || todayIST;
+  const toDate = filters.date_to || todayIST;
+  if (filters.hour !== undefined && filters.hour !== null && filters.hour !== '' && filters.date_from) {
+    const hh = String(parseInt(filters.hour, 10)).padStart(2, '0');
+    return {
+      start: new Date(`${fromDate}T${hh}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+      end: new Date(`${fromDate}T${hh}:59:59+05:30`).toISOString().slice(0, 19).replace('T', ' '),
+    };
+  }
+  return istYmdSpanToMysqlUtcRange(fromDate, toDate);
+}
+
 export class ReportService {
   /**
    * Offer / publisher / advertiser filters for fast reporting paths (fact table scans).
@@ -1411,6 +1491,23 @@ export class ReportService {
           selects.push('COUNT(*) as clicks');
         }
 
+        // Status-only reports (approved TID, pending payout, …) must not scan every click.
+        // A month of clicks never returns; approved conversions are a few thousand rows.
+        const outcomeStatuses = outcomeStatusList(wantsMetric, includeAllMetrics);
+        if (outcomeStatuses.length > 0 && groups.length > 0) {
+          return await this.getOutcomeGroupedDetailed({
+            filters,
+            tenantId,
+            page,
+            limit,
+            offset,
+            selects,
+            groups,
+            groupBy,
+            outcomeStatuses,
+          });
+        }
+
         let query = `SELECT ${selects.join(', ')} 
                      FROM clicks c
                      LEFT JOIN offers o ON c.offer_id = o.id
@@ -1424,6 +1521,12 @@ export class ReportService {
 
         if (groups.length > 0) {
           query += ` GROUP BY ${groups.join(', ')}`;
+        }
+
+        // Status-only metrics (approved TID, pending payout, …) should not list zero rows.
+        const outcomeHaving = outcomeOnlyHavingSql(wantsMetric, includeAllMetrics);
+        if (outcomeHaving && groups.length > 0) {
+          query += outcomeHaving;
         }
 
         // Deterministic order: click-level groups by latest click time; else date/hour buckets.
@@ -1453,7 +1556,8 @@ export class ReportService {
         const needsConvJoinForCount =
           Boolean(filters.status) ||
           Boolean(filters.rcid) ||
-          Boolean(filters.search);
+          Boolean(filters.search) ||
+          Boolean(outcomeHaving);
 
         let countBaseQuery = `
           SELECT 1
@@ -1466,6 +1570,7 @@ export class ReportService {
           ${filtersBuild.clause}
         `;
         if (groups.length > 0) countBaseQuery += ` GROUP BY ${groups.join(', ')}`;
+        if (outcomeHaving && groups.length > 0) countBaseQuery += outcomeHaving;
 
         const countQuery = `SELECT COUNT(*) as total FROM (${countBaseQuery}) as agg`;
         const [countRows] = await pool.query(countQuery, filtersBuild.params);
@@ -1577,7 +1682,98 @@ export class ReportService {
     }
   }
 
-  buildWhereClause(filters, tenantId = null) {
+  /**
+   * Approved / pending / rejected breakdowns grouped by click dimensions (TID, date, …).
+   * Driven from `conversions` so a month range does not group every click.
+   */
+  async getOutcomeGroupedDetailed({
+    filters,
+    tenantId,
+    page,
+    limit,
+    offset,
+    selects,
+    groups,
+    groupBy,
+    outcomeStatuses,
+  }) {
+    let statuses = outcomeStatuses;
+    if (filters.status) {
+      statuses = statuses.filter((status) => status === String(filters.status));
+    }
+    if (statuses.length === 0) {
+      return {
+        data: [],
+        pagination: { page, limit, total: 0, totalPages: 1 },
+        isAggregated: true,
+      };
+    }
+
+    const useConvTime = (expr) => String(expr).replaceAll('c.created_at', 'conv.created_at');
+    const fastSelects = selects.map(useConvTime);
+    const fastGroups = groups.map(useConvTime);
+    const selectSql = fastSelects.join(' ');
+    const needsAdvertiser = selectSql.includes('a.') || Boolean(filters.advertiser_id);
+    const needsOffer = selectSql.includes('o.') || needsAdvertiser || Boolean(filters.search);
+    const needsPublisher = selectSql.includes('p.') || Boolean(filters.search);
+
+    const filtersBuild = this.buildWhereClause(filters, tenantId, { skipDate: true });
+    let where = ` WHERE 1=1 ${filtersBuild.clause}`;
+    const params = [...filtersBuild.params];
+    if (tenantId) {
+      where += ' AND conv.tenant_id = ?';
+      params.push(tenantId);
+    }
+    const range = reportUtcRange(filters);
+    if (range) {
+      where += ' AND conv.created_at BETWEEN ? AND ?';
+      params.push(range.start, range.end);
+    }
+    where += ` AND conv.status IN (${statuses.map(() => '?').join(', ')})`;
+    params.push(...statuses);
+
+    const fromSql = `
+      FROM conversions conv
+      INNER JOIN clicks c ON c.click_uuid = conv.click_uuid AND c.tenant_id = conv.tenant_id
+      ${needsOffer ? 'LEFT JOIN offers o ON c.offer_id = o.id' : ''}
+      ${needsPublisher ? 'LEFT JOIN publishers p ON c.publisher_id = p.id' : ''}
+      ${needsAdvertiser ? 'LEFT JOIN advertisers a ON a.id = o.advertiser_id' : ''}
+    `;
+
+    let query = `SELECT ${fastSelects.join(', ')} ${fromSql} ${where}`;
+    if (fastGroups.length > 0) query += ` GROUP BY ${fastGroups.join(', ')}`;
+
+    const aggregatedOrderParts = [];
+    if (groupBy.includes('click_uuid')) aggregatedOrderParts.push('MAX(c.created_at) DESC');
+    if (groupBy.includes('date')) {
+      aggregatedOrderParts.push(`${useConvTime('DATE(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))')} DESC`);
+    }
+    if (groupBy.includes('hour')) {
+      aggregatedOrderParts.push(`${useConvTime('HOUR(DATE_ADD(c.created_at, INTERVAL 330 MINUTE))')} DESC`);
+    }
+    if (aggregatedOrderParts.length > 0) query += ` ORDER BY ${aggregatedOrderParts.join(', ')}`;
+    else query += ' ORDER BY MAX(conv.created_at) DESC';
+
+    if (filters.export === 'csv' || filters.export === 'true') {
+      const [exportRows] = await pool.query(query, params);
+      return { data: exportRows, isExport: true };
+    }
+
+    const countQuery = `SELECT COUNT(*) as total FROM (SELECT 1 ${fromSql} ${where} GROUP BY ${fastGroups.join(', ')}) agg`;
+    const [[countRows], [rows]] = await Promise.all([
+      pool.query(countQuery, params),
+      pool.query(`${query} LIMIT ? OFFSET ?`, [...params, limit, offset]),
+    ]);
+    const total = Number(countRows[0]?.total || 0);
+
+    return {
+      data: rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      isAggregated: true,
+    };
+  }
+
+  buildWhereClause(filters, tenantId = null, options = {}) {
     let clause = '';
     const params = [];
 
@@ -1597,7 +1793,7 @@ export class ReportService {
     // ✅ HOUR filter — index-safe UTC hour window; replaces full-day BETWEEN (same intersection, narrower scan)
     const hasHourFilter = !allDates && filters.hour !== undefined && filters.date_from;
 
-    if (!allDates) {
+    if (!allDates && !options.skipDate) {
       if (hasHourFilter) {
         const h = parseInt(filters.hour, 10);
         const utcHourStart = new Date(`${fromDate}T${String(h).padStart(2, '0')}:00:00+05:30`).toISOString().slice(0, 19).replace('T', ' ');

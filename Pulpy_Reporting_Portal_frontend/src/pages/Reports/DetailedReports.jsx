@@ -227,8 +227,9 @@ function DetailedReports() {
             // Grouping Logic
             if (activeDims.length > 0) {
                 params.groupBy = activeDims.join(',');
-                // If specific metrics selected, backend needs to support limiting metrics or we filter on frontend?
-                // For now, backend returns ALL metrics if aggregated. We can filter display on frontend.
+                if (activeMetrics.length > 0) {
+                    params.metrics = activeMetrics.join(',');
+                }
             }
             // If No GroupBy, DetailedReports returns specific columns.
 
@@ -857,15 +858,15 @@ function DetailedReports() {
                                             return (
                                                 <td key={col.id}>
                                                     {canApprove && (
-                                                        <button 
-                                                            className="btn btn-primary" 
+                                                        <button
+                                                            className="btn btn-primary"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
                                                                 handleApproveClick(row.click_uuid);
                                                             }}
                                                             title="Manually Approve"
-                                                            style={{ 
-                                                                padding: '4px 8px', 
+                                                            style={{
+                                                                padding: '4px 8px',
                                                                 fontSize: '11px',
                                                                 display: 'flex',
                                                                 alignItems: 'center',
@@ -921,32 +922,32 @@ function DetailedReports() {
                                         <div className="reports-mobile-item" key={`${col.id}-mobile-val-${idx}`}>
                                             <span className="reports-mobile-label">{col.label}</span>
                                             <span className="reports-mobile-value">
-                                                {col.id === 'conversion_status' ? getStatusBadge(val) : 
-                                                 col.id === 'actions' ? (
-                                                     (() => {
-                                                         const status = (row.conversion_status || '').toLowerCase();
-                                                         const canApprove = !status || status === 'pending' || status === 'click_expired' || status === 'rejected' || status === 'rejected_cap';
-                                                         return canApprove && (
-                                                            <button 
-                                                                className="btn btn-primary" 
-                                                                onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleApproveClick(row.click_uuid);
-                                                            }}
-                                                                style={{ 
-                                                                    padding: '4px 10px', 
-                                                                    fontSize: '11px',
-                                                                    display: 'flex',
-                                                                    alignItems: 'center',
-                                                                    gap: '4px',
-                                                                    marginTop: '4px'
-                                                                }}
-                                                            >
-                                                                <ApproveIcon /> Approve
-                                                            </button>
-                                                         );
-                                                     })()
-                                                 ) : displayValue}
+                                                {col.id === 'conversion_status' ? getStatusBadge(val) :
+                                                    col.id === 'actions' ? (
+                                                        (() => {
+                                                            const status = (row.conversion_status || '').toLowerCase();
+                                                            const canApprove = !status || status === 'pending' || status === 'click_expired' || status === 'rejected' || status === 'rejected_cap';
+                                                            return canApprove && (
+                                                                <button
+                                                                    className="btn btn-primary"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleApproveClick(row.click_uuid);
+                                                                    }}
+                                                                    style={{
+                                                                        padding: '4px 10px',
+                                                                        fontSize: '11px',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        gap: '4px',
+                                                                        marginTop: '4px'
+                                                                    }}
+                                                                >
+                                                                    <ApproveIcon /> Approve
+                                                                </button>
+                                                            );
+                                                        })()
+                                                    ) : displayValue}
                                             </span>
                                         </div>
                                     );
