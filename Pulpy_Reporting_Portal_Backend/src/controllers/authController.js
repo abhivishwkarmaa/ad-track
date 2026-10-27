@@ -473,9 +473,182 @@ export class AuthController {
     }
   }
 
+  async publisherLogin(request, reply) {
+    try {
+      const { email, password } = request.body;
+
+      if (!email || !password) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Validation Error',
+          message: 'Email and password are required',
+        });
+      }
+
+      // 🔒 STRICT SUBDOMAIN MULTI-TENANCY:
+      // Publisher MUST login via their tenant's subdomain.
+      // Super admin domain (admin.*) or requests without tenant resolution are strictly rejected.
+      const requestTenantId = getTenantIdFromRequest(request);
+      const isAdminSubdomain = request.isAdminSubdomain || false;
+
+      logger.info('[PUBLISHER_LOGIN] Tenant resolution', {
+        host: request.headers.host,
+        requestTenantId,
+        isAdminSubdomain,
+        email,
+      });
+
+      if (isAdminSubdomain || !requestTenantId) {
+        logger.warn('[PUBLISHER_LOGIN] Attempted login on admin/non-tenant subdomain - REJECTED', {
+          host: request.headers.host,
+          email,
+          isAdminSubdomain,
+          requestTenantId,
+        });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Invalid email or password', // Never leak tenant details
+        });
+      }
+
+      // Query publisher for this specific tenant
+      const [rows] = await pool.query(
+        'SELECT id, public_publisher_id, email, first_name, company_name, country, password_hash, global_postback_url, status, tenant_id FROM publishers WHERE email = ? AND tenant_id = ?',
+        [email, requestTenantId]
+      );
+
+      if (!rows || rows.length === 0) {
+        logger.warn('[PUBLISHER_LOGIN] Publisher not found for tenant', { email, requestTenantId });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Invalid email or password',
+        });
+      }
+
+      const publisher = rows[0];
+
+      if (!publisher.password_hash) {
+        logger.warn('[PUBLISHER_LOGIN] Publisher has no password set', { email, publisherId: publisher.id });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Invalid email or password',
+        });
+      }
+
+      const isValid = await bcrypt.compare(password, publisher.password_hash);
+      if (!isValid) {
+        logger.warn('[PUBLISHER_LOGIN] Invalid password', { email, publisherId: publisher.id });
+        return reply.code(401).send({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Invalid email or password',
+        });
+      }
+
+      if (publisher.status !== 'active') {
+        logger.warn('[PUBLISHER_LOGIN] Inactive publisher attempt', { email, publisherId: publisher.id, status: publisher.status });
+        return reply.code(403).send({
+          success: false,
+          error: 'Forbidden',
+          message: 'Publisher account is not active. Please contact support.',
+        });
+      }
+
+      // Check tenant status
+      if (request.tenant) {
+        const normalizedStatus = String(request.tenant.status || '').toUpperCase();
+        if (normalizedStatus === 'SUSPENDED') {
+          return reply.code(403).send({
+            success: false,
+            error: 'Tenant Suspended',
+            message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+          });
+        }
+      }
+
+      // Generate Publisher JWT token
+      const token = jwt.sign(
+        {
+          id: publisher.id,
+          publisher_id: publisher.id,
+          public_publisher_id: publisher.public_publisher_id,
+          email: publisher.email,
+          name: publisher.first_name || publisher.company_name || 'Publisher',
+          company_name: publisher.company_name,
+          role: 'publisher',
+          tenant_id: publisher.tenant_id,
+          token_type: 'publisher',
+        },
+        TENANT_JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_TTL }
+      );
+
+      const refreshToken = generateRefreshToken();
+      await redis.set(
+        `auth:session:${refreshToken}`,
+        JSON.stringify({
+          user_id: publisher.id,
+          tenant_id: publisher.tenant_id,
+          role: 'publisher',
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
+
+      reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(request));
+
+      logger.info('[PUBLISHER_LOGIN] Login successful', {
+        publisherId: publisher.id,
+        email: publisher.email,
+        tenantId: publisher.tenant_id,
+        host: request.headers.host,
+      });
+
+      return reply.send({
+        success: true,
+        message: 'Login successful',
+        data: {
+          id: publisher.id,
+          public_publisher_id: publisher.public_publisher_id,
+          email: publisher.email,
+          name: publisher.first_name || publisher.company_name || 'Publisher',
+          fullName: publisher.first_name || publisher.company_name || 'Publisher',
+          company_name: publisher.company_name,
+          country: publisher.country,
+          global_postback_url: publisher.global_postback_url,
+          role: 'publisher',
+          tenant_id: publisher.tenant_id,
+          token,
+        },
+      });
+    } catch (error) {
+      logger.error('AuthController.publisherLogin error:', error);
+      return reply.code(500).send(createErrorResponse(error, 500));
+    }
+  }
 
   async getProfile(request, reply) {
     try {
+      // Publisher profile
+      if (request.publisher) {
+        return reply.send({
+          success: true,
+          data: {
+            ...request.publisher,
+            name: request.publisher.first_name || request.publisher.company_name || 'Publisher',
+            fullName: request.publisher.first_name || request.publisher.company_name || 'Publisher',
+            role: 'publisher',
+            tenant_id: request.publisher.tenant_id,
+            tenant_slug: request.tenant?.slug || null,
+            tenant_name: request.tenant?.name || null,
+          },
+        });
+      }
+
       // Admin info is already attached by auth middleware
       const hostUsed =
         request.headers['x-forwarded-host'] ||
@@ -682,6 +855,84 @@ export class AuthController {
           success: false,
           error: 'Unauthorized',
           message: 'Session expired',
+        });
+      }
+
+      // Handle Publisher session refresh
+      if (session.role === 'publisher') {
+        const [pubRows] = await pool.query(
+          'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id FROM publishers WHERE id = ? AND tenant_id = ?',
+          [session.user_id, session.tenant_id]
+        );
+
+        if (!pubRows || pubRows.length === 0 || pubRows[0].status !== 'active') {
+          await redis.del(sessionKey);
+          reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Publisher not found or inactive',
+          });
+        }
+
+        const publisher = pubRows[0];
+        const requestTenantId = getTenantIdFromRequest(request);
+
+        if (!requestTenantId || parseInt(requestTenantId) !== parseInt(publisher.tenant_id)) {
+          await redis.del(sessionKey);
+          reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+          return reply.code(401).send({
+            success: false,
+            error: 'Unauthorized',
+            message: 'Invalid session context',
+          });
+        }
+
+        const token = jwt.sign(
+          {
+            id: publisher.id,
+            publisher_id: publisher.id,
+            public_publisher_id: publisher.public_publisher_id,
+            email: publisher.email,
+            name: publisher.first_name || publisher.company_name || 'Publisher',
+            company_name: publisher.company_name,
+            role: 'publisher',
+            tenant_id: publisher.tenant_id,
+            token_type: 'publisher',
+          },
+          TENANT_JWT_SECRET,
+          { expiresIn: ACCESS_TOKEN_TTL }
+        );
+
+        await redis.set(
+          sessionKey,
+          JSON.stringify({
+            ...session,
+            last_activity: Date.now(),
+          }),
+          'EX',
+          REFRESH_TTL_SECONDS
+        );
+
+        reply.setCookie(REFRESH_COOKIE_NAME, refreshToken, getRefreshCookieOptions(request));
+
+        return reply.send({
+          success: true,
+          data: {
+            token,
+            user: {
+              id: publisher.id,
+              public_publisher_id: publisher.public_publisher_id,
+              email: publisher.email,
+              name: publisher.first_name || publisher.company_name || 'Publisher',
+              fullName: publisher.first_name || publisher.company_name || 'Publisher',
+              company_name: publisher.company_name,
+              country: publisher.country,
+              global_postback_url: publisher.global_postback_url,
+              role: 'publisher',
+              tenant_id: publisher.tenant_id,
+            },
+          },
         });
       }
 

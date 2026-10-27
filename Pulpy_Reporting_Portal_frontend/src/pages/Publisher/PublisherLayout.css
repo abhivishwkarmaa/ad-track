@@ -1,0 +1,314 @@
+/* Enterprise Publisher Layout - Strictly using index.css Design Tokens */
+.pub-portal {
+    display: flex;
+    min-height: 100vh;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* Sidebar */
+.pub-sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-primary);
+    border-right: 1px solid var(--border-color);
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition-normal);
+}
+
+.pub-sidebar-brand {
+    height: 70px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.pub-logo-box {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.pub-logo-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.pub-logo-initial {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--primary-color);
+}
+
+.pub-brand-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pub-brand-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+.pub-brand-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--primary-color);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Nav Menu */
+.pub-nav-menu {
+    flex: 1;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.pub-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 16px;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all var(--transition-fast);
+}
+
+.pub-nav-link:hover {
+    color: var(--text-primary);
+    background: var(--bg-sidebar-hover);
+}
+
+.pub-nav-link.active {
+    color: var(--primary-color);
+    background: var(--bg-secondary);
+    box-shadow: inset 3px 0 0 var(--primary-color);
+    font-weight: 700;
+}
+
+.pub-nav-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+/* Sidebar Footer */
+.pub-sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--bg-primary);
+}
+
+.pub-user-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+}
+
+.pub-user-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: var(--text-white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.pub-user-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.pub-user-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pub-user-id {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.pub-logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.pub-logout-btn:hover {
+    color: var(--danger-color);
+    border-color: var(--danger-color);
+    background: var(--bg-secondary);
+}
+
+.pub-logout-icon {
+    width: 16px;
+    height: 16px;
+}
+
+/* Main Area */
+.pub-main-area {
+    flex: 1;
+    margin-left: var(--sidebar-width);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.pub-top-header {
+    height: 70px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 90px 0 32px; /* 90px right padding leaves ample clearance for the floating RefreshButton */
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    box-shadow: var(--shadow-sm);
+}
+
+.pub-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.pub-mobile-toggle {
+    display: none;
+    background: transparent;
+    border: none;
+    padding: 6px;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+
+.pub-page-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
+}
+
+.pub-partner-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 9999px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.pub-pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(27, 182, 184, 0.2);
+}
+
+.pub-content-body {
+    flex: 1;
+    padding: 32px;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .pub-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .pub-sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .pub-main-area {
+        margin-left: 0;
+    }
+
+    .pub-mobile-toggle {
+        display: block;
+    }
+
+    .pub-top-header {
+        padding: 0 80px 0 16px;
+    }
+
+    .pub-content-body {
+        padding: 20px 16px;
+    }
+
+    .pub-mobile-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 90;
+    }
+}

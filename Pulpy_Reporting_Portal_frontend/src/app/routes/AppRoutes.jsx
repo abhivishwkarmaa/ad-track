@@ -30,6 +30,11 @@ import NewTenant from '../../pages/Tenant/NewTenant';
 import EditTenant from '../../pages/Tenant/EditTenant';
 import TenantDetail from '../../pages/Tenant/TenantDetail';
 import ManageContactSubmissions from '../../pages/ContactSubmissions/ManageContactSubmissions';
+import PublisherLayout from '../../pages/Publisher/PublisherLayout';
+import PublisherDashboard from '../../pages/Publisher/PublisherDashboard';
+import PublisherOffers from '../../pages/Publisher/PublisherOffers';
+import PublisherReports from '../../pages/Publisher/PublisherReports';
+import PublisherSettings from '../../pages/Publisher/PublisherSettings';
 import { useAuth } from '../../context/AuthContext';
 
 function PrivateRoute({ children }) {
@@ -82,6 +87,21 @@ export default function AppRoutes() {
         const brandName = user?.companyName || 'Track MyAds';
         document.title = `${brandName} | Performance Marketing Platform`;
     }, [user?.companyName]);
+
+    // 🔒 STRICT ROLE ISOLATION: Publisher Portal
+    if (isAuthenticated && user?.role === 'publisher') {
+        return (
+            <Routes>
+                <Route path="/" element={<PublisherLayout />}>
+                    <Route index element={<PublisherDashboard />} />
+                    <Route path="offers" element={<PublisherOffers />} />
+                    <Route path="reports" element={<PublisherReports />} />
+                    <Route path="settings" element={<PublisherSettings />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+            </Routes>
+        );
+    }
 
     return (
         <>

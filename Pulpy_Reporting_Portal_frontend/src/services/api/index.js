@@ -9,6 +9,7 @@ export { assignmentsAPI } from './assignments.api.js';
 export { tenantsAPI } from './tenants.api.js';
 export { contactSubmissionsAPI } from './contact.api.js';
 export { logsAPI } from './logs.api.js';
+export { publisherAPI } from './publisher.api.js';
 
 import { authAPI } from './auth.api.js';
 import { dashboardAPI } from './dashboard.api.js';
@@ -20,6 +21,7 @@ import { assignmentsAPI } from './assignments.api.js';
 import { tenantsAPI } from './tenants.api.js';
 import { contactSubmissionsAPI } from './contact.api.js';
 import { logsAPI } from './logs.api.js';
+import { publisherAPI } from './publisher.api.js';
 
 export default {
     authAPI,
@@ -33,4 +35,5 @@ export default {
     tenantsAPI,
     contactSubmissionsAPI,
     logsAPI,
+    publisherAPI,
 };

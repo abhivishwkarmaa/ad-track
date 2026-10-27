@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { authAPI, setAccessToken, clearAccessToken } from '../services/api';
+import { authAPI, publisherAPI, setAccessToken, clearAccessToken } from '../services/api';
 import { startActivityTracking, onLogoutEvent, getLastActivity, broadcastLogout } from '../utils/activityTracker';
 
 const AuthContext = createContext(null);
@@ -99,28 +99,33 @@ export function AuthProvider({ children }) {
         isLoggingOutRef.current = false;
     };
 
-    const login = async (email, password) => {
+    const login = async (email, password, role = 'admin') => {
         try {
-            const response = await authAPI.login(email, password);
+            const response = role === 'publisher'
+                ? await publisherAPI.login(email, password)
+                : await authAPI.login(email, password);
 
             if (response.success && response.data) {
                 const userData = {
                     id: response.data.id,
+                    public_publisher_id: response.data.public_publisher_id || null,
                     email: response.data.email,
-                    name: response.data.name,
-                    fullName: response.data.name,
-                    role: response.data.role,
+                    name: response.data.name || response.data.company_name,
+                    fullName: response.data.fullName || response.data.name,
+                    role: response.data.role || (role === 'publisher' ? 'publisher' : 'admin'),
                     tenant_id: response.data.tenant_id || null, // 🔒 STRICT: Only for super admin role checks, NOT for tenant resolution
                     mustChangePassword: Boolean(response.data.must_change_password),
                     companyName: response.data.company_name || null,
                     phone: response.data.phone || null,
+                    global_postback_url: response.data.global_postback_url || null,
+                    country: response.data.country || null,
                     conversion_expiry_minutes: response.data.conversion_expiry_minutes != null ? response.data.conversion_expiry_minutes : 60
                 };
 
                 setUser(userData);
                 setIsAuthenticated(true);
                 localStorage.setItem('track-myads_user', JSON.stringify(userData));
-                return { success: true };
+                return { success: true, role: userData.role };
             } else {
                 return { success: false, error: response.message || 'Login failed' };
             }
