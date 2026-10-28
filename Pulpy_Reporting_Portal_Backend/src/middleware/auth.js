@@ -320,3 +320,209 @@ export async function requireSuperAdmin(request, reply) {
     });
   }
 }
+
+/**
+ * Publisher JWT authentication middleware
+ * 🔒 STRICT TENANT-ISOLATED PUBLISHER AUTHENTICATION
+ */
+export async function authenticatePublisher(request, reply) {
+  try {
+    const authHeader = request.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Missing or invalid authorization header. Please provide a Bearer token.',
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Token is required',
+      });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, TENANT_JWT_SECRET);
+    } catch (err) {
+      try {
+        decoded = jwt.verify(token, ADMIN_JWT_SECRET);
+      } catch (err2) {
+        decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+      }
+    }
+
+    if (decoded.role !== 'publisher') {
+      return reply.code(403).send({
+        success: false,
+        error: 'Forbidden',
+        message: 'Publisher access required',
+      });
+    }
+
+    const refreshToken = request.cookies?.[REFRESH_COOKIE_NAME];
+    if (!refreshToken) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Missing refresh token',
+      });
+    }
+
+    const sessionKey = `auth:session:${refreshToken}`;
+    const sessionRaw = await redis.get(sessionKey);
+
+    if (!sessionRaw) {
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session expired',
+      });
+    }
+
+    let session;
+    try {
+      session = JSON.parse(sessionRaw);
+    } catch (parseError) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session invalid',
+      });
+    }
+
+    if (session?.user_id && decoded?.id && parseInt(session.user_id) !== parseInt(decoded.id)) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session mismatch',
+      });
+    }
+
+    if (Date.now() - session.last_activity > SESSION_TTL_MS) {
+      await redis.del(sessionKey);
+      reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Session expired',
+      });
+    }
+
+    // Activity tracking
+    const isUserActivity = request.headers['x-user-activity'] === '1';
+    if (isUserActivity) {
+      await redis.set(
+        sessionKey,
+        JSON.stringify({
+          ...session,
+          last_activity: Date.now(),
+        }),
+        'EX',
+        REFRESH_TTL_SECONDS
+      );
+    }
+
+    // Fetch publisher from database strictly by ID and tenant_id
+    const [rows] = await pool.query(
+      'SELECT id, public_publisher_id, email, first_name, company_name, country, global_postback_url, status, tenant_id FROM publishers WHERE id = ? AND email = ?',
+      [decoded.id, decoded.email]
+    );
+
+    if (!rows || rows.length === 0) {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Publisher not found',
+      });
+    }
+
+    const publisher = rows[0];
+
+    if (publisher.status !== 'active') {
+      return reply.code(403).send({
+        success: false,
+        error: 'Forbidden',
+        message: 'Publisher account is not active. Please contact administrator.',
+      });
+    }
+
+    // 🔒 STRICT SUBDOMAIN ISOLATION:
+    const requestTenantId = getTenantId(request);
+    if (!requestTenantId) {
+      return reply.code(403).send({
+        success: false,
+        error: 'Forbidden',
+        message: 'Publisher access requires tenant subdomain.',
+      });
+    }
+
+    if (parseInt(requestTenantId) !== parseInt(publisher.tenant_id)) {
+      logger.error('[AUTH] Publisher tenant mismatch detected - REJECTED', {
+        publisherTenantId: publisher.tenant_id,
+        requestTenantId: requestTenantId,
+        publisherId: publisher.id,
+        email: publisher.email,
+        host: request.headers.host
+      });
+      return reply.code(403).send({
+        success: false,
+        error: 'Forbidden',
+        message: 'Tenant mismatch. Access denied.',
+      });
+    }
+
+    // Verify tenant is active
+    if (request.tenant) {
+      const normalizedStatus = String(request.tenant.status || '').toUpperCase();
+      if (normalizedStatus === 'SUSPENDED') {
+        return reply.code(403).send({
+          success: false,
+          error: 'Tenant Suspended',
+          message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+        });
+      }
+    }
+
+    // Attach to request
+    request.publisher = publisher;
+    request.user = {
+      ...publisher,
+      role: 'publisher',
+      name: publisher.first_name || publisher.company_name || 'Publisher',
+    };
+    request.tenantId = publisher.tenant_id;
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Invalid token. Please login again.',
+      });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return reply.code(401).send({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Token has expired. Please login again.',
+      });
+    }
+    logger.error('Publisher auth error:', error);
+    return reply.code(500).send({
+      success: false,
+      error: 'Internal Server Error',
+      message: 'Authentication failed',
+    });
+  }
+}

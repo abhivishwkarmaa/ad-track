@@ -20,6 +20,7 @@ export {
     tenantsAPI,
     contactSubmissionsAPI,
     logsAPI,
+    publisherAPI,
 } from './api/index.js';
 
 export { default } from './api/index.js';

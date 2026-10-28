@@ -25,6 +25,8 @@ function EditAffiliate() {
         global_postback_url: '',
         status: 'active'
     });
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
 
     useEffect(() => {
         if (publisherError) {
@@ -61,7 +63,24 @@ function EditAffiliate() {
                 return;
             }
 
-            await updatePublisherMutation.mutateAsync({ id, data: formData });
+            const payload = { ...formData };
+            if (newPassword || confirmPassword) {
+                if (newPassword.length < 6) {
+                    toast.error('Password must be at least 6 characters');
+                    setLoading(false);
+                    return;
+                }
+                if (newPassword !== confirmPassword) {
+                    toast.error('Passwords do not match');
+                    setLoading(false);
+                    return;
+                }
+                payload.password = newPassword;
+            }
+
+            await updatePublisherMutation.mutateAsync({ id, data: payload });
+            setNewPassword('');
+            setConfirmPassword('');
             toast.success('Publisher updated successfully!');
             navigate('/affiliate/manage');
         } catch (error) {
@@ -151,6 +170,37 @@ function EditAffiliate() {
                                     ))}
                                 </select>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="affiliate-form-section">
+                        <h3 className="affiliate-form-section-title">Change Password</h3>
+                        <div className="affiliate-form-row two-col">
+                            <div className="form-group">
+                                <label className="form-label">New Password</label>
+                                <input
+                                    type="password"
+                                    className="form-control"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Leave blank to keep current password"
+                                    autoComplete="new-password"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label">Confirm New Password</label>
+                                <input
+                                    type="password"
+                                    className="form-control"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    placeholder="Repeat new password"
+                                    autoComplete="new-password"
+                                />
+                            </div>
+                        </div>
+                        <div className="form-helper">
+                            Only the publisher login password changes. Admin accounts with the same email are not affected.
                         </div>
                     </div>
 

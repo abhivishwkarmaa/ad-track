@@ -7,6 +7,9 @@ import { resetAppClientData } from '../../utils/appClientLifecycle.js';
 
 function Login() {
     const { login } = useAuth();
+    const hostname = window.location.hostname;
+    const isAdminDomain = hostname.startsWith('admin');
+    const [activeRole, setActiveRole] = useState('admin');
     const [showPassword, setShowPassword] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -19,7 +22,7 @@ function Login() {
         setLoading(true);
 
         try {
-            const result = await login(email, password);
+            const result = await login(email, password, activeRole);
             if (!result.success) {
                 setError(result.error || 'Login failed. Please try again.');
             }
@@ -47,17 +50,50 @@ function Login() {
 
                 <div className="login-card">
                     <h2 className="login-title">Welcome Back!</h2>
-                    <p className="login-subtitle">Sign in to continue to your dashboard</p>
+                    <p className="login-subtitle">
+                        {activeRole === 'publisher'
+                            ? 'Sign in to access your publisher portal'
+                            : 'Sign in to continue to your dashboard'}
+                    </p>
+
+                    <div className="login-role-tabs">
+                        <button
+                            type="button"
+                            className={`login-role-tab ${activeRole === 'admin' ? 'active' : ''}`}
+                            onClick={() => { setActiveRole('admin'); setError(''); }}
+                        >
+                            Admin
+                        </button>
+                        <button
+                            type="button"
+                            className={`login-role-tab ${activeRole === 'publisher' ? 'active' : ''}`}
+                            onClick={() => {
+                                if (isAdminDomain) return;
+                                setActiveRole('publisher');
+                                setError('');
+                            }}
+                            disabled={isAdminDomain}
+                            title={isAdminDomain ? 'Publisher login is only available on tenant subdomains' : 'Login as Publisher'}
+                        >
+                            Publisher
+                        </button>
+                    </div>
+
+                    {isAdminDomain && (
+                        <p className="login-domain-hint">
+                            Admin Portal • Publisher login available via tenant subdomains
+                        </p>
+                    )}
 
                     {error && <div className="login-error">{error}</div>}
 
                     <form className="login-form" onSubmit={handleSubmit}>
                         <div className="form-group">
-                            <label className="form-label">Email Address</label>
+                            <label className="form-label">{activeRole === 'publisher' ? 'Publisher Email' : 'Email Address'}</label>
                             <input
                                 type="email"
                                 className="form-control"
-                                placeholder="Enter your email"
+                                placeholder={activeRole === 'publisher' ? 'publisher@company.com' : 'Enter your email'}
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
@@ -97,7 +133,7 @@ function Login() {
                         </div>
 
                         <div className="login-options">
-                            <Link to="/forgot-password" style={{ color: '#2563EB', textDecoration: 'none', fontSize: '14px' }}>Forgot Password?</Link>
+                            <Link to="/forgot-password" style={{ color: 'var(--primary-color)', textDecoration: 'none', fontSize: '14px', fontWeight: '500' }}>Forgot Password?</Link>
                         </div>
 
                         <button type="submit" className="login-btn" disabled={loading}>

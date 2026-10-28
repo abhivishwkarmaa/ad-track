@@ -24,6 +24,7 @@ import contactRoutes from './routes/contact.js';
 import testPostbackRoutes from './routes/testPostback.js';
 import subscriptionRoutes from './routes/subscription.js';
 import dashboardRoutes from './routes/dashboard.js';
+import publisherRoutes from './routes/publisher.routes.js';
 
 const fastify = Fastify({
   logger: logger,
@@ -111,6 +112,7 @@ async function initializeServer() {
   await fastify.register(testPostbackRoutes, { prefix: '/api/test-postback' });
   await fastify.register(contactRoutes, { prefix: '/api' }); // Contact form endpoint
   await fastify.register(subscriptionRoutes, { prefix: '/api' }); // Subscription management
+  await fastify.register(publisherRoutes, { prefix: '/api/publisher' }); // Publisher portal endpoints
 
   // 🔒 SECURE 404 Not Found Handler
   // Must be after routes - returns minimal response, logs full details server-side

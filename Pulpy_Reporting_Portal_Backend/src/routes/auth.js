@@ -5,6 +5,7 @@ async function authRoutes(fastify, options) {
   // Public routes (no auth required)
   // fastify.post('/register', authController.register);
   fastify.post('/login', authController.login);
+  fastify.post('/publisher/login', authController.publisherLogin.bind(authController));
   fastify.post('/refresh', authController.refresh.bind(authController));
   fastify.post('/logout', authController.logout.bind(authController));
   fastify.post('/register', authController.register);
