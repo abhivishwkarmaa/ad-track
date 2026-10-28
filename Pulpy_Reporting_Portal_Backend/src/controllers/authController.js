@@ -1105,6 +1105,22 @@ export class AuthController {
     }
   }
 
+  /**
+   * Publisher fallback for the public forgot-password flow: only when no admin
+   * matched, never for logged-in admin change-password, and only for the tenant
+   * resolved from the subdomain.
+   */
+  async findPublisherForPasswordReset(request, email) {
+    if (request.admin) return null;
+    const tenantId = getTenantIdFromRequest(request);
+    if (!tenantId || request.isAdminSubdomain) return null;
+    const [rows] = await pool.query(
+      `SELECT id, email, tenant_id FROM publishers WHERE email = ? AND tenant_id = ? AND status = 'active' LIMIT 1`,
+      [email, tenantId]
+    );
+    return rows && rows.length > 0 ? rows[0] : null;
+  }
+
   async requestOtp(request, reply) {
     try {
       await this.ensureOtpTable(); // Ensure table exists
@@ -1119,7 +1135,9 @@ export class AuthController {
 
       // Check if user exists
       const [users] = await pool.query('SELECT id, email, name FROM admin_users WHERE email = ?', [email]);
-      if (!users || users.length === 0) {
+      const hasAdmin = users && users.length > 0;
+      const publisher = hasAdmin ? null : await this.findPublisherForPasswordReset(request, email);
+      if (!hasAdmin && !publisher) {
         // Security: Don't reveal user doesn't exist
         return reply.send({
           success: true,
@@ -1171,9 +1189,24 @@ export class AuthController {
       // Mark OTP as verified/used so it can be used to reset password
       // We can issue a temporary token here
 
+      // Same rule as requestOtp: admin account wins, publisher only as fallback
+      const tokenPayload = { email: userEmail, type: 'password_reset' };
+      if (!request.admin) {
+        const [adminRows] = await pool.query('SELECT id FROM admin_users WHERE email = ?', [userEmail]);
+        if (!adminRows || adminRows.length === 0) {
+          const publisher = await this.findPublisherForPasswordReset(request, userEmail);
+          if (!publisher) {
+            return reply.code(400).send({ success: false, message: 'Invalid or expired OTP' });
+          }
+          tokenPayload.account_type = 'publisher';
+          tokenPayload.publisher_id = publisher.id;
+          tokenPayload.tenant_id = publisher.tenant_id;
+        }
+      }
+
       // Generate a short-lived reset token
       const resetToken = jwt.sign(
-        { email: userEmail, type: 'password_reset' },
+        tokenPayload,
         ADMIN_JWT_SECRET,
         { expiresIn: '15m' }
       );
@@ -1217,6 +1250,24 @@ export class AuthController {
 
       // Hash new password
       const passwordHash = await bcrypt.hash(newPassword, 10);
+
+      if (decoded.account_type === 'publisher') {
+        if (request.admin) {
+          return reply.code(401).send({ success: false, message: 'Invalid token type' });
+        }
+        const [result] = await pool.query(
+          'UPDATE publishers SET password_hash = ?, updated_at = UTC_TIMESTAMP() WHERE id = ? AND tenant_id = ? AND email = ?',
+          [passwordHash, decoded.publisher_id, decoded.tenant_id, email]
+        );
+        if (!result || result.affectedRows === 0) {
+          return reply.code(400).send({ success: false, message: 'Account not found' });
+        }
+        await pool.query('DELETE FROM password_resets WHERE email = ?', [email]);
+        return reply.send({
+          success: true,
+          message: 'Password updated successfully'
+        });
+      }
 
       // Update password and clear must-change flag if present
       try {

@@ -62,7 +62,7 @@ function Login() {
                             className={`login-role-tab ${activeRole === 'admin' ? 'active' : ''}`}
                             onClick={() => { setActiveRole('admin'); setError(''); }}
                         >
-                            Admin / Staff
+                            Admin
                         </button>
                         <button
                             type="button"
