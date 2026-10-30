@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `tenants` (
   `subscription_end_at` timestamp NULL DEFAULT NULL COMMENT 'Subscription expiry time (UTC)',
   `subscription_plan` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'Subscription plan identifier (e.g., basic, pro, enterprise)',
   `billing_email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'Billing contact email',
+  `publisher_login_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '1 = publisher login allowed on this tenant subdomain',
   PRIMARY KEY (`id`),
   UNIQUE KEY `slug` (`slug`),
   KEY `idx_tenants_status` (`status`),

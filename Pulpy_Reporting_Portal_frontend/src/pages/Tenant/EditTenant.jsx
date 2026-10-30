@@ -18,6 +18,7 @@ function EditTenant() {
     const [formData, setFormData] = useState({
         name: '',
         status: 'TRIAL',
+        publisher_login_enabled: true,
     });
     const [subscriptionForm, setSubscriptionForm] = useState({
         start_date: '',
@@ -34,6 +35,7 @@ function EditTenant() {
         setFormData({
             name: tenant.name || '',
             status: (tenant.status || 'TRIAL').toUpperCase(),
+            publisher_login_enabled: !(tenant.publisher_login_enabled === 0 || tenant.publisher_login_enabled === false),
         });
     }, [tenant]);
 
@@ -95,6 +97,7 @@ function EditTenant() {
                 data: {
                     name: formData.name.trim(),
                     status: formData.status,
+                    publisher_login_enabled: formData.publisher_login_enabled,
                 },
             });
             toast.success('Tenant updated successfully!');
@@ -197,6 +200,25 @@ function EditTenant() {
                         </select>
                         <div className="help-text">
                             Note: Subdomain slug cannot be changed after creation.
+                        </div>
+                    </div>
+
+                    <div className="tenant-form-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                name="publisher_login_enabled"
+                                checked={formData.publisher_login_enabled}
+                                onChange={(e) => setFormData((prev) => ({
+                                    ...prev,
+                                    publisher_login_enabled: e.target.checked,
+                                }))}
+                                disabled={saving}
+                            />
+                            Allow publisher login
+                        </label>
+                        <div className="help-text">
+                            When off, publishers cannot sign in on this tenant subdomain. Tenant admin login stays available.
                         </div>
                     </div>
 

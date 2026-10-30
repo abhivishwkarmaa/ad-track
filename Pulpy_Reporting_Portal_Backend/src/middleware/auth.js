@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import pool from '../db/connection.js';
 import logger from '../utils/logger.js';
 import { getTenantId } from './tenant.js';
+import { isPublisherLoginEnabled } from '../utils/publisherLoginAccess.js';
 import redis from '../config/redis.js';
 
 // JWT secrets - separate for admin and tenant users
@@ -491,6 +492,13 @@ export async function authenticatePublisher(request, reply) {
           success: false,
           error: 'Tenant Suspended',
           message: `Tenant "${request.tenant.name}" is currently suspended. Please contact support.`,
+        });
+      }
+      if (!isPublisherLoginEnabled(request.tenant)) {
+        return reply.code(403).send({
+          success: false,
+          error: 'Forbidden',
+          message: 'Publisher login is disabled for this portal.',
         });
       }
     }

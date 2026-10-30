@@ -16,6 +16,7 @@ function NewTenant() {
         status: 'TRIAL',
         adminEmail: '',
         adminName: '',
+        publisher_login_enabled: true,
     });
 
     const [errors, setErrors] = useState({});
@@ -71,6 +72,7 @@ function NewTenant() {
                 name: formData.name.trim(),
                 slug: formData.slug.trim().toLowerCase(),
                 status: formData.status,
+                publisher_login_enabled: formData.publisher_login_enabled,
             };
 
             if (createAdmin) {
@@ -144,6 +146,25 @@ function NewTenant() {
                             <option value="EXPIRED">Expired</option>
                             <option value="SUSPENDED">Suspended</option>
                         </select>
+                    </div>
+
+                    <div className="tenant-form-group">
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                name="publisher_login_enabled"
+                                checked={formData.publisher_login_enabled}
+                                onChange={(e) => setFormData((prev) => ({
+                                    ...prev,
+                                    publisher_login_enabled: e.target.checked,
+                                }))}
+                                disabled={loading}
+                            />
+                            Allow publisher login
+                        </label>
+                        <div className="help-text">
+                            When off, the Publisher tab is hidden on this tenant subdomain and publisher login is blocked. Tenant admin login stays available.
+                        </div>
                     </div>
 
                     <div className="tenant-form-group">

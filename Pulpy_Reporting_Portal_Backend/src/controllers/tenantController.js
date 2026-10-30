@@ -6,6 +6,7 @@ import crypto from 'crypto';
 
 import tenantResolutionService from '../services/tenantResolutionService.js';
 import emailService from '../services/emailService.js';
+import { parsePublisherLoginEnabled } from '../utils/publisherLoginAccess.js';
 
 const generateRandomPassword = (length = 12) => {
   const bytes = crypto.randomBytes(Math.ceil(length));
@@ -79,7 +80,7 @@ export class TenantController {
    */
   async createTenant(request, reply) {
     try {
-      const { name, slug, status = 'TRIAL', adminEmail, adminName, conversion_expiry_minutes = 60 } = request.body;
+      const { name, slug, status = 'TRIAL', adminEmail, adminName, conversion_expiry_minutes = 60, publisher_login_enabled } = request.body;
 
       // Validate input
       if (!name || !slug) {
@@ -130,10 +131,20 @@ export class TenantController {
 
         const parsedExpiry = parseInt(conversion_expiry_minutes, 10);
         const finalExpiry = (Number.isFinite(parsedExpiry) && parsedExpiry > 0) ? parsedExpiry : 60;
+        const parsedPublisherLogin = parsePublisherLoginEnabled(publisher_login_enabled);
+        if (parsedPublisherLogin === null) {
+          await pool.query('ROLLBACK');
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: 'publisher_login_enabled must be true or false',
+          });
+        }
+        const publisherLoginEnabled = parsedPublisherLogin === undefined ? 1 : parsedPublisherLogin;
 
         const [tenantResult] = await pool.query(
-          'INSERT INTO tenants (name, slug, status, conversion_expiry_minutes) VALUES (?, ?, ?, ?)',
-          [name, slug, normalizedStatus, finalExpiry]
+          'INSERT INTO tenants (name, slug, status, conversion_expiry_minutes, publisher_login_enabled) VALUES (?, ?, ?, ?, ?)',
+          [name, slug, normalizedStatus, finalExpiry, publisherLoginEnabled]
         );
 
         const tenantId = tenantResult.insertId || tenantResult[0]?.insertId;
@@ -187,7 +198,7 @@ export class TenantController {
 
         // Fetch created tenant
         const [tenantRows] = await pool.query(
-          'SELECT id, name, slug, status, created_at FROM tenants WHERE id = ?',
+          'SELECT id, name, slug, status, publisher_login_enabled, created_at FROM tenants WHERE id = ?',
           [tenantId]
         );
 
@@ -254,7 +265,7 @@ export class TenantController {
       const offset = (page - 1) * limit;
       const { status, search } = request.query;
 
-      let query = 'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants';
+      let query = 'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at, updated_at FROM tenants';
       const params = [];
       const where = [];
 
@@ -319,7 +330,7 @@ export class TenantController {
       const { id } = request.params;
 
       const [rows] = await pool.query(
-        'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at, updated_at FROM tenants WHERE id = ?',
         [id]
       );
 
@@ -347,14 +358,14 @@ export class TenantController {
   async updateTenant(request, reply) {
     try {
       const { id } = request.params;
-      const { name, status, conversion_expiry_minutes } = request.body;
+      const { name, status, conversion_expiry_minutes, publisher_login_enabled } = request.body;
 
       // Validate that at least one field is provided
-      if (!name && !status && conversion_expiry_minutes === undefined) {
+      if (!name && !status && conversion_expiry_minutes === undefined && publisher_login_enabled === undefined) {
         return reply.code(400).send({
           success: false,
           error: 'Validation Error',
-          message: 'At least one field (name, status, or conversion_expiry_minutes) is required',
+          message: 'At least one field (name, status, conversion_expiry_minutes, or publisher_login_enabled) is required',
         });
       }
 
@@ -395,6 +406,19 @@ export class TenantController {
         params.push(parsed);
       }
 
+      if (publisher_login_enabled !== undefined) {
+        const parsedPublisherLogin = parsePublisherLoginEnabled(publisher_login_enabled);
+        if (parsedPublisherLogin === null || parsedPublisherLogin === undefined) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation Error',
+            message: 'publisher_login_enabled must be true or false',
+          });
+        }
+        updates.push('publisher_login_enabled = ?');
+        params.push(parsedPublisherLogin);
+      }
+
       if (updates.length > 0) {
         params.push(id);
         await pool.query(
@@ -422,7 +446,7 @@ export class TenantController {
 
       // Fetch updated tenant
       const [tenantRows] = await pool.query(
-        'SELECT id, name, slug, status, conversion_expiry_minutes, created_at, updated_at FROM tenants WHERE id = ?',
+        'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at, updated_at FROM tenants WHERE id = ?',
         [id]
       );
 

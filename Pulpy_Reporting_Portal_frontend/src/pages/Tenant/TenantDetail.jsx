@@ -432,6 +432,9 @@ function TenantDetail() {
                             <span className={`tenant-status ${getStatusClass(tenant.status)}`}>
                                 {getStatusLabel(tenant.status)}
                             </span>
+                            <span className="tenant-status">
+                                Publisher login: {tenant.publisher_login_enabled === 0 || tenant.publisher_login_enabled === false ? 'Off' : 'On'}
+                            </span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             <a
