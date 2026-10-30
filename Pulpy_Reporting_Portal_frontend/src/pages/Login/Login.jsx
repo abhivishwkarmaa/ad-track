@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
+import { authAPI } from '../../services/api';
 import logoImage from '../../assets/logo.png';
 import './Login.css';
 import { resetAppClientData } from '../../utils/appClientLifecycle.js';
@@ -15,6 +16,32 @@ function Login() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [publisherLoginEnabled, setPublisherLoginEnabled] = useState(!isAdminDomain);
+
+    useEffect(() => {
+        if (isAdminDomain) {
+            setPublisherLoginEnabled(false);
+            return undefined;
+        }
+
+        let cancelled = false;
+        authAPI.getPublisherLoginAccess()
+            .then((response) => {
+                if (cancelled) return;
+                const enabled = Boolean(response?.data?.publisher_login_enabled);
+                setPublisherLoginEnabled(enabled);
+                if (!enabled) {
+                    setActiveRole('admin');
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setPublisherLoginEnabled(true);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isAdminDomain]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -56,33 +83,27 @@ function Login() {
                             : 'Sign in to continue to your dashboard'}
                     </p>
 
-                    <div className="login-role-tabs">
-                        <button
-                            type="button"
-                            className={`login-role-tab ${activeRole === 'admin' ? 'active' : ''}`}
-                            onClick={() => { setActiveRole('admin'); setError(''); }}
-                        >
-                            Admin
-                        </button>
-                        <button
-                            type="button"
-                            className={`login-role-tab ${activeRole === 'publisher' ? 'active' : ''}`}
-                            onClick={() => {
-                                if (isAdminDomain) return;
-                                setActiveRole('publisher');
-                                setError('');
-                            }}
-                            disabled={isAdminDomain}
-                            title={isAdminDomain ? 'Publisher login is only available on tenant subdomains' : 'Login as Publisher'}
-                        >
-                            Publisher
-                        </button>
-                    </div>
-
-                    {isAdminDomain && (
-                        <p className="login-domain-hint">
-                            Admin Portal • Publisher login available via tenant subdomains
-                        </p>
+                    {!isAdminDomain && publisherLoginEnabled && (
+                        <div className="login-role-tabs">
+                            <button
+                                type="button"
+                                className={`login-role-tab ${activeRole === 'admin' ? 'active' : ''}`}
+                                onClick={() => { setActiveRole('admin'); setError(''); }}
+                            >
+                                Admin
+                            </button>
+                            <button
+                                type="button"
+                                className={`login-role-tab ${activeRole === 'publisher' ? 'active' : ''}`}
+                                onClick={() => {
+                                    setActiveRole('publisher');
+                                    setError('');
+                                }}
+                                title="Login as Publisher"
+                            >
+                                Publisher
+                            </button>
+                        </div>
                     )}
 
                     {error && <div className="login-error">{error}</div>}

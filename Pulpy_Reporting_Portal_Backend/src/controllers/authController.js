@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import redis from '../config/redis.js';
 import subscriptionService from '../services/subscriptionService.js';
 import tenantResolutionService from '../services/tenantResolutionService.js';
+import { isPublisherLoginEnabled } from '../utils/publisherLoginAccess.js';
 
 // JWT secrets - separate for admin and tenant users
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'admin-secret-key-change-in-production';
@@ -473,6 +474,16 @@ export class AuthController {
     }
   }
 
+  async getPublisherLoginAccess(request, reply) {
+    const enabled = Boolean(request.tenant) && !request.isAdminSubdomain && isPublisherLoginEnabled(request.tenant);
+    return reply.send({
+      success: true,
+      data: {
+        publisher_login_enabled: enabled,
+      },
+    });
+  }
+
   async publisherLogin(request, reply) {
     try {
       const { email, password } = request.body;
@@ -509,6 +520,19 @@ export class AuthController {
           success: false,
           error: 'Unauthorized',
           message: 'Invalid email or password', // Never leak tenant details
+        });
+      }
+
+      if (!isPublisherLoginEnabled(request.tenant)) {
+        logger.warn('[PUBLISHER_LOGIN] Publisher login disabled for tenant', {
+          host: request.headers.host,
+          requestTenantId,
+          email,
+        });
+        return reply.code(403).send({
+          success: false,
+          error: 'Forbidden',
+          message: 'Publisher login is disabled for this portal.',
         });
       }
 
@@ -885,6 +909,16 @@ export class AuthController {
             success: false,
             error: 'Unauthorized',
             message: 'Invalid session context',
+          });
+        }
+
+        if (!isPublisherLoginEnabled(request.tenant)) {
+          await redis.del(sessionKey);
+          reply.clearCookie(REFRESH_COOKIE_NAME, { path: '/' });
+          return reply.code(403).send({
+            success: false,
+            error: 'Forbidden',
+            message: 'Publisher login is disabled for this portal.',
           });
         }
 

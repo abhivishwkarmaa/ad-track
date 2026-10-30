@@ -18,6 +18,15 @@ export const authAPI = {
 
         return response;
     },
+    getPublisherLoginAccess: async () => {
+        return apiRequest('/api/auth/publisher-login-access', {
+            method: 'GET',
+        }, {
+            skipAuth: true,
+            skipIdleCheck: true,
+            trackActivity: false,
+        });
+    },
     refresh: async () => {
         const success = await refreshAccessToken();
         if (!success) {

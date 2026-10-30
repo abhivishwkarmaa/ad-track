@@ -45,7 +45,7 @@ class TenantResolutionService {
         // 2. Fallback to DB
         try {
             const [rows] = await this.pool.query(
-                'SELECT id, name, slug, status, conversion_expiry_minutes, created_at FROM tenants WHERE slug = ? LIMIT 1',
+                'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at FROM tenants WHERE slug = ? LIMIT 1',
                 [slug]
             );
 

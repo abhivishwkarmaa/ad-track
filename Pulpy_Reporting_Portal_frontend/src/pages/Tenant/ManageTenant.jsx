@@ -192,7 +192,7 @@ function ManageTenant() {
                 error={error}
                 onRetry={() => refetch()}
                 tableRows={8}
-                tableCols={5}
+                tableCols={6}
             >
                 <EntityListTableWrap>
                     <table className="entity-list-table">
@@ -201,13 +201,14 @@ function ManageTenant() {
                                 <th>Name</th>
                                 <th>Subdomain</th>
                                 <th>Status</th>
+                                <th>Publisher Login</th>
                                 <th>Created</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {tenants.length === 0 ? (
-                                <EntityListEmpty colSpan={5} message="No tenants found" />
+                                <EntityListEmpty colSpan={6} message="No tenants found" />
                             ) : (
                                 tenants.map((tenant) => (
                                     <tr key={tenant.id}>
@@ -219,6 +220,9 @@ function ManageTenant() {
                                         </td>
                                         <td>
                                             <StatusBadge status={getStatusLabel(tenant.status)} />
+                                        </td>
+                                        <td>
+                                            <StatusBadge status={tenant.publisher_login_enabled === 0 || tenant.publisher_login_enabled === false ? 'Off' : 'On'} />
                                         </td>
                                         <td className="entity-list-cell-sub">{formatDate(tenant.created_at)}</td>
                                         <td>
