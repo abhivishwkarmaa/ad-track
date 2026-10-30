@@ -137,6 +137,7 @@ function TenantDetail() {
 
     // Modal state for Suspend / Resume
     const [confirmModal, setConfirmModal] = useState({ open: false, type: null });
+    const [selectedOfferModal, setSelectedOfferModal] = useState(null);
     const [actionLoading, setActionLoading] = useState(false);
 
     // Fetch Stats Overview & Daily Breakdown
@@ -173,7 +174,7 @@ function TenantDetail() {
                 limit: offersPagination.limit,
             });
             if (response.success) {
-                setOffersData(response.data || []);
+                setOffersData(response.data || response.offers || []);
                 if (response.pagination) {
                     setOffersPagination(response.pagination);
                 }
@@ -198,7 +199,7 @@ function TenantDetail() {
                 limit: clicksPagination.limit,
             });
             if (response.success) {
-                setClicksData(response.data || []);
+                setClicksData(response.data || response.clicks || []);
                 if (response.pagination) {
                     setClicksPagination(response.pagination);
                 }
@@ -224,7 +225,7 @@ function TenantDetail() {
                 limit: conversionsPagination.limit,
             });
             if (response.success) {
-                setConversionsData(response.data || []);
+                setConversionsData(response.data || response.conversions || []);
                 if (response.pagination) {
                     setConversionsPagination(response.pagination);
                 }
@@ -821,7 +822,7 @@ function TenantDetail() {
                                 <thead>
                                     <tr>
                                         <th>Offer ID / Public ID</th>
-                                        <th>Offer Name</th>
+                                        <th>Offer Name & URL</th>
                                         <th>Advertiser</th>
                                         <th>Model / Payout</th>
                                         <th>Status</th>
@@ -831,6 +832,7 @@ function TenantDetail() {
                                         <th className="text-right">Payout ($)</th>
                                         <th className="text-right">Net Profit ($)</th>
                                         <th className="text-right">CR (%)</th>
+                                        <th className="text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -846,7 +848,42 @@ function TenantDetail() {
                                             </td>
                                             <td>
                                                 <div style={{ fontWeight: '600', color: '#111827' }}>{offer.name}</div>
-                                                <div style={{ fontSize: '11px', color: '#6b7280' }}>Category: {offer.category || 'General'}</div>
+                                                <div style={{ fontSize: '11px', color: '#6b7280', display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
+                                                    <span>Category: {offer.category || 'General'}</span>
+                                                    {offer.country && <span>• Geo: {offer.country}</span>}
+                                                </div>
+                                                {offer.offer_url && (
+                                                    <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        <span
+                                                            style={{
+                                                                maxWidth: '220px',
+                                                                overflow: 'hidden',
+                                                                textOverflow: 'ellipsis',
+                                                                whiteSpace: 'nowrap',
+                                                                fontSize: '11px',
+                                                                color: '#2563eb',
+                                                                backgroundColor: '#eff6ff',
+                                                                padding: '2px 6px',
+                                                                borderRadius: '4px',
+                                                                fontFamily: 'monospace'
+                                                            }}
+                                                            title={offer.offer_url}
+                                                        >
+                                                            {offer.offer_url}
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            title="Copy Offer URL"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCopy(offer.offer_url, 'Offer URL');
+                                                            }}
+                                                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: '#6b7280', display: 'inline-flex', alignItems: 'center' }}
+                                                        >
+                                                            <CopyIcon />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td style={{ color: '#4b5563' }}>{offer.advertiser_name || 'N/A'}</td>
                                             <td>
@@ -875,6 +912,17 @@ function TenantDetail() {
                                                 {formatCurrency(offer.net_profit)}
                                             </td>
                                             <td className="text-right font-mono">{offer.conversion_rate}%</td>
+                                            <td className="text-center">
+                                                <button
+                                                    type="button"
+                                                    className="refresh-action-btn"
+                                                    style={{ padding: '4px 8px', fontSize: '12px' }}
+                                                    onClick={() => setSelectedOfferModal(offer)}
+                                                    title="View Offer Details & URL"
+                                                >
+                                                    Details
+                                                </button>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1210,6 +1258,181 @@ function TenantDetail() {
                                 disabled={actionLoading}
                             >
                                 {actionLoading ? 'Processing...' : (confirmModal.type === 'suspend' ? 'Confirm Suspend' : 'Confirm Resume')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Offer Quick Details Modal */}
+            {selectedOfferModal && (
+                <div className="modal-overlay" onClick={() => setSelectedOfferModal(null)}>
+                    <div className="modal-content" style={{ maxWidth: '620px' }} onClick={(e) => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '12px' }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {selectedOfferModal.name}
+                                    <span className={`tenant-status ${selectedOfferModal.status === 'live' ? 'active' : 'expired'}`} style={{ fontSize: '11px', textTransform: 'uppercase' }}>
+                                        {selectedOfferModal.status || 'draft'}
+                                    </span>
+                                </h3>
+                                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', fontFamily: 'monospace' }}>
+                                    Offer ID: #{selectedOfferModal.id} {selectedOfferModal.public_offer_id ? `| Public ID: ${selectedOfferModal.public_offer_id}` : ''}
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedOfferModal(null)}
+                                style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#6b7280', padding: '0 4px', lineHeight: 1 }}
+                            >
+                                &times;
+                            </button>
+                        </div>
+
+                        {/* Quick Attributes */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', background: '#f9fafb', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
+                            <div>
+                                <span style={{ color: '#6b7280', display: 'block', fontSize: '11px', textTransform: 'uppercase', fontWeight: '500' }}>Advertiser</span>
+                                <strong style={{ color: '#111827' }}>{selectedOfferModal.advertiser_name || 'N/A'}</strong>
+                            </div>
+                            <div>
+                                <span style={{ color: '#6b7280', display: 'block', fontSize: '11px', textTransform: 'uppercase', fontWeight: '500' }}>Category</span>
+                                <strong style={{ color: '#111827' }}>{selectedOfferModal.category || 'General'}</strong>
+                            </div>
+                            <div>
+                                <span style={{ color: '#6b7280', display: 'block', fontSize: '11px', textTransform: 'uppercase', fontWeight: '500' }}>Model & Payout</span>
+                                <strong style={{ color: '#059669' }}>
+                                    {selectedOfferModal.affiliate_model || 'CPA'} • {formatCurrency(selectedOfferModal.affiliate_amount)} {selectedOfferModal.offer_currency || 'USD'}
+                                </strong>
+                            </div>
+                            <div>
+                                <span style={{ color: '#6b7280', display: 'block', fontSize: '11px', textTransform: 'uppercase', fontWeight: '500' }}>Target Country / Geo</span>
+                                <strong style={{ color: '#111827' }}>{selectedOfferModal.country || 'Global / All'}</strong>
+                            </div>
+                        </div>
+
+                        {/* Target Landing Page URL */}
+                        <div style={{ marginBottom: '16px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                                Offer Landing / Target URL:
+                            </label>
+                            {selectedOfferModal.offer_url ? (
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={selectedOfferModal.offer_url}
+                                        style={{
+                                            flex: 1,
+                                            padding: '8px 12px',
+                                            fontSize: '12px',
+                                            fontFamily: 'monospace',
+                                            background: '#f3f4f6',
+                                            border: '1px solid #d1d5db',
+                                            borderRadius: '6px',
+                                            color: '#111827'
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="refresh-action-btn"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                                        onClick={() => handleCopy(selectedOfferModal.offer_url, 'Offer URL')}
+                                    >
+                                        <CopyIcon /> Copy
+                                    </button>
+                                    <a
+                                        href={selectedOfferModal.offer_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="refresh-action-btn"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '8px 12px', fontSize: '12px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                                    >
+                                        <ExternalLinkIcon /> Open
+                                    </a>
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', padding: '6px 0' }}>No offer landing URL configured</div>
+                            )}
+                        </div>
+
+                        {/* Preview URL */}
+                        {selectedOfferModal.preview_url && (
+                            <div style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                                    Preview URL:
+                                </label>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={selectedOfferModal.preview_url}
+                                        style={{
+                                            flex: 1,
+                                            padding: '8px 12px',
+                                            fontSize: '12px',
+                                            fontFamily: 'monospace',
+                                            background: '#f3f4f6',
+                                            border: '1px solid #d1d5db',
+                                            borderRadius: '6px',
+                                            color: '#111827'
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="refresh-action-btn"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                                        onClick={() => handleCopy(selectedOfferModal.preview_url, 'Preview URL')}
+                                    >
+                                        <CopyIcon /> Copy
+                                    </button>
+                                    <a
+                                        href={selectedOfferModal.preview_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="refresh-action-btn"
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '8px 12px', fontSize: '12px', textDecoration: 'none', whiteSpace: 'nowrap' }}
+                                    >
+                                        <ExternalLinkIcon /> Open
+                                    </a>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Performance Summary for Selected Dates */}
+                        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '18px' }}>
+                            <span style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                Period Performance Summary
+                            </span>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', textAlign: 'center' }}>
+                                <div style={{ background: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #edf2f7' }}>
+                                    <div style={{ fontSize: '11px', color: '#718096' }}>Clicks</div>
+                                    <div style={{ fontSize: '15px', fontWeight: '700', color: '#1a202c' }}>{formatNumber(selectedOfferModal.total_clicks)}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #edf2f7' }}>
+                                    <div style={{ fontSize: '11px', color: '#718096' }}>Conversions</div>
+                                    <div style={{ fontSize: '15px', fontWeight: '700', color: '#1a202c' }}>{formatNumber(selectedOfferModal.total_conversions)}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #edf2f7' }}>
+                                    <div style={{ fontSize: '11px', color: '#718096' }}>Revenue</div>
+                                    <div style={{ fontSize: '15px', fontWeight: '700', color: '#059669' }}>{formatCurrency(selectedOfferModal.total_revenue)}</div>
+                                </div>
+                                <div style={{ background: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #edf2f7' }}>
+                                    <div style={{ fontSize: '11px', color: '#718096' }}>Net Profit</div>
+                                    <div style={{ fontSize: '15px', fontWeight: '700', color: selectedOfferModal.net_profit >= 0 ? '#10b981' : '#ef4444' }}>
+                                        {formatCurrency(selectedOfferModal.net_profit)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="modal-actions">
+                            <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => setSelectedOfferModal(null)}
+                            >
+                                Close
                             </button>
                         </div>
                     </div>

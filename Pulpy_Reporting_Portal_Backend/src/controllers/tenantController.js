@@ -701,7 +701,7 @@ export class TenantController {
 
       return reply.send({
         success: true,
-        data: result.data,
+        data: result.offers || result.data || [],
         pagination: result.pagination,
       });
     } catch (error) {
@@ -743,7 +743,7 @@ export class TenantController {
 
       return reply.send({
         success: true,
-        data: result.data,
+        data: result.clicks || result.data || [],
         pagination: result.pagination,
       });
     } catch (error) {
@@ -786,7 +786,7 @@ export class TenantController {
 
       return reply.send({
         success: true,
-        data: result.data,
+        data: result.conversions || result.data || [],
         pagination: result.pagination,
       });
     } catch (error) {
