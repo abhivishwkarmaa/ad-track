@@ -273,54 +273,9 @@ async function processBatch(buffer) {
             // Process Pending Conversions (REMOVED - now handled by conversionWorker)
             // await processPendingConversions(clicks);
 
-            // Update daily_offer_stats directly in DB for clicks.
-            // Aggregate by offer+tenant for a single upsert per group to avoid double-counting.
-            try {
-                const today = getIstDateString();
-                const groups = {}; // key -> { offerId, tenantId, clicks: n }
-
-                for (const c of clicks) {
-                    const offerId = parseInt(c.offer_id, 10);
-                    const tenantId = (c.tenant_id && c.tenant_id !== '0') ? parseInt(c.tenant_id, 10) : null;
-                    const key = `${offerId}:${tenantId ?? 'null'}`;
-                    if (!groups[key]) groups[key] = { offerId, tenantId, clicks: 0 };
-                    groups[key].clicks += 1;
-                }
-
-                // For each group, compute today's actual distinct IPs and upsert:
-                // - clicks: increment by delta (existing behavior)
-                // - unique_clicks: set to actual distinct count (strictly unique only)
-                await Promise.all(Object.values(groups).map(async (g) => {
-                    const offerId = g.offerId;
-                    const tenantId = g.tenantId;
-                    const deltaClicks = g.clicks;
-
-                    const todayRange = getIstDayCreatedAtRange(today);
-
-                    // Count distinct IPs for this offer+tenant for today
-                    const ipCountQuery = tenantId
-                        ? `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND tenant_id = ? AND created_at >= ? AND created_at < ?`
-                        : `SELECT COUNT(DISTINCT ip) as uniq FROM clicks WHERE offer_id = ? AND created_at >= ? AND created_at < ?`;
-                    const ipParams = tenantId
-                        ? [offerId, tenantId, todayRange.start, todayRange.endExclusive]
-                        : [offerId, todayRange.start, todayRange.endExclusive];
-                    const [ipRows] = await pool.query(ipCountQuery, ipParams);
-                    const uniqToday = parseInt((Array.isArray(ipRows) ? ipRows[0] : ipRows).uniq || 0);
-
-                    // Upsert with calculated deltas
-                    await pool.query(
-                        `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, clicks, unique_clicks, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-                         ON DUPLICATE KEY UPDATE
-                           clicks = daily_offer_stats.clicks + VALUES(clicks),
-                           unique_clicks = VALUES(unique_clicks),
-                           updated_at = UTC_TIMESTAMP()`,
-                        [offerId, tenantId, today, deltaClicks, uniqToday]
-                    );
-                }));
-            } catch (statsErr) {
-                logger.error('❌ Failed to update daily_offer_stats after inserting clicks:', statsErr);
-            }
+            // ✅ OPTIMIZATION: Legacy daily_offer_stats and heavy COUNT(DISTINCT ip) scans are bypassed.
+            // All dashboards, charts, and reports are powered by daily_reporting_rollup via reportingStatsAggregationWorker.
+            // Bypassing this prevents severe MySQL row locks (41s+) and high disk I/O.
 
             logger.info(`✅ Batch Inserted: ${clicks.length} clicks`);
 

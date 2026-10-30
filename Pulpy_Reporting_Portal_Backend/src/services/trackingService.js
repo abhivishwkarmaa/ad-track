@@ -710,13 +710,16 @@ export class TrackingService {
       const pipeline = redis.pipeline();
       pipeline.hset(redisKey, clickData);
       pipeline.expire(redisKey, redisTtlSeconds);
-      pipeline.xadd('stream:clicks', '*',
+      // 🔥 P0 FIX: Bound stream to 100k items to prevent Redis RAM exhaustion & OOM crashes
+      pipeline.xadd('stream:clicks', 'MAXLEN', '~', 100000, '*',
         'tenant_id', tenantIdStr,
         'offer_id', String(offerId),
         'publisher_id', String(publisherId),
         'click_id', clickUuid
       );
       pipeline.setex(redirectCacheKey, 5, redirectUrl);
+      // 🔥 P0 FIX: Direct O(1) lookup pointer for postback service (0 DB queries needed)
+      pipeline.setex(`lookup:click:${clickUuid}`, redisTtlSeconds, redisKey);
 
       const results = await pipeline.exec();
 
@@ -727,7 +730,7 @@ export class TrackingService {
       for (let i = 0; i < results.length; i++) {
         const [err, result] = results[i];
         if (err) {
-          const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : 'redirect cache';
+          const operation = i === 0 ? 'hash write' : i === 1 ? 'hash expire' : i === 2 ? 'stream add' : i === 3 ? 'redirect cache' : 'lookup pointer';
           logger.error(`❌ Redis ${operation} failed:`, { error: err.message, result });
 
           if (i === 0) {
@@ -1389,61 +1392,9 @@ export class TrackingService {
   }
 
   async updateDailyStats(offerId, publisherId, type, tenantId = null) {
-    try {
-      // UTC ENFORCEMENT: Store UTC in DB; IST day boundaries computed in Node for uniqueness checks.
-      const today = getIstDateString();
-      const todayRange = getIstDayCreatedAtRange(today);
-
-      // Upsert daily stats - UTC ENFORCEMENT: Date stored as UTC, uniqueness calculated using IST conversion
-      if (type === 'click') {
-        const [latestClickRows] = await pool.query(
-          `SELECT ip FROM clicks
-           WHERE offer_id = ? AND publisher_id = ?
-           ORDER BY created_at DESC LIMIT 1`,
-          [offerId, publisherId]
-        );
-
-        const latestClick = Array.isArray(latestClickRows) ? latestClickRows[0] : latestClickRows;
-        const clickIp = latestClick?.ip || null;
-
-        let isUnique = true;
-        if (clickIp) {
-          let countQuery = `SELECT COUNT(*) as cnt FROM clicks
-                 WHERE offer_id = ?
-                   AND ip = ?
-                   AND created_at >= ? AND created_at < ?`;
-          const countParams = [offerId, clickIp, todayRange.start, todayRange.endExclusive];
-          if (tenantId) {
-            countQuery += ' AND tenant_id = ?';
-            countParams.push(tenantId);
-          }
-          const [countRows] = await pool.query(countQuery, countParams);
-          const cnt = (Array.isArray(countRows) ? countRows[0] : countRows).cnt;
-          isUnique = (cnt === 1);
-        }
-
-        await pool.query(
-          `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, clicks, unique_clicks)
-           VALUES (?, ?, ?, 1, ?)
-           ON DUPLICATE KEY UPDATE
-             clicks = daily_offer_stats.clicks + 1,
-             unique_clicks = daily_offer_stats.unique_clicks + (CASE WHEN ? = 1 THEN 1 ELSE 0 END),
-             updated_at = UTC_TIMESTAMP()`,
-          [offerId, tenantId, today, isUnique ? 1 : 0, isUnique ? 1 : 0]
-        );
-      } else if (type === 'impression') {
-        await pool.query(
-          `INSERT INTO daily_offer_stats (offer_id, tenant_id, day, impressions)
-           VALUES (?, ?, ?, 1)
-           ON DUPLICATE KEY UPDATE
-             impressions = daily_offer_stats.impressions + 1,
-             updated_at = UTC_TIMESTAMP()`,
-          [offerId, tenantId, today]
-        );
-      }
-    } catch (error) {
-      logger.error('TrackingService.updateDailyStats error:', error);
-    }
+    // ✅ OPTIMIZATION: Bypassed legacy daily_offer_stats writes.
+    // Reporting & Dashboards use daily_reporting_rollup via reportingStatsAggregationWorker.
+    return;
   }
 }
 

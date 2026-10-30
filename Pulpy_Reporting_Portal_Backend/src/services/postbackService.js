@@ -563,9 +563,23 @@ export class PostbackService {
         // ✅ CRITICAL: Get tenant_id from request first (for new key format)
         const tenantId = getTenantIdFromRequest(request);
 
-        // Strategy 1: If we have tenant_id, try to get click from DB first to get offer_id/publisher_id
+        // Strategy 0: Fast O(1) direct pointer lookup via Redis (Zero DB query)
+        try {
+          const directKey = await redis.get(`lookup:click:${click_id}`);
+          if (directKey) {
+            redisKey = directKey;
+            redisClick = await redis.hgetall(directKey);
+            if (redisClick && redisClick.offer_id) {
+              logger.debug('[POSTBACK] Click resolved via direct lookup pointer', { click_id, redisKey });
+            }
+          }
+        } catch (lookupErr) {
+          logger.debug('Direct lookup pointer read failed, falling back to legacy strategies', lookupErr);
+        }
+
+        // Strategy 1: If we have tenant_id and not found via lookup, try to get click from DB to get offer_id/publisher_id
         // ✅ FAST PATH: Use 2-second timeout for initial lookup to prevent blocking
-        if (tenantId) {
+        if ((!redisClick || !redisClick.offer_id) && tenantId) {
           try {
             const [dbRows] = await queryWithTimeout(
               'SELECT tenant_id, offer_id, publisher_id FROM clicks WHERE click_uuid = ? AND tenant_id = ? LIMIT 1',
@@ -759,7 +773,7 @@ export class PostbackService {
             }
 
             await redis.setex(`conversion:${click_id}`, 900, JSON.stringify(expiredConversionData));
-            await redis.xadd('stream:conversions', '*',
+            await redis.xadd('stream:conversions', 'MAXLEN', '~', 50000, '*',
               'click_uuid', click_id,
               'conversion_key', `conversion:${click_id}`,
               'event_name', eventName,
@@ -1049,7 +1063,7 @@ export class PostbackService {
           const conversionKey = `conversion:${click_id}:${eventName}`;
           try {
             await redis.setex(conversionKey, 900, JSON.stringify(conversionData));
-            await redis.xadd('stream:conversions', '*',
+            await redis.xadd('stream:conversions', 'MAXLEN', '~', 50000, '*',
               'click_uuid', click_id,
               'conversion_key', conversionKey,
               'event_name', eventName,
@@ -1943,23 +1957,34 @@ export class PostbackService {
 
       let postbackResult = null;
       if (mayFirePostback) {
-        postbackResult = await this.sendPublisherPostback(callbackUrl, conversion, click);
-        if (postbackResult && postbackResult.success) {
+        // 🔥 P0 FIX: Asynchronously fire publisher postback in background so advertiser HTTP request is never delayed
+        setImmediate(async () => {
           try {
-            await pool.query(
-              'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
-              [conversion.id, tenantId]
-            );
-            if (eventLogId) {
-              await pool.query('UPDATE event_logs SET affiliate_postback_fired = 1 WHERE id = ?', [eventLogId]);
+            const res = await this.sendPublisherPostback(callbackUrl, conversion, click);
+            if (res && res.success) {
+              await pool.query(
+                'UPDATE conversions SET affiliate_postback_fired = 1 WHERE id = ? AND tenant_id = ?',
+                [conversion.id, tenantId]
+              );
+              if (eventLogId) {
+                await pool.query('UPDATE event_logs SET affiliate_postback_fired = 1 WHERE id = ?', [eventLogId]);
+              }
+              logger.info(`✅ Async Affiliate Postback Fired (DB fallback): ${callbackUrl}`);
+            } else {
+              logger.warn(`⚠️ Async Affiliate Postback Not Marked Fired (DB fallback): ${callbackUrl}`, {
+                reason: res?.reason || res?.error
+              });
             }
-            conversion.affiliate_postback_fired = 1;
-          } catch (updateErr) {
-            if (updateErr.code === 'ER_BAD_FIELD_ERROR') {
-              logger.warn('affiliate_postback_fired column missing - database schema update required');
-            } else throw updateErr;
+          } catch (pubErr) {
+            logger.error(`❌ Failed to fire async affiliate postback (DB fallback): ${pubErr.message}`, { url: callbackUrl });
           }
-        }
+        });
+
+        postbackResult = {
+          success: true,
+          scheduled: true,
+          message: 'Affiliate postback scheduled asynchronously in background'
+        };
       } else {
         postbackResult = {
           success: false,
@@ -2074,67 +2099,9 @@ export class PostbackService {
   }
 
   async updateDailyStats(offerId, revenue, payout, status, tenantId = null, eventName = 'default') {
-    try {
-      // FINANCIAL SEPARATION RULES:
-      // 1. Revenue = SUM(amount) (Advertiser Revenue) - ALWAYS counted, regardless of status (even rejected).
-      // 2. Payout = SUM(payout) (Publisher Earnings) - ONLY counted when status = 'approved'.
-      // 3. Profit = Revenue - Payout.
-
-      // Revamped Logic:
-      // - Revenue: Always add (even if rejected)
-      // - Payout: Only add if approved
-      // - Conversions: Increment for every conversion status
-      // - Status buckets: approved/pending/rejected tracked separately
-
-      const finalRevenue = revenue;
-      const finalPayout = (status === 'approved') ? payout : 0;
-      const conversionInc = 1;
-      const approvedConversionInc = status === 'approved' ? 1 : 0;
-      const pendingConversionInc = status === 'pending' ? 1 : 0;
-      const rejectedConversionInc = (status === 'rejected' || status === 'rejected_cap' || status === CLICK_EXPIRED_STATUS) ? 1 : 0;
-
-      // Profit
-      const profit = finalRevenue - finalPayout;
-
-      // UTC ENFORCEMENT: Store UTC date in DB. Business logic converts to IST only at query time.
-      // Use CONVERT_TZ(created_at, '+00:00', '+05:30') in queries for IST display
-      const today = new Date().toISOString().split('T')[0];
-
-      await pool.query(
-        `INSERT INTO daily_offer_stats (
-          offer_id, day, conversions, approved_conversions, pending_conversions, rejected_conversions,
-          revenue, payout, profit, created_at, updated_at
-        )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-         ON DUPLICATE KEY UPDATE
-           conversions = daily_offer_stats.conversions + VALUES(conversions),
-           approved_conversions = daily_offer_stats.approved_conversions + VALUES(approved_conversions),
-           pending_conversions = daily_offer_stats.pending_conversions + VALUES(pending_conversions),
-           rejected_conversions = daily_offer_stats.rejected_conversions + VALUES(rejected_conversions),
-           revenue = daily_offer_stats.revenue + VALUES(revenue),
-           payout = daily_offer_stats.payout + VALUES(payout),
-           profit = daily_offer_stats.profit + VALUES(profit),
-           updated_at = UTC_TIMESTAMP()`,
-        [
-          offerId,
-          today,
-          conversionInc,
-          approvedConversionInc,
-          pendingConversionInc,
-          rejectedConversionInc,
-          finalRevenue,
-          finalPayout,
-          profit
-        ]
-      );
-
-      // Event breakdown is written once by upsertDailyOfferEventStats at the postback
-      // terminal, or once by the conversion worker. Do not write it here too.
-      void tenantId;
-      void eventName;
-    } catch (error) {
-      logger.error('PostbackService.updateDailyStats error:', error);
-    }
+    // ✅ OPTIMIZATION: Bypassed legacy daily_offer_stats writes to prevent row lock contention during postbacks.
+    // Reporting & Dashboards use daily_reporting_rollup via reportingStatsAggregationWorker.
+    return;
   }
 
   async isAssignmentBudgetCapHit(assignment, offerId, publisherId, tenantId = null) {
@@ -2610,56 +2577,8 @@ export class PostbackService {
         finalConversionId = result.insertId;
       }
 
-      // 4. Update Daily Offer Stats
-      const todayIST = new Date(new Date().getTime() + 330 * 60 * 1000).toISOString().split('T')[0];
-      
-      if (isNew) {
-        // Increment all metrics for a new approved conversion
-        await pool.query(
-          `INSERT INTO daily_offer_stats (
-            offer_id, tenant_id, day, 
-            conversions, approved_conversions, revenue, payout, profit,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, 1, 1, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-          ON DUPLICATE KEY UPDATE
-            conversions = conversions + 1,
-            approved_conversions = approved_conversions + 1,
-            revenue = revenue + ?,
-            payout = payout + ?,
-            profit = profit + ?,
-            updated_at = UTC_TIMESTAMP()`,
-          [
-            click.offer_id, tenantId, todayIST, 
-            advertiserAmount, payout, (advertiserAmount - payout),
-            advertiserAmount, payout, (advertiserAmount - payout)
-          ]
-        );
-      } else if (statusChanged) {
-        // Correct stats based on transition
-        let pendingDelta = oldStatus === 'pending' ? -1 : 0;
-        let rejectedDelta = (oldStatus === 'rejected' || oldStatus === 'rejected_cap' || oldStatus === CLICK_EXPIRED_STATUS) ? -1 : 0;
-        
-        await pool.query(
-          `INSERT INTO daily_offer_stats (
-            offer_id, tenant_id, day, 
-            approved_conversions, pending_conversions, rejected_conversions,
-            payout, profit,
-            created_at, updated_at
-          ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-          ON DUPLICATE KEY UPDATE
-            approved_conversions = approved_conversions + 1,
-            pending_conversions = pending_conversions + ?,
-            rejected_conversions = rejected_conversions + ?,
-            payout = payout + ?,
-            profit = profit - ?,
-            updated_at = UTC_TIMESTAMP()`,
-          [
-            click.offer_id, tenantId, todayIST,
-            pendingDelta, rejectedDelta, payout, payout,
-            pendingDelta, rejectedDelta, payout, payout
-          ]
-        );
-      }
+      // 4. Update Daily Offer Stats (Bypassed: Reports use daily_reporting_rollup via reportingStatsAggregationWorker)
+
 
       // 5. Fire Publisher Postback
       const [updatedConvRows] = await pool.query('SELECT * FROM conversions WHERE id = ?', [finalConversionId]);

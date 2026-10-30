@@ -552,36 +552,9 @@ async function updateDailyStats(items) {
         }
     }
 
-    // Execute Updates for Offer Totals (daily_offer_stats)
-    const offerPromises = Object.values(groups).map(async (g) => {
-        const profit = g.revenue - g.payout;
-
-        const sql = `
-            INSERT INTO daily_offer_stats (
-                offer_id, tenant_id, day, 
-                clicks, unique_clicks, 
-                conversions, approved_conversions, pending_conversions, rejected_conversions,
-                revenue, payout, profit, 
-                created_at, updated_at
-            )
-            VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-            ON DUPLICATE KEY UPDATE
-                conversions = conversions + VALUES(conversions),
-                approved_conversions = approved_conversions + VALUES(approved_conversions),
-                pending_conversions = pending_conversions + VALUES(pending_conversions),
-                rejected_conversions = rejected_conversions + VALUES(rejected_conversions),
-                revenue = revenue + VALUES(revenue),
-                payout = payout + VALUES(payout),
-                profit = profit + VALUES(profit),
-                updated_at = UTC_TIMESTAMP()
-        `;
-
-        await pool.query(sql, [
-            g.offerId, g.tenantId, today,
-            g.conversions, g.approved, g.pending, g.rejected,
-            g.revenue, g.payout, profit
-        ]);
-    });
+    // ✅ OPTIMIZATION: Bypassed legacy daily_offer_stats writes to prevent row lock contention.
+    // Reporting & Dashboards use daily_reporting_rollup via reportingStatsAggregationWorker.
+    const offerPromises = [];
 
     // Execute Updates for Event Breakdown (daily_offer_event_stats)
     const eventPromises = Object.values(eventGroups).map(async (eg) => {
