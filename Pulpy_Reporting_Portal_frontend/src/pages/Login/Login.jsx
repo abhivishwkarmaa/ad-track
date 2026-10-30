@@ -16,7 +16,7 @@ function Login() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [publisherLoginEnabled, setPublisherLoginEnabled] = useState(!isAdminDomain);
+    const [publisherLoginEnabled, setPublisherLoginEnabled] = useState(false);
 
     useEffect(() => {
         if (isAdminDomain) {
@@ -35,7 +35,7 @@ function Login() {
                 }
             })
             .catch(() => {
-                if (!cancelled) setPublisherLoginEnabled(true);
+                if (!cancelled) setPublisherLoginEnabled(false);
             });
 
         return () => {
