@@ -34,8 +34,11 @@ class TenantResolutionService {
         try {
             const cached = await this.redis.get(cacheKey);
             if (cached) {
-                // We assume cached data is the source of truth until invalidated
-                return JSON.parse(cached);
+                const tenant = JSON.parse(cached);
+                // Entries written before publisher_login_enabled existed must be refreshed once.
+                if (tenant && tenant.publisher_login_enabled !== undefined && tenant.publisher_login_enabled !== null) {
+                    return tenant;
+                }
             }
         } catch (error) {
             // Redis failure should not block the request
@@ -58,12 +61,7 @@ class TenantResolutionService {
             const tenant = rows[0];
 
             // 3. Write back to Redis
-            try {
-                // Cache the result for future lookups
-                await this.redis.set(cacheKey, JSON.stringify(tenant), 'EX', TENANT_CACHE_TTL);
-            } catch (redisError) {
-                logger.warn(`Failed to cache tenant ${slug}: ${redisError.message}`);
-            }
+            await this.cacheTenant(tenant);
 
             return tenant;
 
@@ -127,6 +125,32 @@ class TenantResolutionService {
             await this.redis.del(`tenant:expiry:${tenantId}`);
         } catch (err) {
             logger.warn(`Failed to invalidate tenant expiry cache for tenant ${tenantId}: ${err.message}`);
+        }
+    }
+
+    /**
+     * Writes the tenant row used by subdomain resolution.
+     * Call this after a tenant update so login sees publisher_login_enabled immediately.
+     *
+     * @param {Object} tenant
+     */
+    async cacheTenant(tenant) {
+        if (!tenant?.slug) return;
+        const cacheKey = `tenant:slug:${tenant.slug}`;
+        const payload = {
+            id: tenant.id,
+            name: tenant.name,
+            slug: tenant.slug,
+            status: tenant.status,
+            conversion_expiry_minutes: tenant.conversion_expiry_minutes,
+            publisher_login_enabled: tenant.publisher_login_enabled,
+            created_at: tenant.created_at,
+        };
+        try {
+            await this.redis.set(cacheKey, JSON.stringify(payload), 'EX', TENANT_CACHE_TTL);
+            logger.info(`Updated tenant cache for slug: ${tenant.slug}`);
+        } catch (redisError) {
+            logger.warn(`Failed to cache tenant ${tenant.slug}: ${redisError.message}`);
         }
     }
 

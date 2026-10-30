@@ -198,9 +198,12 @@ export class TenantController {
 
         // Fetch created tenant
         const [tenantRows] = await pool.query(
-          'SELECT id, name, slug, status, publisher_login_enabled, created_at FROM tenants WHERE id = ?',
+          'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at FROM tenants WHERE id = ?',
           [tenantId]
         );
+        if (tenantRows[0]) {
+          await tenantResolutionService.cacheTenant(tenantRows[0]);
+        }
 
         // Send tenant welcome email (best effort, do not block creation)
         if (adminEmail && finalAdminPassword) {
@@ -444,11 +447,14 @@ export class TenantController {
         await tenantResolutionService.invalidateTenantCache(existingRows[0].slug);
       }
 
-      // Fetch updated tenant
+      // Fetch updated tenant and write it back so login does not keep the previous slug cache
       const [tenantRows] = await pool.query(
         'SELECT id, name, slug, status, conversion_expiry_minutes, publisher_login_enabled, created_at, updated_at FROM tenants WHERE id = ?',
         [id]
       );
+      if (tenantRows[0]) {
+        await tenantResolutionService.cacheTenant(tenantRows[0]);
+      }
 
       return reply.send({
         success: true,
