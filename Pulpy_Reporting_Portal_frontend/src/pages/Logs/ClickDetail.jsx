@@ -195,6 +195,7 @@ function ClickDetail() {
                             label: 'Conversion Status',
                             value: conversion?.status ? <StatusBadge status={conversion.status} /> : '—',
                         },
+                        { label: 'Reason', value: conversion?.reason || '—' },
                     ]}
                 />
             </DetailCard>

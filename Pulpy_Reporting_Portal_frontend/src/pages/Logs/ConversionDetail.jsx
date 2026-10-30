@@ -195,6 +195,7 @@ function ConversionDetail() {
                         { label: 'RCID', value: conversion.rcid, mono: true },
                         { label: 'Event Name', value: <code>{conversion.event_name || 'default'}</code> },
                         { label: 'Status', value: <StatusBadge status={conversion.status} /> },
+                        { label: 'Reason', value: conversion.reason || '—' },
                         { label: 'Revenue (Amount)', value: conversion.amount != null ? `$${Number(conversion.amount).toFixed(2)}` : '—' },
                         { label: 'Publisher Payout', value: conversion.payout != null ? `$${Number(conversion.payout).toFixed(2)}` : '—' },
                         { label: 'IP', value: conversion.ip || click?.ip },

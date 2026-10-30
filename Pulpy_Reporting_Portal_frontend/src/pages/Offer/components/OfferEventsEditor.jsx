@@ -142,7 +142,7 @@ export default function OfferEventsEditor({
 
     const copyPostbackTemplate = () => {
         const host = window.location.hostname || 'track.yourdomain.com';
-        const url = `https://${host}/postback?click_id={click_id}&event={event_name}&amount={amount}`;
+        const url = `https://${host}/postback?click_id={click_id}&event={event_name}&amount={amount}&reason={reason}`;
         navigator.clipboard.writeText(url).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 2500);
@@ -150,7 +150,7 @@ export default function OfferEventsEditor({
     };
 
     const host = window.location.hostname || 'track.yourdomain.com';
-    const samplePostback = `https://${host}/postback?click_id={click_id}&event={event_name}&amount={amount}`;
+    const samplePostback = `https://${host}/postback?click_id={click_id}&event={event_name}&amount={amount}&reason={reason}`;
     const configuredCodes = rows
         .map((r) => String(r.event_name || '').trim().toLowerCase())
         .filter(Boolean);
@@ -436,7 +436,7 @@ export default function OfferEventsEditor({
                     ) : (
                         <> (add those codes above first).</>
                     )}
-                    Any other name is declined.
+                    Any other name is declined. <code>{'{reason}'}</code> is optional free text, such as parking or grace. Whatever the advertiser sends is stored as-is.
                 </p>
             </div>
         </div>

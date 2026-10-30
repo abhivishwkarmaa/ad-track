@@ -53,6 +53,7 @@ export function filtersBlockReportingRollup(filters = {}) {
   if (filters.country) return true;
   if (filters.xff) return true;
   if (filters.authorizationToken) return true;
+  if (filters.reason) return true;
 
   return false;
 }

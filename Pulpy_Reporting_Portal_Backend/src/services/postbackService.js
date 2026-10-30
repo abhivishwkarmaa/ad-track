@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { extractIP } from '../utils/ipExtractor.js';
 import { replaceMacros, generateClickId } from '../utils/urlGenerator.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { normalizeAdvertiserReason } from '../utils/advertiserReason.js';
 import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
@@ -111,6 +112,10 @@ function singleConversionPricing(offer, assignment, amountParam) {
  * Insert a conversion. dedup_slot is optional so a deploy before migration 006
  * still writes the same conversions row the single-conversion path always wrote.
  */
+function isMissingColumn(err, column) {
+  return err?.code === 'ER_BAD_FIELD_ERROR' && new RegExp(column, 'i').test(err.message || '');
+}
+
 async function insertConversionRow(row) {
   const payload = typeof row.postbackPayload === 'string'
     ? row.postbackPayload
@@ -125,24 +130,43 @@ async function insertConversionRow(row) {
     row.rcid,
     row.eventName || 'default',
   ];
-  const tail = [row.status, row.amount, row.payout, row.ip, payload];
-  try {
-    return await pool.query(
+
+  const attempt = (withSlot, withReason) => {
+    const mid = [];
+    if (withSlot) mid.push(row.dedupSlot || 'once');
+    mid.push(row.status);
+    if (withReason) mid.push(row.reason ?? null);
+    mid.push(row.amount, row.payout, row.ip, payload);
+    const slotSql = withSlot ? 'dedup_slot, ' : '';
+    const reasonSql = withReason ? 'reason, ' : '';
+    const placeholders = mid.map(() => '?').join(', ');
+    return pool.query(
       `INSERT INTO conversions (
         conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        rcid, event_name, dedup_slot, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-      [...head, row.dedupSlot || 'once', ...tail]
+        rcid, event_name, ${slotSql}status, ${reasonSql}amount, payout, ip, postback_payload, timestamp, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${placeholders}, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [...head, ...mid]
     );
+  };
+
+  try {
+    return await attempt(true, true);
   } catch (err) {
-    if (err.code === 'ER_BAD_FIELD_ERROR' && /dedup_slot/i.test(err.message || '')) {
-      return pool.query(
-        `INSERT INTO conversions (
-          conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-          rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
-        [...head, ...tail]
-      );
+    if (isMissingColumn(err, 'reason')) {
+      try {
+        return await attempt(true, false);
+      } catch (err2) {
+        if (isMissingColumn(err2, 'dedup_slot')) return attempt(false, false);
+        throw err2;
+      }
+    }
+    if (isMissingColumn(err, 'dedup_slot')) {
+      try {
+        return await attempt(false, true);
+      } catch (err2) {
+        if (isMissingColumn(err2, 'reason')) return attempt(false, false);
+        throw err2;
+      }
     }
     throw err;
   }
@@ -518,6 +542,7 @@ export class PostbackService {
   async processPostback(query, request) {
     try {
       const { click_id, rcid, amount, status = 'approved' } = query;
+      const advertiserReason = normalizeAdvertiserReason(query.reason);
       const rawEvent = query.event || query.event_name || query.goal || query.goal_id || null;
       let eventName = rawEvent ? String(rawEvent).trim().toLowerCase() : null;
       const normalizedIncomingStatus = normalizeConversionStatus(status);
@@ -705,6 +730,7 @@ export class PostbackService {
               tenant_id: tenantId,
               rcid: expiredRcid,
               status: CLICK_EXPIRED_STATUS,
+              reason: advertiserReason,
               amount: expiredAmount,
               payout: 0,
               ip: extractIP(request),
@@ -1008,6 +1034,7 @@ export class PostbackService {
             tenant_id: tenantId,
             rcid: rcid || redisClick.rcid || uuidv4(),
             status: finalStatus,
+            reason: advertiserReason,
             amount: finalAmount,
             payout: finalPayout,
             ip: extractIP(request),
@@ -1309,6 +1336,7 @@ export class PostbackService {
           eventName,
           dedupSlot: 'once',
           status: CLICK_EXPIRED_STATUS,
+          reason: advertiserReason,
           amount: expiredConversionAmount,
           payout: expiredConversionPayout,
           ip: extractIP(request),
@@ -1662,6 +1690,7 @@ export class PostbackService {
             eventName,
             dedupSlot: eventModeDb === 'legacy' ? 'once' : dedupSlotFor(allowMultipleDb),
             status: 'rejected_cap',
+            reason: advertiserReason,
             amount: conversionAmount,
             payout: 0,
             ip,
@@ -1726,6 +1755,7 @@ export class PostbackService {
           eventName,
           dedupSlot: eventModeDb === 'legacy' ? 'once' : dedupSlotFor(allowMultipleDb),
           status: 'rejected_cap',
+          reason: advertiserReason,
           amount: conversionAmount,
           payout: 0,
           ip,
@@ -1785,6 +1815,7 @@ export class PostbackService {
           eventName,
           dedupSlot: eventModeDb === 'legacy' ? 'once' : dedupSlotFor(allowMultipleDb),
           status: finalStatus,
+          reason: advertiserReason,
           amount: finalAmount,
           payout: finalPayout,
           ip,

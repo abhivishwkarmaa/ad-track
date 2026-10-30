@@ -145,6 +145,8 @@ function DetailedReports() {
     const [publisherFilter, setPublisherFilter] = useState(searchParams.get('publisher_id') || 'all');
     const [advertiserFilter, setAdvertiserFilter] = useState(searchParams.get('advertiser_id') || 'all');
     const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all');
+    const [reasonFilter, setReasonFilter] = useState(searchParams.get('reason') || '');
+    const [reasonOptions, setReasonOptions] = useState([]);
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
     const [sourceIpFilter, setSourceIpFilter] = useState(searchParams.get('sourceIp') || '');
     const [xffFilter, setXffFilter] = useState(searchParams.get('xff') || '');
@@ -213,6 +215,7 @@ function DetailedReports() {
             if (publisherFilter !== 'all') params.publisher_id = publisherFilter;
             if (advertiserFilter !== 'all') params.advertiser_id = advertiserFilter;
             if (statusFilter !== 'all') params.status = statusFilter;
+            if (reasonFilter.trim()) params.reason = reasonFilter.trim();
             if (searchTerm) params.search = searchTerm;
             if (sourceIpFilter) params.sourceIp = sourceIpFilter;
             if (xffFilter) params.xff = xffFilter;
@@ -244,6 +247,7 @@ function DetailedReports() {
             if (publisherFilter !== 'all') urlParams.set('publisher_id', publisherFilter);
             if (advertiserFilter !== 'all') urlParams.set('advertiser_id', advertiserFilter);
             if (statusFilter !== 'all') urlParams.set('status', statusFilter);
+            if (reasonFilter.trim()) urlParams.set('reason', reasonFilter.trim());
             if (searchTerm) urlParams.set('search', searchTerm);
             if (sourceIpFilter) urlParams.set('sourceIp', sourceIpFilter);
             if (xffFilter) urlParams.set('xff', xffFilter);
@@ -260,6 +264,17 @@ function DetailedReports() {
             }
 
             const requestOptions = opts.signal ? { signal: opts.signal } : {};
+            const reasonParams = {};
+            if (params.date_from) reasonParams.date_from = params.date_from;
+            if (params.date_to) reasonParams.date_to = params.date_to;
+            dashboardAPI.getAdvertiserReasons(reasonParams, requestOptions)
+                .then((reasonResponse) => {
+                    if (opts.signal?.aborted) return;
+                    if (reasonResponse?.success) setReasonOptions(reasonResponse.data || []);
+                })
+                .catch((reasonErr) => {
+                    if (!isAbortError(reasonErr)) setReasonOptions([]);
+                });
             const response = await dashboardAPI.getDetailed(params, {}, requestOptions);
             if (opts.signal?.aborted) return;
             if (response.success) {
@@ -440,6 +455,7 @@ function DetailedReports() {
             if (publisherFilter !== 'all') params.set('publisher_id', publisherFilter);
             if (advertiserFilter !== 'all') params.set('advertiser_id', advertiserFilter);
             if (statusFilter !== 'all') params.set('status', statusFilter);
+            if (reasonFilter.trim()) params.set('reason', reasonFilter.trim());
             if (searchTerm) params.set('search', searchTerm);
             if (sourceIpFilter) params.set('sourceIp', sourceIpFilter);
             if (xffFilter) params.set('xff', xffFilter);
@@ -503,6 +519,10 @@ function DetailedReports() {
                     cols.push({ id: metric.id, label: metric.label });
                 }
             });
+            if (selectedDims.includes('click_uuid')) {
+                const clickIdx = cols.findIndex((col) => col.id === 'click_uuid');
+                cols.splice(clickIdx + 1, 0, { id: 'conversion_reason', label: 'Reason' });
+            }
             return cols;
         }
         // Detailed: one Date column — full datetime (click + conversion) from backend
@@ -517,6 +537,7 @@ function DetailedReports() {
             { id: 'device_type', label: 'Device' },
             { id: 'timestamp', label: 'Date' },
             { id: 'conversion_status', label: 'Status' },
+            { id: 'conversion_reason', label: 'Reason' },
             { id: 'conversion_amount', label: 'Revenue' },
             { id: 'conversion_payout', label: 'Payout' },
             { id: 'actions', label: 'Actions' },
@@ -662,6 +683,25 @@ function DetailedReports() {
                                 <option value="rejected_cap">Rejected (Cap Hit)</option>
                                 <option value="click_expired">Rejected (Click Expired)</option>
                             </select>
+                        </div>
+                        <div className="filter-group">
+                            <label>Reason</label>
+                            <input
+                                type="text"
+                                className="form-control"
+                                list="advertiser-reason-options"
+                                placeholder="All reasons"
+                                value={reasonFilter}
+                                onChange={e => setReasonFilter(e.target.value)}
+                            />
+                            <datalist id="advertiser-reason-options">
+                                {reasonOptions.map((reason) => (
+                                    <option key={reason} value={reason} />
+                                ))}
+                            </datalist>
+                            <span className="param-hint" style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: '#64748b' }}>
+                                Clear every group-by, or include Click UUID, to see reason on each row. Export uses the same filter.
+                            </span>
                         </div>
                         <div className="filter-group">
                             <label>Search</label>

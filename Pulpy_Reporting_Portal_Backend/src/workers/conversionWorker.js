@@ -326,7 +326,7 @@ async function bulkInsertConversions(items) {
         return [
             conversionUuid,
             c.click_uuid, c.offer_id, c.publisher_id, pubOfferId, c.tenant_id,
-            c.rcid || uuidv4(), c.event_name || 'default', c.dedup_slot || 'once', c.status, c.amount, c.payout, c.ip,
+            c.rcid || uuidv4(), c.event_name || 'default', c.dedup_slot || 'once', c.status, c.reason || null, c.amount, c.payout, c.ip,
             c.postback_payload, new Date(), new Date(), new Date(),
             0  // affiliate_postback_fired: fire only when status=approved, then set to 1
         ];
@@ -334,22 +334,27 @@ async function bulkInsertConversions(items) {
 
     const sqlWithSlot = `INSERT INTO conversions (
         conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-        rcid, event_name, dedup_slot, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
+        rcid, event_name, dedup_slot, status, reason, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
     ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`;
 
     try {
         await pool.query(sqlWithSlot, [values]);
     } catch (insertErr) {
-        if (insertErr.code === 'ER_BAD_FIELD_ERROR' && /dedup_slot/i.test(insertErr.message || '')) {
+        const missingReason = insertErr.code === 'ER_BAD_FIELD_ERROR' && /reason/i.test(insertErr.message || '');
+        const missingSlot = insertErr.code === 'ER_BAD_FIELD_ERROR' && /dedup_slot/i.test(insertErr.message || '');
+        if (missingReason || missingSlot) {
             const legacyValues = values.map((row) => {
                 const copy = row.slice();
-                copy.splice(8, 1);
+                if (missingReason) copy.splice(10, 1);
+                if (missingSlot) copy.splice(8, 1);
                 return copy;
             });
+            const slotSql = missingSlot ? '' : 'dedup_slot, ';
+            const reasonSql = missingReason ? '' : 'reason, ';
             await pool.query(
                 `INSERT INTO conversions (
                     conversion_uuid, click_uuid, offer_id, publisher_id, publisher_offer_id, tenant_id,
-                    rcid, event_name, status, amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
+                    rcid, event_name, ${slotSql}status, ${reasonSql}amount, payout, ip, postback_payload, timestamp, created_at, updated_at, affiliate_postback_fired
                 ) VALUES ? ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)`,
                 [legacyValues]
             );

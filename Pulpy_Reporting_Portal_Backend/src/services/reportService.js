@@ -9,6 +9,7 @@ import {
 } from '../utils/reportDailyRollup.js';
 import { getReportingRollupTableName } from '../config/reportingRollupTable.js';
 import { runRollupDetailedAggregated } from './reportRollupDetailed.js';
+import { normalizeAdvertiserReason } from '../utils/advertiserReason.js';
 
 /**
  * Click-grouped reports list every click, so a status-only metric (for example
@@ -1467,6 +1468,13 @@ export class ReportService {
           wantsMetric('profit') ||
           wantsMetric('pending_payout') ||
           wantsMetric('approved_payout');
+        const needsConversionJoin =
+          needsConversionJoinForMetrics ||
+          Boolean(filters.status) ||
+          Boolean(filters.reason) ||
+          Boolean(filters.rcid) ||
+          Boolean(filters.search) ||
+          groupBy.includes('click_uuid');
 
         // Use DISTINCT click id so conversion join cannot inflate click counts.
         if (wantsMetric('clicks')) selects.push('COUNT(DISTINCT c.id) as clicks');
@@ -1485,6 +1493,7 @@ export class ReportService {
         // Per-click time when grouping includes click_uuid (one row per click — not an hour bucket).
         if (groupBy.includes('click_uuid')) {
           selects.push('MAX(c.created_at) as click_created_at');
+          selects.push('MAX(conv.reason) as conversion_reason');
         }
 
         if (selects.length === 0) {
@@ -1513,7 +1522,7 @@ export class ReportService {
                      LEFT JOIN offers o ON c.offer_id = o.id
                      LEFT JOIN publishers p ON c.publisher_id = p.id
                      LEFT JOIN advertisers a ON a.id = o.advertiser_id
-                     ${needsConversionJoinForMetrics || filters.status || filters.rcid || filters.search ? 'LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id' : ''}
+                     ${needsConversionJoin ? 'LEFT JOIN conversions conv ON conv.click_uuid = c.click_uuid AND conv.tenant_id = c.tenant_id' : ''}
                      WHERE 1=1 `;
 
         const filtersBuild = this.buildWhereClause(filters, tenantId);
@@ -1555,9 +1564,11 @@ export class ReportService {
         // Faster count query: only count grouped keys, avoid metric SELECT and avoid conversions join unless required.
         const needsConvJoinForCount =
           Boolean(filters.status) ||
+          Boolean(filters.reason) ||
           Boolean(filters.rcid) ||
           Boolean(filters.search) ||
-          Boolean(outcomeHaving);
+          Boolean(outcomeHaving) ||
+          groupBy.includes('click_uuid');
 
         let countBaseQuery = `
           SELECT 1
@@ -1628,6 +1639,7 @@ export class ReportService {
           conv.id as conversion_id,
           conv.conversion_uuid,
           conv.status as conversion_status,
+          conv.reason as conversion_reason,
           conv.amount as conversion_amount,
           conv.payout as conversion_payout,
           conv.timestamp as conversion_timestamp
@@ -1878,6 +1890,11 @@ export class ReportService {
       params.push(filters.status);
     }
 
+    if (filters.reason) {
+      clause += ' AND conv.reason = ?';
+      params.push(filters.reason);
+    }
+
     if (filters.search) {
       const term = `%${filters.search}%`;
       clause += ` AND (
@@ -2089,6 +2106,7 @@ export class ReportService {
           p.public_publisher_id,
           p.company_name as publisher_name,
           conv.event_name,
+          conv.reason,
           conv.amount,
           conv.payout,
           conv.status,
@@ -2137,6 +2155,10 @@ export class ReportService {
         query += ' AND conv.status = ?';
         params.push(filters.status);
       }
+      if (filters.reason) {
+        query += ' AND conv.reason = ?';
+        params.push(filters.reason);
+      }
       if (filters.event_name) {
         query += ' AND conv.event_name = ?';
         params.push(filters.event_name);
@@ -2172,6 +2194,34 @@ export class ReportService {
       logger.error('ReportService.getConversions error:', error);
       throw error;
     }
+  }
+
+  /**
+   * Distinct advertiser reasons already stored on conversions in the report range.
+   * Used to fill the report filter. Not a fixed list.
+   */
+  async getAdvertiserReasons(filters = {}, tenantId = null) {
+    if (!tenantId) return [];
+    const range = reportUtcRange(filters);
+    const params = [tenantId];
+    let dateSql = '';
+    if (range) {
+      dateSql = ' AND created_at BETWEEN ? AND ?';
+      params.push(range.start, range.end);
+    }
+    const [rows] = await pool.query(
+      `SELECT DISTINCT reason
+       FROM conversions
+       WHERE tenant_id = ?
+         AND reason IS NOT NULL
+         AND reason <> ''${dateSql}
+       ORDER BY reason ASC
+       LIMIT 200`,
+      params
+    );
+    return rows
+      .map((row) => normalizeAdvertiserReason(row.reason))
+      .filter(Boolean);
   }
 }
 

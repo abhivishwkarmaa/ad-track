@@ -865,12 +865,12 @@ function OfferDetail() {
                     </div>
                     <div className="offer-detail-postback">
                         <span>Advertiser postback</span>
-                        <code>https://{window.location.hostname}/postback?click_id={'{click_id}'}&event={'{event_name}'}&amount={'{amount}'}</code>
+                        <code>https://{window.location.hostname}/postback?click_id={'{click_id}'}&event={'{event_name}'}&amount={'{amount}'}&reason={'{reason}'}</code>
                         <button
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => {
-                                safeCopyToClipboard(`https://${window.location.hostname}/postback?click_id={click_id}&event={event_name}&amount={amount}`);
+                                safeCopyToClipboard(`https://${window.location.hostname}/postback?click_id={click_id}&event={event_name}&amount={amount}&reason={reason}`);
                                 toast.success('Postback URL copied');
                             }}
                         >

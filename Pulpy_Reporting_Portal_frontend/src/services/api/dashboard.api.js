@@ -42,6 +42,10 @@ export const dashboardAPI = {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/summary?${queryString}`, requestOptions);
     },
+    getAdvertiserReasons: async (params = {}, requestOptions = {}) => {
+        const queryString = new URLSearchParams(params).toString();
+        return apiRequest(`/api/admin/reports/reasons?${queryString}`, requestOptions);
+    },
     getDetailed: async (params = {}, meta = {}, requestOptions = {}) => {
         const queryString = new URLSearchParams(params).toString();
         return apiRequest(`/api/admin/reports/detailed?${queryString}`, requestOptions, meta);

@@ -4,6 +4,7 @@ import postbackService from '../services/postbackService.js';
 import logger from '../utils/logger.js';
 import { createErrorResponse } from '../utils/errorResponse.js';
 import { getTenantIdFromRequest } from '../utils/tenantScope.js';
+import { normalizeAdvertiserReason } from '../utils/advertiserReason.js';
 import {
   assignEntityFilterQuery,
   resolveReportEntityFilters,
@@ -134,6 +135,8 @@ export class ReportController {
       if (request.query.xff) filters.xff = request.query.xff;
       if (request.query.authorizationToken) filters.authorizationToken = request.query.authorizationToken;
       if (request.query.status) filters.status = request.query.status;
+      const advertiserReason = normalizeAdvertiserReason(request.query.reason);
+      if (advertiserReason) filters.reason = advertiserReason;
       if (request.query.export) filters.export = request.query.export;
       if (request.query.groupBy) filters.groupBy = request.query.groupBy;
       if (request.query.columns) filters.columns = request.query.columns;
@@ -181,6 +184,33 @@ export class ReportController {
       });
     } catch (error) {
       logger.error('ReportController.getDetailed error:', error);
+      const status = error.statusCode || 500;
+      return reply.code(status).send(createErrorResponse(error, status));
+    }
+  }
+
+  async getAdvertiserReasons(request, reply) {
+    try {
+      const tenantId = getTenantIdFromRequest(request);
+      if (!tenantId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Bad Request',
+          message: 'Tenant context required',
+        });
+      }
+
+      const filters = {};
+      if (request.query.date_from) filters.date_from = request.query.date_from;
+      if (request.query.date_to) filters.date_to = request.query.date_to;
+      const reasons = await reportService.getAdvertiserReasons(filters, tenantId);
+
+      return reply.send({
+        success: true,
+        data: reasons,
+      });
+    } catch (error) {
+      logger.error('ReportController.getAdvertiserReasons error:', error);
       const status = error.statusCode || 500;
       return reply.code(status).send(createErrorResponse(error, status));
     }
@@ -235,6 +265,8 @@ export class ReportController {
       if (request.query.date_to) filters.date_to = request.query.date_to;
       assignEntityFilterQuery(filters, request.query);
       if (request.query.status) filters.status = request.query.status;
+      const advertiserReason = normalizeAdvertiserReason(request.query.reason);
+      if (advertiserReason) filters.reason = advertiserReason;
       if (request.query.conversion_uuid) filters.conversion_uuid = request.query.conversion_uuid;
       if (request.query.click_uuid) filters.click_uuid = request.query.click_uuid;
 
