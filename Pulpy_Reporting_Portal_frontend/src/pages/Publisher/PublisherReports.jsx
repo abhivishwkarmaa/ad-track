@@ -305,7 +305,7 @@ export default function PublisherReports() {
                                 ) : (
                                     pagedReports.map((row, idx) => (
                                         <tr key={idx}>
-                                            <td className="font-bold">
+                                            <td className="font-bold" data-label={getDimensionHeader()}>
                                                 {groupBy === 'offer' ? (
                                                     <div className="row-offer-cell">
                                                         <span className="row-offer-tag">#{row.public_id}</span>
@@ -315,16 +315,16 @@ export default function PublisherReports() {
                                                     row.label || row.id || 'Unknown'
                                                 )}
                                             </td>
-                                            {groupBy === 'offer' && <td><span className="row-cat-pill">{row.category}</span></td>}
-                                            <td>{Number(row.clicks || 0).toLocaleString()}</td>
-                                            <td>
+                                            {groupBy === 'offer' && <td data-label="Category"><span className="row-cat-pill">{row.category}</span></td>}
+                                            <td data-label="Clicks">{Number(row.clicks || 0).toLocaleString()}</td>
+                                            <td data-label="Conversions">
                                                 <span className="status-num-badge approved">
                                                     {Number(row.conversions || 0).toLocaleString()}
                                                 </span>
                                             </td>
-                                            <td className="payout-cell">${Number(row.payout || 0).toFixed(2)}</td>
-                                            <td>${Number(row.epc || 0).toFixed(4)}</td>
-                                            <td>{Number(row.cr || 0).toFixed(2)}%</td>
+                                            <td className="payout-cell" data-label="Earnings">${Number(row.payout || 0).toFixed(2)}</td>
+                                            <td data-label="EPC">${Number(row.epc || 0).toFixed(4)}</td>
+                                            <td data-label="CR">{Number(row.cr || 0).toFixed(2)}%</td>
                                         </tr>
                                     ))
                                 )}
@@ -332,13 +332,13 @@ export default function PublisherReports() {
                             {sortedReports.length > 0 && summary && (
                                 <tfoot>
                                     <tr className="pub-table-total-row">
-                                        <td className="font-bold">Total Summary</td>
-                                        {groupBy === 'offer' && <td>-</td>}
-                                        <td className="font-bold">{summary.total_clicks?.toLocaleString()}</td>
-                                        <td className="font-bold">{summary.total_conversions?.toLocaleString()}</td>
-                                        <td className="font-bold payout-cell">${summary.total_payout?.toFixed(2)}</td>
-                                        <td className="font-bold">${summary.avg_epc?.toFixed(4)}</td>
-                                        <td className="font-bold">{summary.avg_cr?.toFixed(2)}%</td>
+                                        <td className="font-bold" data-label={getDimensionHeader()}>Total Summary</td>
+                                        {groupBy === 'offer' && <td data-label="Category">-</td>}
+                                        <td className="font-bold" data-label="Clicks">{summary.total_clicks?.toLocaleString()}</td>
+                                        <td className="font-bold" data-label="Conversions">{summary.total_conversions?.toLocaleString()}</td>
+                                        <td className="font-bold payout-cell" data-label="Earnings">${summary.total_payout?.toFixed(2)}</td>
+                                        <td className="font-bold" data-label="EPC">${summary.avg_epc?.toFixed(4)}</td>
+                                        <td className="font-bold" data-label="CR">{summary.avg_cr?.toFixed(2)}%</td>
                                     </tr>
                                 </tfoot>
                             )}

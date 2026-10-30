@@ -373,4 +373,71 @@
     .pub-offers-layout {
         grid-template-columns: 1fr;
     }
+
+    .pub-offers-sidebar-list {
+        max-height: 420px;
+    }
+}
+
+@media (max-width: 768px) {
+    .pub-offers-view .entity-list-header-text h1 {
+        font-size: 1.25rem;
+    }
+
+    .pub-offers-view .entity-list-search,
+    .pub-offers-view .entity-list-toolbar {
+        min-width: 0;
+        width: 100%;
+        max-width: none;
+    }
+
+    .pub-offer-detail-panel {
+        padding: 16px;
+        gap: 16px;
+    }
+
+    .detail-tags-row {
+        flex-wrap: wrap;
+    }
+
+    .detail-offer-title {
+        font-size: 18px;
+    }
+
+    .detail-payout-badge {
+        width: 100%;
+        align-items: flex-start;
+    }
+
+    .tracking-input-group {
+        flex-direction: column;
+    }
+
+    .tracking-input {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .box-header-row {
+        align-items: flex-start;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .params-fields-row {
+        grid-template-columns: 1fr;
+    }
+
+    .pub-offer-row-card {
+        padding: 14px;
+    }
+
+    .row-offer-name {
+        white-space: normal;
+    }
+
+    .pub-empty-card {
+        margin: 12px auto;
+        padding: 36px 16px;
+    }
 }

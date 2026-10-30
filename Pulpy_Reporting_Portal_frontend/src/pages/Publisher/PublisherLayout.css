@@ -240,6 +240,14 @@
     color: var(--text-primary);
     cursor: pointer;
     border-radius: var(--radius-sm);
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.pub-mobile-toggle svg {
+    width: 22px;
+    height: 22px;
 }
 
 .pub-page-title {
@@ -247,6 +255,8 @@
     font-weight: 800;
     color: var(--text-primary);
     letter-spacing: -0.02em;
+    min-width: 0;
+    line-height: 1.25;
 }
 
 .pub-partner-badge {
@@ -277,12 +287,34 @@
     width: 100%;
     margin: 0 auto;
     box-sizing: border-box;
+    min-width: 0;
 }
 
-/* Responsive */
+.pub-content-body > * {
+    max-width: 100%;
+    min-width: 0;
+}
+
+.pub-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 90;
+}
+
+/* Tablet and phone: slide-in nav, full-width content */
 @media (max-width: 900px) {
+    .pub-portal,
+    .pub-main-area {
+        max-width: 100%;
+        min-width: 0;
+    }
+
     .pub-sidebar {
+        width: min(280px, 84vw);
         transform: translateX(-100%);
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
     }
 
     .pub-sidebar.mobile-open {
@@ -291,24 +323,70 @@
 
     .pub-main-area {
         margin-left: 0;
+        width: 100%;
+        max-width: 100%;
     }
 
     .pub-mobile-toggle {
-        display: block;
+        display: flex;
+        width: 40px;
+        height: 40px;
     }
 
     .pub-top-header {
-        padding: 0 80px 0 16px;
+        height: auto;
+        min-height: 56px;
+        padding: calc(8px + env(safe-area-inset-top)) 16px 8px 12px;
+        gap: 8px;
+    }
+
+    .pub-header-left {
+        min-width: 0;
+        flex: 1;
+        gap: 8px;
+    }
+
+    .pub-page-title {
+        font-size: 17px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal;
+    }
+
+    .pub-partner-badge {
+        flex-shrink: 0;
+        padding: 5px 10px;
+        font-size: 11px;
     }
 
     .pub-content-body {
-        padding: 20px 16px;
+        padding: 16px 14px calc(88px + env(safe-area-inset-bottom));
     }
 
-    .pub-mobile-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        z-index: 90;
+    .pub-portal input,
+    .pub-portal select,
+    .pub-portal textarea {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 640px) {
+    .pub-partner-badge {
+        display: none;
+    }
+
+    .pub-page-title {
+        font-size: 16px;
+    }
+
+    .pub-content-body {
+        padding: 14px 12px calc(88px + env(safe-area-inset-bottom));
+    }
+
+    .pub-nav-link {
+        padding: 12px 14px;
     }
 }

@@ -368,7 +368,7 @@ export default function PublisherDashboard() {
                             <p>No traffic recorded for the selected timeline.</p>
                         </div>
                     ) : (
-                        <ResponsiveContainer width="100%" height={290}>
+                        <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={trend} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                                 <defs>
                                     <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
@@ -617,12 +617,12 @@ export default function PublisherDashboard() {
                             ) : (
                                 pagedTrend.map((row, idx) => (
                                     <tr key={idx}>
-                                        <td className="font-bold">{row.time || row.date}</td>
-                                        <td>{row.clicks?.toLocaleString()}</td>
-                                        <td>{row.conversions?.toLocaleString()}</td>
-                                        <td className="payout-cell">${row.payout?.toFixed(2)}</td>
-                                        <td>${row.epc}</td>
-                                        <td>{row.cr}%</td>
+                                        <td className="font-bold" data-label="Timestamp">{row.time || row.date}</td>
+                                        <td data-label="Clicks">{row.clicks?.toLocaleString()}</td>
+                                        <td data-label="Conversions">{row.conversions?.toLocaleString()}</td>
+                                        <td className="payout-cell" data-label="Earnings">${row.payout?.toFixed(2)}</td>
+                                        <td data-label="EPC">${row.epc}</td>
+                                        <td data-label="CR">{row.cr}%</td>
                                     </tr>
                                 ))
                             )}

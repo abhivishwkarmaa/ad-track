@@ -358,6 +358,11 @@
 .chart-recharts-container {
     width: 100%;
     margin-top: 8px;
+    min-width: 0;
+}
+
+.chart-recharts-container:has(.recharts-responsive-container) {
+    height: 290px;
 }
 
 .chart-empty-state {
@@ -690,4 +695,201 @@
     border-radius: 50%;
     animation: pub-spin 0.8s linear infinite;
     margin: 0 auto 16px;
+}
+
+@media (max-width: 900px) {
+    .pub-dashboard-view {
+        gap: 18px;
+    }
+
+    .pub-dash-header,
+    .pub-dash-actions {
+        width: 100%;
+        align-items: stretch;
+    }
+
+    .pub-dash-actions {
+        flex-direction: column;
+    }
+
+    .pub-dash-actions .pub-btn-primary,
+    .pub-dash-actions .timeline-filter,
+    .pub-dash-actions .timeline-filter-group,
+    .pub-dash-actions .timeline-filter-select,
+    .pub-dash-actions .timeline-filter-select-tz {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .pub-dash-actions .timeline-filter-custom-range {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .pub-dash-actions .timeline-filter-custom-range input {
+        flex: 1 1 140px;
+        min-width: 0;
+        width: auto;
+    }
+
+    .pub-dash-greeting {
+        font-size: 20px;
+    }
+
+    .pub-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .pub-kpi-card {
+        padding: 14px;
+    }
+
+    .kpi-num {
+        font-size: 22px;
+    }
+
+    .pub-dashboard-view .pub-card-elevated {
+        padding: 16px;
+        gap: 14px;
+    }
+
+    .chart-controls-wrapper,
+    .metric-pills-bar {
+        width: 100%;
+    }
+
+    .metric-pills-bar {
+        flex-wrap: wrap;
+    }
+
+    .metric-pill {
+        flex: 1 1 calc(50% - 6px);
+        text-align: center;
+    }
+
+    .chart-stat-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .chart-recharts-container:has(.recharts-responsive-container) {
+        height: 220px;
+    }
+
+    .top-offer-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .offer-title {
+        white-space: normal;
+    }
+
+    .offer-item-stats {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .stat-pill {
+        align-items: flex-start;
+        min-width: 72px;
+    }
+
+    .quick-url-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .pub-alert-callout .alert-action {
+        width: 100%;
+    }
+
+    .pub-table-responsive {
+        overflow: visible;
+    }
+
+    .pub-table {
+        min-width: 0;
+    }
+
+    .pub-table thead {
+        display: none;
+    }
+
+    .pub-table,
+    .pub-table tbody,
+    .pub-table tfoot,
+    .pub-table tr,
+    .pub-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .pub-table tr {
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        margin-bottom: 12px;
+        padding: 4px 12px;
+        background: var(--bg-primary);
+    }
+
+    .pub-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-light);
+        text-align: right;
+        word-break: break-word;
+    }
+
+    .pub-table td:last-child {
+        border-bottom: none;
+    }
+
+    .pub-table td::before {
+        content: attr(data-label);
+        flex: 0 0 auto;
+        max-width: 46%;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        text-align: left;
+    }
+
+    .pub-table td.pub-empty-cell {
+        display: block;
+        text-align: center;
+        padding: 24px 8px !important;
+    }
+
+    .pub-table td.pub-empty-cell::before {
+        content: none;
+    }
+
+    .pub-table tr:hover td {
+        background: transparent;
+    }
+}
+
+@media (max-width: 340px) {
+    .pub-kpi-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chart-stat-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .metric-pill {
+        flex-basis: 100%;
+    }
 }

@@ -279,16 +279,16 @@ export default function PublisherOffers() {
                                         </thead>
                                         <tbody>
                                             <tr>
-                                                <td><code>{'{affiliate_click_id}'}</code></td>
-                                                <td>Your click ID from your tracking software (Recommended)</td>
+                                                <td data-label="Macro"><code>{'{affiliate_click_id}'}</code></td>
+                                                <td data-label="Description">Your click ID from your tracking software (Recommended)</td>
                                             </tr>
                                             <tr>
-                                                <td><code>{'{click_id}'}</code></td>
-                                                <td>Standard click ID placeholder</td>
+                                                <td data-label="Macro"><code>{'{click_id}'}</code></td>
+                                                <td data-label="Description">Standard click ID placeholder</td>
                                             </tr>
                                             <tr>
-                                                <td><code>{'{sub1}'} ... {'{sub5}'}</code></td>
-                                                <td>Custom sub parameters for source, placement, keyword tracking</td>
+                                                <td data-label="Macro"><code>{'{sub1}'} ... {'{sub5}'}</code></td>
+                                                <td data-label="Description">Custom sub parameters for source, placement, keyword tracking</td>
                                             </tr>
                                         </tbody>
                                     </table>

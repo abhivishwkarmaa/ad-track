@@ -443,3 +443,76 @@
     gap: 16px;
     color: var(--text-secondary);
 }
+
+.pub-inline-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+@media (max-width: 768px) {
+    .pub-settings-view .pub-view-title {
+        font-size: 20px;
+    }
+
+    .pub-settings-view .pub-card-elevated {
+        padding: 16px;
+        gap: 16px;
+    }
+
+    .pub-settings-view .pub-card-narrow {
+        max-width: none;
+    }
+
+    .pub-grid-two {
+        grid-template-columns: 1fr;
+    }
+
+    .pub-tabs-nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        overflow: visible;
+        gap: 4px;
+    }
+
+    .pub-tab-btn {
+        flex-direction: column;
+        justify-content: center;
+        padding: 8px 6px;
+        font-size: 12px;
+        white-space: normal;
+        text-align: center;
+        line-height: 1.25;
+        gap: 4px;
+    }
+
+    .pub-form-actions,
+    .pub-inline-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .pub-form-actions .pub-btn-primary,
+    .pub-inline-actions .pub-btn-primary,
+    .pub-settings-view .btn {
+        width: 100%;
+    }
+
+    .pub-info-banner {
+        flex-direction: column;
+        padding: 16px;
+    }
+
+    .macro-bar-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .preview-url-display {
+        font-size: 12px;
+    }
+
+    .pub-input-wrapper .pub-input {
+        padding-right: 36px;
+    }
+}

@@ -480,7 +480,7 @@ export default function PublisherSettings() {
                                 <div>
                                     <div className="pub-input-group">
                                         <label className="pub-label">Enter OTP sent to {profile?.email}</label>
-                                        <div style={{ display: 'flex', gap: '10px' }}>
+                                        <div className="pub-inline-actions">
                                             <input
                                                 type="text"
                                                 className="pub-input"
@@ -519,7 +519,7 @@ export default function PublisherSettings() {
                                             onChange={(e) => setConfirmPassword(e.target.value)}
                                         />
                                     </div>
-                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                    <div className="pub-inline-actions">
                                         <button type="button" className="pub-btn-primary" onClick={changePassword} disabled={passLoading}>
                                             {passLoading ? 'Updating...' : 'Set New Password'}
                                         </button>
