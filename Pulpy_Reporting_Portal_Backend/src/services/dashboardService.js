@@ -1434,7 +1434,7 @@ export class DashboardService {
     const dateBoundaries = this.getDateBoundaries();
     const dateFrom = filters.date_from || dateBoundaries.monthStart;
     const dateTo = filters.date_to || dateBoundaries.todayStart;
-    const cacheKey = `cache:dash:pub_stats:${tenantId}:${serializeDashboardFilters(filters)}`;
+    const cacheKey = `cache:dash:pub_stats_v2:${tenantId}:${serializeDashboardFilters(filters)}`;
     const ttl = getDashboardCacheTTL(dateFrom, dateTo);
 
     return getOrSetDashboardCache(cacheKey, ttl, async () => {
@@ -1486,6 +1486,7 @@ export class DashboardService {
             conversions: parseInt(row.conversions || 0),
             approved_conversions: parseInt(row.approved_conversions || 0),
             pending_conversions: parseInt(row.pending_conversions || 0),
+            affiliate_payout: parseFloat(row.affiliate_payout || 0),
             publisher_revenue: parseFloat(row.affiliate_payout || 0),
             total_revenue: parseFloat(row.total_revenue || 0),
             profit: parseFloat(row.profit || 0)

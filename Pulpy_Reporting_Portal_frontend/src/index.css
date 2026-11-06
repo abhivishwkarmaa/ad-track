@@ -83,6 +83,15 @@ body {
   min-height: 100vh;
 }
 
+/* Ensure all form elements and controls inherit the site font */
+button,
+input,
+select,
+textarea,
+optgroup {
+  font-family: inherit;
+}
+
 /* Ensure body updates when theme changes */
 [data-theme="light"] body {
   background-color: var(--bg-primary);

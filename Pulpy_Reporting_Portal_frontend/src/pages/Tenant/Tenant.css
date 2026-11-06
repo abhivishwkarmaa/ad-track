@@ -125,7 +125,7 @@
 
 .tenant-slug {
     color: #6366f1;
-    font-family: 'Courier New', monospace;
+    font-family: inherit;
     font-size: 13px;
 }
 
@@ -359,7 +359,7 @@
 
 .tenant-detail-info .tenant-subdomain {
     color: #6366f1;
-    font-family: 'Courier New', monospace;
+    font-family: inherit;
     font-size: 14px;
     margin-top: 4px;
 }
@@ -1075,7 +1075,8 @@
 
 /* Monospace & Text helper */
 .font-mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
 }
 
 .text-success {
