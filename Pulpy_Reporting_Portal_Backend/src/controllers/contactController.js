@@ -345,13 +345,13 @@ class ContactController {
    */
   async sendOtp(request, reply) {
     try {
-      const { firstName, lastName, email, message } = request.body;
+      const { firstName, lastName,phone, email, message } = request.body;
 
       // Validate required fields
-      if (!firstName || !lastName || !email || !message) {
+      if (!firstName || !lastName || !email || !message || !phone) {
         return reply.code(400).send({
           success: false,
-          message: 'All fields are required: firstName, lastName, email, message',
+          message: 'All fields are required: firstName, lastName, email, message, phone',
         });
       }
 
@@ -394,6 +394,7 @@ class ContactController {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim().toLowerCase(),
+        phone: phone.trim(),
         message: message.trim(),
         attempts: 0,
         createdAt: new Date().toISOString(),
@@ -517,6 +518,7 @@ class ContactController {
       const contactData = {
         firstName: otpData.firstName,
         lastName: otpData.lastName,
+        phone: otpData.phone,
         email: otpData.email,
         message: otpData.message,
         submittedAt: new Date().toISOString(),

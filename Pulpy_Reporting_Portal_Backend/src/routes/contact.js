@@ -13,7 +13,7 @@ async function contactRoutes(fastify, options) {
       tags: ['contact'],
       body: {
         type: 'object',
-        required: ['firstName', 'lastName', 'email', 'message'],
+        required: ['firstName', 'lastName', 'email', 'phone', 'message'],
         properties: {
           firstName: {
             type: 'string',
@@ -26,6 +26,12 @@ async function contactRoutes(fastify, options) {
             minLength: 1,
             maxLength: 100,
             description: 'Last name',
+          },
+          phone: {
+            type: 'string',
+            minLength: 8,
+            maxLength: 15,
+            description: 'Phone number',
           },
           email: {
             type: 'string',
