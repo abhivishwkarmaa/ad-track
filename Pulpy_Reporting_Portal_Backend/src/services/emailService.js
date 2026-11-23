@@ -242,6 +242,10 @@ class EmailService {
         <td style="padding: 10px 0; color: #666;">${this.escapeHtml(data.firstName)} ${this.escapeHtml(data.lastName)}</td>
       </tr>
       <tr>
+        <td style="padding: 10px 0; font-weight: bold; color: #333;">Phone:</td>
+        <td style="padding: 10px 0; color: #666;">${this.escapeHtml(data.phone)}</td>
+      </tr>
+      <tr>
         <td style="padding: 10px 0; font-weight: bold; color: #333;">Email:</td>
         <td style="padding: 10px 0; color: #666;"><a href="mailto:${this.escapeHtml(data.email)}" style="color: #ff6b35; text-decoration: none;">${this.escapeHtml(data.email)}</a></td>
       </tr>

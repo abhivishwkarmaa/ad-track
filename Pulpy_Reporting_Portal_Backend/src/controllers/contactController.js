@@ -629,6 +629,7 @@ class ContactController {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim().toLowerCase(),
+        phone: phone.trim(),
         message: message.trim(),
         submittedAt: new Date().toISOString(),
         ip: request.ip || request.headers['x-forwarded-for'] || 'unknown',
