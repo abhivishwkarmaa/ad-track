@@ -411,34 +411,28 @@ class ContactController {
         name: `${firstName} ${lastName}`,
       });
 
-      // Send OTP email
-      try {
-        await emailService.sendContactOtpEmail({
-          email: email.trim().toLowerCase(),
-          firstName: firstName.trim(),
-          otp,
-        });
-
+      // Send OTP email in the background so SMTP latency does not block the response.
+      // OTP is already stored in Redis; a send failure is logged and the keys are cleared
+      // so the caller can request a new code after the cooldown.
+      const otpEmail = email.trim().toLowerCase();
+      emailService.sendContactOtpEmail({
+        email: otpEmail,
+        firstName: firstName.trim(),
+        otp,
+      }).then(() => {
         logger.info('✅ OTP email sent successfully', {
-          email: email.toLowerCase(),
+          email: otpEmail,
         });
-
-        return reply.code(200).send({
-          success: true,
-          message: 'OTP sent successfully to your email',
-        });
-      } catch (emailError) {
+      }).catch(async (emailError) => {
         logger.error('❌ Failed to send OTP email:', emailError);
-
-        // Clean up Redis data if email fails
         await redis.del(otpKey);
         await redis.del(rateLimitKey);
+      });
 
-        return reply.code(500).send({
-          success: false,
-          message: 'Failed to send OTP email. Please try again.',
-        });
-      }
+      return reply.code(200).send({
+        success: true,
+        message: 'OTP sent successfully to your email',
+      });
     } catch (error) {
       logger.error('❌ Error sending OTP:', error);
       return reply.code(500).send({
